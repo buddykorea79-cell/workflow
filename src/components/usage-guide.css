@@ -15,7 +15,7 @@
   padding: 9px 14px;
   border-radius: 999px;
   color: var(--brand-deep, #153a70);
-  font-size: 12px;
+  font-size: 14px;
   font-weight: 600;
 }
 
@@ -42,7 +42,7 @@
   gap: 7px;
   margin-bottom: 10px;
   color: var(--brand-primary, #1863dc);
-  font-size: 12px;
+  font-size: 14px;
   font-weight: 600;
   letter-spacing: .02em;
 }
@@ -70,7 +70,7 @@
 .guide-role-card > svg { flex-shrink: 0; }
 .guide-role-card > span { display: grid; gap: 7px; min-width: 0; flex: 1; }
 .guide-role-card strong { font-size: 15px; font-weight: 650; }
-.guide-role-card small { font-size: 12px; line-height: 1.75; color: #5b6574; overflow-wrap: anywhere; }
+.guide-role-card small { font-size: 14px; line-height: 1.75; color: #5b6574; overflow-wrap: anywhere; }
 .guide-role-card > svg:last-child { margin-top: 3px; color: #7b8da6; }
 
 .usage-guide { color: #263346; line-height: 1.75; }
@@ -94,7 +94,7 @@
   padding: 11px 8px;
   min-height: 44px;
   border-radius: 11px;
-  font-size: 13px;
+  font-size: 15px;
   line-height: 1.5;
   color: #526278;
 }
@@ -119,32 +119,32 @@
 
 .guide-callout > svg { color: var(--brand-primary, #1863dc); margin-top: 3px; }
 .guide-callout strong { font-size: 14px; color: #214f8e; font-weight: 650; }
-.guide-callout p { margin-top: 5px; color: #4f6581; font-size: 13px; line-height: 1.8; }
+.guide-callout p { margin-top: 5px; color: #4f6581; font-size: 15px; line-height: 1.8; }
 .guide-term-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; margin: 22px 0 26px; }
 .guide-term-grid article { padding: 18px; border: 1px solid #e1e7ef; border-radius: 15px; background: #fcfdff; }
 .guide-term-grid h4 { color: #203c60; font-size: 15px; line-height: 1.5; margin-bottom: 7px; }
-.guide-term-grid p { font-size: 13px; line-height: 1.8; color: #5b6574; }
-.guide-term-grid small { display: block; margin-top: 10px; color: #496c99; font-size: 12px; }
+.guide-term-grid p { font-size: 15px; line-height: 1.8; color: #5b6574; }
+.guide-term-grid small { display: block; margin-top: 10px; color: #496c99; font-size: 14px; }
 .guide-term-grid svg { color: var(--brand-primary, #1863dc); margin-bottom: 11px; }
 
 .guide-steps { list-style: none; display: grid; gap: 19px; margin: 18px 0; }
 .guide-steps > li { display: flex; gap: 13px; align-items: flex-start; }
-.guide-steps > li > span { width: 30px; min-height: 30px; border-radius: 50%; display: grid; place-items: center; flex-shrink: 0; background: #edf3fe; color: #2463b7; font-size: 12px; font-weight: 650; }
+.guide-steps > li > span { width: 30px; min-height: 30px; border-radius: 50%; display: grid; place-items: center; flex-shrink: 0; background: #edf3fe; color: #2463b7; font-size: 14px; font-weight: 650; }
 .guide-steps > li > div { min-width: 0; padding-top: 2px; }
 .guide-steps strong { font-size: 14px; line-height: 1.65; color: #24394f; }
-.guide-steps p { margin-top: 5px; font-size: 13px; line-height: 1.8; color: #5b6574; }
+.guide-steps p { margin-top: 5px; font-size: 15px; line-height: 1.8; color: #5b6574; }
 
 .guide-role-picker { display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); gap: 7px; margin-bottom: 23px; }
-.guide-role-picker button { display: flex; align-items: center; justify-content: center; flex-direction: column; gap: 8px; padding: 12px 6px; border: 1px solid #dfe6ef; border-radius: 13px; color: #526278; font-size: 12px; line-height: 1.5; }
+.guide-role-picker button { display: flex; align-items: center; justify-content: center; flex-direction: column; gap: 8px; padding: 12px 6px; border: 1px solid #dfe6ef; border-radius: 13px; color: #526278; font-size: 14px; line-height: 1.5; }
 .guide-role-picker button:hover { background: #f3f7ff; }
 .guide-role-picker button[aria-pressed="true"] { border-color: var(--brand-primary, #1863dc); background: #edf4ff; color: #1956af; font-weight: 650; }
 .guide-role-summary { margin-bottom: 19px; }
-.guide-role-summary > small { display: block; margin-bottom: 6px; color: #58718e; font-size: 12px; }
+.guide-role-summary > small { display: block; margin-bottom: 6px; color: #58718e; font-size: 14px; }
 .guide-role-summary h3 { font-size: 23px; }
 .guide-role-summary p { margin-top: 9px; font-size: 14px; line-height: 1.85; color: #526278; }
 .guide-scope { padding: 16px 19px; margin: 0 0 25px; border-left: 3px solid #8eb4ec; border-radius: 0 11px 11px 0; background: #f5f8fd; }
-.guide-scope strong { font-size: 13px; color: #285382; }
-.guide-scope p { margin-top: 5px; font-size: 13px; line-height: 1.8; color: #53667d; }
+.guide-scope strong { font-size: 15px; color: #285382; }
+.guide-scope p { margin-top: 5px; font-size: 15px; line-height: 1.8; color: #53667d; }
 .guide-columns { display: grid; grid-template-columns: minmax(0, 1.05fr) minmax(0, 1fr); gap: 30px; }
 .guide-columns > section { min-width: 0; }
 .guide-columns h4 { display: flex; align-items: center; gap: 7px; font-size: 16px; line-height: 1.5; color: #203c60; margin: 0 0 15px; }
@@ -152,28 +152,28 @@
 .guide-menu-list > div { padding: 13px 0; border-bottom: 1px solid #e7ecf3; }
 .guide-menu-list > div:first-child { padding-top: 0; }
 .guide-menu-list > div:last-child { border-bottom: 0; }
-.guide-menu-list dt { font-size: 13px; color: #214b80; font-weight: 650; line-height: 1.65; }
-.guide-menu-list dd { margin: 6px 0 0; color: #5b6574; font-size: 13px; line-height: 1.8; }
+.guide-menu-list dt { font-size: 15px; color: #214b80; font-weight: 650; line-height: 1.65; }
+.guide-menu-list dd { margin: 6px 0 0; color: #5b6574; font-size: 15px; line-height: 1.8; }
 .guide-notes { padding-left: 19px; margin: 15px 0 0; display: grid; gap: 9px; }
-.guide-notes li { font-size: 13px; line-height: 1.8; color: #58667a; padding-left: 2px; }
+.guide-notes li { font-size: 15px; line-height: 1.8; color: #58667a; padding-left: 2px; }
 .guide-notes li::marker { color: #7a9ac5; }
 .guide-flow { list-style: none; display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; margin: 18px 0 25px; counter-reset: guide-flow; }
 .guide-flow li { position: relative; counter-increment: guide-flow; padding: 16px 17px; border: 1px solid #e0e7f1; border-radius: 13px; background: #fbfcff; }
-.guide-flow li::before { content: counter(guide-flow, decimal-leading-zero); display: block; color: #7b97bc; font-size: 11px; font-weight: 600; margin-bottom: 8px; }
-.guide-flow small { display: block; color: #5a708c; font-size: 11px; margin-bottom: 4px; }
-.guide-flow strong { display: block; color: #25446a; font-size: 13px; line-height: 1.7; font-weight: 600; }
+.guide-flow li::before { content: counter(guide-flow, decimal-leading-zero); display: block; color: #7b97bc; font-size: 13px; font-weight: 600; margin-bottom: 8px; }
+.guide-flow small { display: block; color: #5a708c; font-size: 13px; margin-bottom: 4px; }
+.guide-flow strong { display: block; color: #25446a; font-size: 15px; line-height: 1.7; font-weight: 600; }
 
 .guide-detail-tabs { display: flex; flex-wrap: wrap; gap: 7px; margin: 20px 0; }
-.guide-detail-tabs button { display: flex; align-items: center; justify-content: center; gap: 6px; border: 1px solid #dfe6ef; border-radius: 999px; padding: 9px 13px; min-height: 40px; font-size: 12px; color: #526278; line-height: 1.5; }
+.guide-detail-tabs button { display: flex; align-items: center; justify-content: center; gap: 6px; border: 1px solid #dfe6ef; border-radius: 999px; padding: 9px 13px; min-height: 40px; font-size: 14px; color: #526278; line-height: 1.5; }
 .guide-detail-tabs button:hover { background: #f3f7ff; }
 .guide-detail-tabs button[aria-pressed="true"] { background: #edf4ff; border-color: #9ebfea; color: #1956af; font-weight: 650; }
 .guide-detail-content { padding: 23px; border: 1px solid #dfe6ef; border-radius: 17px; background: #fcfdff; }
 .guide-detail-content h4 { color: #203c60; font-size: 18px; line-height: 1.55; margin-bottom: 9px; }
 .guide-detail-content > p { color: #526278; font-size: 14px; line-height: 1.8; }
 .guide-detail-content .guide-steps { margin-top: 24px; margin-bottom: 21px; }
-.guide-tip { border-radius: 11px; background: #edf4ff; color: #385e8e; padding: 14px 17px; font-size: 13px; line-height: 1.8; }
+.guide-tip { border-radius: 11px; background: #edf4ff; color: #385e8e; padding: 14px 17px; font-size: 15px; line-height: 1.8; }
 .guide-tip strong { display: block; color: #254e80; margin-bottom: 4px; }
-.guide-tip p { font-size: 13px; line-height: 1.8; }
+.guide-tip p { font-size: 15px; line-height: 1.8; }
 .guide-detail-content .guide-tip { display: flex; gap: 9px; align-items: flex-start; }
 .guide-tip > svg { flex-shrink: 0; margin-top: 3px; }
 .guide-columns + .guide-tip { margin-top: 24px; }
@@ -181,10 +181,10 @@
 .guide-faq summary { padding: 17px 0; color: #243f61; font-size: 14px; line-height: 1.7; font-weight: 600; cursor: pointer; }
 .guide-faq summary::marker { color: #6390c9; }
 .guide-faq[open] { background: #fbfcff; border-color: #cbdcf3; }
-.guide-faq p { padding: 0 0 19px; color: #58667a; font-size: 13px; line-height: 1.9; }
+.guide-faq p { padding: 0 0 19px; color: #58667a; font-size: 15px; line-height: 1.9; }
 .guide-faq summary:focus-visible { outline: 2px solid var(--focus-blue, #4c6ee6); outline-offset: 3px; border-radius: 5px; }
 .guide-footer { display: flex; align-items: center; justify-content: space-between; gap: 20px; border-top: 1px solid #e4eaf1; padding-top: 20px; margin-top: 29px; }
-.guide-footer p { display: flex; gap: 7px; align-items: center; font-size: 12px; line-height: 1.8; color: #68778a; }
+.guide-footer p { display: flex; gap: 7px; align-items: center; font-size: 14px; line-height: 1.8; color: #68778a; }
 .guide-footer > .btn { flex-shrink: 0; }
 
 @media (max-width: 1100px) {
@@ -196,8 +196,8 @@
   .guide-landing { margin-bottom: 48px; padding-top: 27px; }
   .guide-landing-heading { gap: 15px; align-items: flex-start; }
   .guide-landing-heading h2 { font-size: 23px; }
-  .guide-landing-heading p { font-size: 13px; }
-  .guide-landing-heading > .btn { font-size: 12px; padding: 10px 14px; }
+  .guide-landing-heading p { font-size: 15px; }
+  .guide-landing-heading > .btn { font-size: 14px; padding: 10px 14px; }
   .guide-role-card { padding: 19px 16px; }
   .guide-nav { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .guide-role-picker { grid-template-columns: repeat(3, minmax(0, 1fr)); }
@@ -211,16 +211,16 @@
 @media (max-width: 500px) {
   .landing .landing-nav { padding: 11px 12px 11px 17px; gap: 10px; flex-wrap: wrap; border-radius: 22px; }
   .landing-nav-actions { gap: 4px; }
-  .landing-nav .landing-guide-button { padding: 8px 9px; gap: 5px; font-size: 11px; min-height: 37px; }
+  .landing-nav .landing-guide-button { padding: 8px 9px; gap: 5px; font-size: 13px; min-height: 37px; }
   .landing-nav .landing-guide-button svg { width: 15px; }
   .landing-nav-actions .btn { padding-inline: 12px; }
   .guide-landing-heading { flex-direction: column; }
   .guide-role-cards { grid-template-columns: 1fr; gap: 10px; }
   .guide-role-card { align-items: center; }
   .guide-role-card strong { font-size: 14px; }
-  .guide-role-card small { font-size: 12px; }
+  .guide-role-card small { font-size: 14px; }
   .guide-section h3 { font-size: 19px; }
-  .guide-nav button { font-size: 12px; }
+  .guide-nav button { font-size: 14px; }
   .guide-callout { padding: 16px; gap: 10px; }
   .guide-callout > svg { width: 18px; }
   .guide-detail-tabs { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); }

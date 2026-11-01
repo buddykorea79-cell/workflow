@@ -32,16 +32,17 @@ export function ProcedureFlow({ workflow, selectedId, onSelect }: { workflow: Wo
     };
     workflow.forEach(step => depth(step.id));
     const width = Math.max(900, (Math.max(0, ...levels.values()) + 1) * 260 + 210);
+    const rowSpacing = 112;
     const counts = new Map<string, number>(); const positions = new Map<string, { x: number; y: number }>();
     const laneHeights = roles.map(role => {
       const occurrences = new Map<number, number>();
       for (const step of workflow.filter(item => item.role === role)) { const level = levels.get(step.id) || 0; occurrences.set(level, (occurrences.get(level) || 0) + 1); }
-      return Math.max(165, Math.max(0, ...occurrences.values()) * 100 + 65);
+      return Math.max(1, ...occurrences.values()) * rowSpacing + 65;
     });
     const laneTops = laneHeights.map((_, index) => laneHeights.slice(0, index).reduce((sum, height) => sum + height + 12, 0));
     for (const step of workflow) {
       const lane = roles.indexOf(step.role); const level = levels.get(step.id) || 0; const key = `${lane}-${level}`; const row = counts.get(key) || 0; counts.set(key, row + 1);
-      positions.set(step.id, { x: 185 + level * 260, y: laneTops[lane] + 48 + row * 100 });
+      positions.set(step.id, { x: 185 + level * 260, y: laneTops[lane] + 48 + row * rowSpacing });
     }
     const nodes: Node[] = roles.map((role, index) => ({ id: `lane-${role}`, position: { x: 0, y: laneTops[index] }, data: { label: roleLabels[role] }, style: { width, height: laneHeights[index] }, className: `procedure-lane procedure-lane-${role}`, selectable: false, draggable: false, focusable: false, zIndex: -1 }));
     nodes.push(...workflow.map((step, index): Node => ({ id: step.id, position: positions.get(step.id)!, sourcePosition: Position.Right, targetPosition: Position.Left, data: { label: <div className="procedure-node-content"><span>{String(index + 1).padStart(2, '0')} · {roleLabels[step.role]}{step.done && <Check size={12}/>}</span><strong>{step.title}</strong></div> }, style: { width: 225 }, className: `procedure-node${step.done ? ' is-complete' : ''}`, selected: step.id === selectedId, ariaLabel: `${index + 1}. ${step.title}, ${roleLabels[step.role]}`, draggable: false })));
