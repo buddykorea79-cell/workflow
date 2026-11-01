@@ -13,9 +13,9 @@
 ## 실제 연결 확인
 
 - Neon DB와 Object Storage의 연결값을 Git 제외 `.env.local`에서 사용했다. 비밀값은 로그·문서·Git에 넣지 않았다.
-- `ieum-attachments` 버킷을 만들고 로컬 주소 두 개의 CORS를 설정했다. 기존 규칙은 보존하는 설정 도구를 사용한다.
+- `ieum-attachments` 버킷을 만들고 로컬 주소 두 개와 `https://on-ieum.vercel.app`의 CORS를 설정했다. 기존 규칙은 보존하는 설정 도구를 사용한다.
 - 작은 임시 객체의 업로드·읽기·바이트 대조·삭제를 실제 Neon에서 확인했다.
-- 서명된 PUT 주소, 실제 CORS preflight, 서명된 GET 주소와 다운로드 헤더도 확인했다. 검증 객체는 정리했고 업무·첨부 기록은 바꾸지 않았다.
+- 로컬과 Vercel origin을 각각 사용해 서명된 PUT 주소, 실제 CORS preflight, 서명된 GET 주소와 다운로드 헤더도 확인했다. 검증 객체는 정리했고 업무·첨부 기록은 바꾸지 않았다.
 - 실제 앱에서 Neon의 계정 목록 33명을 불러오고 관리자 역할로 로그인하여 기존 업무와 연결 환경 표시를 확인했다.
 - 실연결에서 발견한 Next.js의 WebSocket 번들 호환 문제는 Neon 드라이버와 `ws`를 서버 외부 패키지로 처리해 수정했다.
 
@@ -27,4 +27,4 @@
 - JSON 첨부 식별자로 PDF 추출 시 권한·업무분장 잠금·내용 검증과 실제 PDF.js 본문 추출 검사.
 - Vercel용 프로토타입 역할 로그인 설정과 동일 출처 검사.
 
-Vercel 환경변수는 로컬 설정과 별도로 적용해야 한다. 실제 Vercel 화면의 로그인·파일 업로드 검증과 BizRouter 실제 모델 호출은 이 기록의 완료 범위에 포함하지 않는다. 설정 위치와 명령은 [프로토타입 연결 안내](PROTOTYPE-NEON-SETUP.md)를 참고한다.
+GitHub main 커밋의 Vercel 빌드 성공을 확인했다. 현재 Vercel의 세션 API는 `403 DEMO_DISABLED`를 반환하므로 Vercel 환경변수에 프로토타입 설정을 추가하고 재배포해야 한다. 로컬 설정은 Vercel에 자동 전달되지 않는다. 실제 Vercel 화면의 로그인·파일 업로드 검증과 BizRouter 실제 모델 호출은 이 기록의 완료 범위에 포함하지 않는다. 설정 위치와 명령은 [프로토타입 연결 안내](PROTOTYPE-NEON-SETUP.md)를 참고한다.

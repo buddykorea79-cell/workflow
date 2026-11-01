@@ -117,11 +117,11 @@ node -e "console.log(require('node:crypto').randomBytes(32).toString('hex'))"
 
 ### 브라우저 파일 업로드 허용 주소 설정
 
-위 파일을 저장한 뒤 PowerShell에서 아래 명령을 실행합니다. 예시 주소를 **실제 Vercel 앱 주소**로 바꿉니다. 마지막에 경로나 `/`를 붙이지 않습니다.
+현재 Vercel 앱 주소는 **https://on-ieum.vercel.app**입니다. 이 주소와 로컬 주소의 CORS 설정을 완료했습니다. 다른 주소를 추가하거나 다시 확인할 때 PowerShell에서 아래 명령을 실행합니다. 주소 마지막에 경로나 `/`를 붙이지 않습니다.
 
 ```powershell
 cd D:\Workflow-Project
-npm run neon:storage:setup -- --origin https://실제앱주소.vercel.app --test
+npm run neon:storage:setup -- --origin https://on-ieum.vercel.app --test
 ```
 
 이 명령은 버킷이 없으면 생성하고, 브라우저 업로드를 위한 CORS를 설정합니다. 기존 파일과 다른 CORS 규칙은 유지하며, 아래 주소를 허용 목록에 포함합니다.
@@ -186,7 +186,7 @@ WHERE id = 'development';
 | `IEUM_WORKSPACE_ID` | `development` |
 | `IEUM_PROTOTYPE_MODE` | `true` |
 | `IEUM_SESSION_SECRET` | 위에서 만든 임의 문자열 |
-| `IEUM_APP_ORIGIN` | 실제 접속할 Vercel HTTPS 주소. 끝의 `/`는 제외 |
+| `IEUM_APP_ORIGIN` | `https://on-ieum.vercel.app` |
 | `IEUM_STORAGE_PROVIDER` | `neon` |
 | `IEUM_STORAGE_BUCKET` | `ieum-attachments` 또는 실제 버킷 이름 |
 | `AWS_ENDPOINT_URL_S3`, `AWS_REGION` | Neon Connect의 Storage 값 |
