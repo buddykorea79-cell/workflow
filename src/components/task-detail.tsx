@@ -5,6 +5,7 @@ import { ArrowDownToLine, ArrowRight, Check, CheckCheck, ChevronDown, ChevronRig
 import { Background, Controls, MarkerType, ReactFlow, type Connection, type Node } from '@xyflow/react';
 import '@xyflow/react/dist/style.css';
 import type { Card, Task, WorkflowStep, Workspace } from '@/lib/types';
+import { uploadAttachment } from '@/lib/upload-attachment';
 import { currentPeriod, dueDateForPeriod, normalizePeriod } from '@/lib/schedule';
 import './task-detail.css';
 
@@ -152,11 +153,8 @@ export default function TaskDetail({ task, workspace, command, onClose }: Props)
     if (file.size > 10 * 1024 * 1024) { setUploadMessage('파일은 10MB 이하로 선택해 주세요.'); return; }
     setBusy(true); setUploadMessage('파일을 업로드하고 있습니다.');
     try {
-      const form = new FormData(); form.append('file', file); form.append('taskId', task.id);
-      const response = await fetch('/api/attachments', { method: 'POST', body: form });
-      const result = await response.json();
-      if (!response.ok) throw new Error(result.error?.message ?? result.error ?? '파일을 저장하지 못했습니다.');
-      setUploadMessage('업로드했습니다. 일반 파일은 검사 대기 상태로 보관됩니다.');
+      await uploadAttachment(file, task.id);
+      setUploadMessage('업로드했습니다. 관리자 계정에서 테스트 파일을 허용하면 다운로드할 수 있습니다.');
       await command('workspace.refresh', {});
     } catch (error) { setUploadMessage(error instanceof Error ? error.message : '업로드에 실패했습니다.'); }
     finally { setBusy(false); if (fileRef.current) fileRef.current.value = ''; }

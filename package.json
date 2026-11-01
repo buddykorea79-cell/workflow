@@ -7,9 +7,15 @@
     "build": "next build --webpack",
     "start": "next start --hostname 127.0.0.1",
     "typecheck": "tsc --noEmit",
-    "test": "tsx --test tests/*.test.ts"
+    "test": "tsx --test tests/*.test.ts",
+    "neon:check": "node --env-file=.env.local --import tsx scripts/check-neon.ts",
+    "neon:import": "node --env-file=.env.local --import tsx scripts/import-local-neon.ts",
+    "neon:import:apply": "node --env-file=.env.local --import tsx scripts/import-local-neon.ts --apply",
+    "neon:storage:setup": "node --env-file=.env.local --import tsx scripts/setup-neon-storage.ts"
   },
   "dependencies": {
+    "@aws-sdk/client-s3": "^3.1161.0",
+    "@aws-sdk/s3-request-presigner": "^3.1161.0",
     "@hookform/resolvers": "^5.2.2",
     "@neondatabase/serverless": "^1.0.2",
     "@xyflow/react": "^12.10.0",

@@ -1,12 +1,31 @@
 import { NextRequest } from 'next/server';
 import path from 'node:path';
-import { assertSameOrigin, currentUserId, isLocalDemo } from '@/lib/auth';
+import { readFile } from 'node:fs/promises';
+import { createHash } from 'node:crypto';
+import { assertSameOrigin, currentUserId, isDemoSession } from '@/lib/auth';
 import { activeUser, assertDefinitionWritable, assertTaskWritable, canReadTask, DomainError } from '@/lib/domain';
-import { transaction } from '@/lib/store';
+import { dataDirectory, transaction } from '@/lib/store';
+import { readNeonFile } from '@/lib/attachment-storage';
 import { apiError, json } from '@/lib/api';
 import { pdfEnvelopeError, PROCEDURE_PDF_LIMIT, PROCEDURE_TEXT_LIMIT, type ProcedurePage } from '@/lib/procedure-draft';
 
 export const runtime = 'nodejs';
+export const maxDuration = 60;
+
+async function attachmentRequestText(request: NextRequest) {
+  const reader = request.body?.getReader();
+  if (!reader) throw new DomainError(422, 'FILE_REQUIRED', '업무와 첨부파일을 선택해 주세요.');
+  const decoder = new TextDecoder(); let text = ''; let size = 0;
+  try {
+    while (true) {
+      const chunk = await reader.read(); if (chunk.done) break;
+      size += chunk.value.byteLength;
+      if (size > 2000) { await reader.cancel(); throw new DomainError(413, 'REQUEST_TOO_LARGE', '첨부파일 식별정보만 전송해 주세요.'); }
+      text += decoder.decode(chunk.value, { stream: true });
+    }
+    return text + decoder.decode();
+  } finally { reader.releaseLock(); }
+}
 
 async function boundedForm(request: NextRequest) {
   const limit = PROCEDURE_PDF_LIMIT + 100_000;
@@ -32,27 +51,47 @@ export async function POST(request: NextRequest) {
   try {
     assertSameOrigin(request);
     const userId = await currentUserId(request);
-    if (!isLocalDemo(request)) throw new DomainError(503, 'LOCAL_EXTRACTION_ONLY', 'PDF 본문 추출은 로컬 시연 환경에서 지원합니다. 본문을 직접 붙여 넣어 주세요.');
-    const form = await boundedForm(request); const file = form.get('file'); const taskId = form.get('taskId');
-    if (!(file instanceof File) || typeof taskId !== 'string' || !taskId || taskId.length > 150) throw new DomainError(422, 'FILE_REQUIRED', '업무와 PDF 파일을 선택해 주세요.');
-    if (!file.size || file.size > PROCEDURE_PDF_LIMIT) throw new DomainError(413, 'FILE_TOO_LARGE', 'PDF는 비어 있지 않은 10MB 이하 파일이어야 합니다.');
-    await transaction(state => {
+    if (!isDemoSession(request)) throw new DomainError(503, 'PROTOTYPE_EXTRACTION_ONLY', 'PDF 본문 추출은 프로토타입 모드에서 지원합니다.');
+    let taskId: string; let attachmentId: string | undefined; let file: File | undefined;
+    if (request.headers.get('content-type')?.startsWith('application/json')) {
+      const bodyText = await attachmentRequestText(request);
+      let body: { taskId?: unknown; attachmentId?: unknown };
+      try { body = JSON.parse(bodyText); } catch { throw new DomainError(422, 'FILE_REQUIRED', '업무와 첨부파일을 선택해 주세요.'); }
+      if (!body || typeof body.taskId !== 'string' || typeof body.attachmentId !== 'string' || !body.attachmentId || body.attachmentId.length > 150) throw new DomainError(422, 'FILE_REQUIRED', '업무와 첨부파일을 선택해 주세요.');
+      taskId = body.taskId; attachmentId = body.attachmentId;
+    } else {
+      const form = await boundedForm(request); const selected = form.get('file'); const id = form.get('taskId');
+      if (!(selected instanceof File) || typeof id !== 'string') throw new DomainError(422, 'FILE_REQUIRED', '업무와 PDF 파일을 선택해 주세요.');
+      file = selected; taskId = id;
+      if (!file.size || file.size > PROCEDURE_PDF_LIMIT) throw new DomainError(413, 'FILE_TOO_LARGE', 'PDF는 비어 있지 않은 10MB 이하 파일이어야 합니다.');
+    }
+    if (!taskId || taskId.length > 150) throw new DomainError(422, 'FILE_REQUIRED', '업무와 PDF 파일을 선택해 주세요.');
+    const attachment = await transaction(state => {
       const user = activeUser(state, userId); const task = state.tasks.find(item => item.id === taskId);
       if (!task || !canReadTask(state, user, task)) throw new DomainError(403, 'PROCEDURE_ACCESS_DENIED', '이 업무의 절차를 작성할 권한이 없습니다.');
       assertTaskWritable(state, task);
       if (task.status === 'archived') throw new DomainError(409, 'TASK_ARCHIVED', '보관된 업무의 절차는 변경할 수 없습니다.');
       if (user.id !== task.primaryId && user.role !== 'admin' && !(user.departmentId === task.departmentId && ['manager', 'head'].includes(user.role))) throw new DomainError(403, 'PROCEDURE_EDIT_DENIED', '담당자 또는 부서 관리자만 절차 자료를 가져올 수 있습니다.');
       assertDefinitionWritable(state, user, task.departmentId);
+      if (!attachmentId) return undefined;
+      const attachment = state.attachments.find(item => item.id === attachmentId && item.taskId === taskId);
+      if (!attachment) throw new DomainError(404, 'ATTACHMENT_NOT_FOUND', '이 업무의 첨부파일을 찾을 수 없습니다.');
+      if (!attachment.size || attachment.size > PROCEDURE_PDF_LIMIT) throw new DomainError(413, 'FILE_TOO_LARGE', 'PDF는 비어 있지 않은 10MB 이하 파일이어야 합니다.');
+      return attachment;
     });
-    const bytes = new Uint8Array(await file.arrayBuffer()); const envelopeError = pdfEnvelopeError(file.name, file.type, bytes);
+    const buffer = attachment
+      ? attachment.storageProvider === 'neon' ? await readNeonFile(attachment.storageKey, attachment.storageBucket) : await readFile(path.join(dataDirectory(), 'files', path.basename(attachment.storageKey)))
+      : Buffer.from(await file!.arrayBuffer());
+    if (attachment && (buffer.length !== attachment.size || createHash('sha256').update(buffer).digest('hex') !== attachment.sha256)) throw new DomainError(409, 'ATTACHMENT_CHANGED', '저장된 첨부파일의 크기나 내용이 다릅니다. 파일을 다시 등록해 주세요.');
+    const bytes = new Uint8Array(buffer); const envelopeError = pdfEnvelopeError(attachment ? attachment.name : file!.name, attachment ? attachment.mime : file!.type, bytes);
     if (envelopeError) throw new DomainError(415, 'PDF_REQUIRED', envelopeError);
     let loading: ReturnType<(typeof import('pdfjs-dist/legacy/build/pdf.mjs'))['getDocument']> | undefined;
     let timedOut = false;
     let timer: ReturnType<typeof setTimeout> | undefined;
     try {
     const pdfjs = await import('pdfjs-dist/legacy/build/pdf.mjs');
-    // PDF.js uses its local fake-worker implementation in Node; no worker URL,
-    // source URL, attachment storage or external service is involved.
+    // PDF.js parses the verified bytes inside Node; it does not fetch source URLs
+    // or send document contents to an external extraction service.
     // @ts-expect-error PDF.js ships runtime worker exports without declarations.
     const worker = await import('pdfjs-dist/legacy/build/pdf.worker.mjs');
     (globalThis as typeof globalThis & { pdfjsWorker?: unknown }).pdfjsWorker = worker;

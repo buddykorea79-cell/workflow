@@ -1,6 +1,6 @@
 # 온이음 워크스페이스 · v0.7.0
 
-공공업무의 계획·배정·실행·반기 성과평가를 연결하는 로컬 시연 앱입니다.
+공공업무의 계획·배정·실행·반기 성과평가를 연결하는 프로토타입입니다. 로컬 또는 Vercel에서 역할별 가상 계정으로 시연하며, Neon DB와 Neon Object Storage를 연결할 수 있습니다.
 
 ## 시작
 
@@ -135,9 +135,17 @@ Node.js와 현재 설치된 의존성으로 실행합니다. 실행 파일은 �
 
 관리자의 **버전 기록**은 릴리스 이력을 기록하는 기능이며 코드를 자동 배포하거나 되돌리는 기능은 아닙니다. 현재 실행 코드 버전은 `package.json`의 0.7.0입니다.
 
-## 운영 전환 시 후속 작업
+## 프로토타입 Neon 연결과 기존 데이터 이관
 
-현재 구현과 운영 전환 작업, Neon DB 설정 순서, 인증·파일 저장소·환경변수·배포·백업 확인사항은 **[서비스 운영 준비 체크리스트](docs/PRODUCTION-READINESS.md)**에 정리했습니다. Neon 저장 어댑터는 구현되어 있지만, DB 연결만으로 기관 로그인과 첨부파일을 운영할 수 있는 상태는 아닙니다. `scripts/setup-neon.ts`는 가상 데이터를 설치하는 개발용 스크립트이므로 운영 초기화에 사용하지 않습니다.
+**[Neon·Vercel 프로토타입 설정 안내](docs/PROTOTYPE-NEON-SETUP.md)**에서 각 설정값을 어디에서 복사하고 어디에 저장하는지 확인할 수 있습니다. 현재 프로젝트에는 기관용 인증이나 운영 전환 작업이 필요하지 않습니다. Vercel에서도 `IEUM_PROTOTYPE_MODE=true`와 `IEUM_SESSION_SECRET`을 설정하면 기존 역할 선택 로그인을 사용합니다.
+
+Vercel에 연결한 DB 값은 로컬로 자동 전달되지 않습니다. 이관 명령을 실행하려면 같은 `DATABASE_URL`과 `IEUM_WORKSPACE_ID`를 `.env.local`에 설정합니다. `npm run neon:check`로 연결 상태를 확인하고, `npm run neon:import`로 현재 `.data/workspace.json`과 DB를 비교한 뒤 `npm run neon:import:apply`로 이관합니다. 로컬 원본은 보존되며 `.qa`·`.qa-data`의 자동화 테스트 데이터는 합치지 않습니다. 기존 DB 내용이 다르면 명령이 중단되며, 명시적 `--replace`를 사용할 때에도 먼저 기존 DB 내용을 로컬 백업합니다.
+
+파일은 `IEUM_STORAGE_PROVIDER=neon`과 Neon Storage 연결값을 설정하면 비공개 버킷에 보관합니다. `npm run neon:storage:setup -- --origin https://실제-프로젝트.vercel.app`으로 브라우저 업로드에 필요한 CORS를 설정합니다. 10MB 이하 파일은 서명된 주소로 Neon에 직접 업로드하고 크기·해시 확인 후 첨부 목록에 등록합니다.
+
+## 향후 운영 검토 참고
+
+이전에 작성한 **[운영 전환 검토 기록](docs/PRODUCTION-READINESS.md)**은 향후 참고 자료입니다. 현재 프로토타입 설정에는 위의 Neon·Vercel 안내를 사용합니다. `scripts/setup-neon.ts`는 새로운 가상 데이터를 설치하는 스크립트이므로, 현재 테스트 데이터를 그대로 옮길 때는 `neon:import` 명령을 사용합니다.
 
 실제 기관 계정·인증과 사용자 초대, 운영 DB·파일 저장소·백업 복구 검증, 공식 법령·행정 시스템 연동, 알림 채널 연동은 후속 항목입니다. 기존 인수인계·자료 관리 소스와 API는 보존했으나 새 화면의 주 메뉴에는 아직 통합하지 않았습니다. 정확한 범위는 관리자 화면에서 확인할 수 있습니다.
 

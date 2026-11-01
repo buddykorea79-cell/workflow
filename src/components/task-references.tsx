@@ -4,6 +4,7 @@ import { useRef, useState } from 'react';
 import { Download, FileText, Landmark, Link2, Plus, Trash2, Upload } from 'lucide-react';
 import type { TaskReference, Workspace } from '@/lib/types';
 import { hasReferenceContent } from '@/lib/task-references';
+import { uploadAttachment } from '@/lib/upload-attachment';
 import { Badge, Button, Field } from './ui';
 
 const referenceNames: Record<TaskReference['type'], string> = { law: '법령', guideline: '지침', national_agenda: '국정과제', directive: '지시사항', document: '생산 문서', other: '기타 근거' };
@@ -28,6 +29,15 @@ export function TaskReferences({ workspace, taskId, references, editable, onChan
   const change = (id: string, patch: Partial<TaskReference>) => onChange(displayedReferences.map(reference => reference.id === id ? { ...reference, ...patch } : reference));
   const chooseFile = (referenceId: string) => { uploadTargetId.current = referenceId; fileInput.current?.click(); };
 
+  async function allowTestFile(attachmentId: string) {
+    setUploading(true); onBusyChange(true); setError(''); setNotice('');
+    try {
+      if (await command('attachment.allowTest', { attachmentId, reason: '프로토타입 첨부 출처 확인' })) setNotice('테스트 파일을 허용했습니다. 다운로드 버튼으로 파일을 확인할 수 있습니다.');
+      else setError('테스트 파일을 허용하지 못했습니다. 다시 시도해 주세요.');
+    } catch (cause) { setError(cause instanceof Error ? cause.message : '테스트 파일을 허용하지 못했습니다.'); }
+    finally { setUploading(false); onBusyChange(false); }
+  }
+
   async function upload(file: File, referenceId: string) {
     if (!canUpload) return;
     const target = displayedReferences.find(reference => reference.id === referenceId);
@@ -35,16 +45,16 @@ export function TaskReferences({ workspace, taskId, references, editable, onChan
     if (!file.size || file.size > 10 * 1024 * 1024) { setError('비어 있지 않은 10MB 이하 파일을 선택해 주세요.'); return; }
     setUploading(true); onBusyChange(true); setError(''); setNotice('');
     try {
-      const form = new FormData(); form.append('file', file); form.append('taskId', taskId);
-      const response = await fetch('/api/attachments', { method: 'POST', body: form });
-      const result = await response.json() as Workspace & { error?: string };
-      if (!response.ok) throw new Error(result.error || '파일을 등록하지 못했습니다.');
+      const result = await uploadAttachment(file, taskId);
       const attachment = result.attachments.find(item => item.taskId === taskId && !files.some(existing => existing.id === item.id) && item.name === file.name);
       if (!attachment) throw new Error('첨부파일 정보를 확인하지 못했습니다. 다시 열어 확인해 주세요.');
       let content = ''; let extractionNotice = '';
       try {
         if (/\.pdf$/i.test(file.name)) {
-          const extracted = await fetch('/api/procedure-extract', { method: 'POST', body: form });
+          const form = new FormData(); form.append('file', file); form.append('taskId', taskId);
+          const extracted = await fetch('/api/procedure-extract', attachment.storageProvider === 'neon'
+            ? { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ taskId, attachmentId: attachment.id }) }
+            : { method: 'POST', body: form });
           const body = await extracted.json() as { text?: string; error?: string };
           if (!extracted.ok) throw new Error(body.error || 'PDF 본문을 추출하지 못했습니다.');
           content = body.text || '';
@@ -72,9 +82,9 @@ export function TaskReferences({ workspace, taskId, references, editable, onChan
         <Field label={reference.type === 'document' ? '문서 내용 · 생산 결과' : '내용 및 적용 조항'} span><textarea rows={5} disabled={!editable || uploading} value={reference.content} maxLength={contentLimit} placeholder="AI가 분석할 본문이나 적용 조항을 입력해 주세요. 파일만 보관할 때에는 비워둘 수 있습니다." onChange={event => change(reference.id, { content: event.target.value })}/></Field>
         <Field label="원문 링크 (선택)" span><input type="url" disabled={!editable || uploading} value={reference.url || ''} placeholder="https://" onChange={event => change(reference.id, { url: event.target.value })}/></Field>
         {files.length > 0 && <Field label="연결할 첨부파일 (선택)" span><select disabled={!editable || uploading} value={reference.attachmentId || ''} onChange={event => change(reference.id, { attachmentId: event.target.value || undefined })}><option value="">파일 연결 없음</option>{files.map(file => <option key={file.id} value={file.id}>{file.name}</option>)}</select></Field>}
-      </div>{canUpload && <div className="pw-reference-attachment"><Button type="button" variant="secondary" disabled={uploading} aria-label={`${index + 1}번 근거 파일 ${file ? '변경' : '첨부'}`} onClick={() => chooseFile(reference.id)}><Upload size={15}/>{uploading && uploadTargetId.current === reference.id ? '파일 처리 중…' : file ? '첨부파일 변경' : '파일 첨부 · 선택'}</Button><p>PDF·문서·이미지·TXT 등 최대 10MB. PDF·TXT·CSV의 본문을 가져옵니다.</p></div>}{file && <div className="pw-reference-file"><FileText size={17}/><span><strong>{file.name}</strong><small>{Math.ceil(file.size / 1024)} KB · {file.status === 'quarantined' ? '검사 대기' : '테스트 허용'}</small></span>{file.status === 'test_allowed' && <a href={`/api/attachments/${encodeURIComponent(file.id)}`} aria-label={`${file.name} 다운로드`}><Download size={17}/></a>}{editable && <button type="button" className="pw-icon-button" disabled={uploading} aria-label={`${file.name} 근거 연결 해제`} onClick={() => change(reference.id, { attachmentId: undefined })}><Trash2 size={16}/></button>}</div>}{reference.url && /^https?:\/\//i.test(reference.url) && <a className="pw-reference-link" href={reference.url} target="_blank" rel="noreferrer"><Link2 size={14}/>원문 열기</a>}</section>;
+      </div>{canUpload && <div className="pw-reference-attachment"><Button type="button" variant="secondary" disabled={uploading} aria-label={`${index + 1}번 근거 파일 ${file ? '변경' : '첨부'}`} onClick={() => chooseFile(reference.id)}><Upload size={15}/>{uploading && uploadTargetId.current === reference.id ? '파일 처리 중…' : file ? '첨부파일 변경' : '파일 첨부 · 선택'}</Button><p>PDF·문서·이미지·TXT 등 최대 10MB. PDF·TXT·CSV의 본문을 가져옵니다.</p></div>}{file && <div className="pw-reference-file"><FileText size={17}/><span><strong>{file.name}</strong><small>{Math.ceil(file.size / 1024)} KB · {file.status === 'quarantined' ? '검사 대기' : '테스트 허용'}</small></span>{workspace.currentUser.role === 'admin' && file.status === 'quarantined' && <Button type="button" variant="secondary" disabled={uploading} onClick={() => void allowTestFile(file.id)}>테스트 파일 허용</Button>}{file.status === 'test_allowed' && <a href={`/api/attachments/${encodeURIComponent(file.id)}`} aria-label={`${file.name} 다운로드`}><Download size={17}/></a>}{editable && <button type="button" className="pw-icon-button" disabled={uploading} aria-label={`${file.name} 근거 연결 해제`} onClick={() => change(reference.id, { attachmentId: undefined })}><Trash2 size={16}/></button>}</div>}{reference.url && /^https?:\/\//i.test(reference.url) && <a className="pw-reference-link" href={reference.url} target="_blank" rel="noreferrer"><Link2 size={14}/>원문 열기</a>}</section>;
     })}</div>
     {!displayedReferences.length && <div className="pw-inline-empty"><Landmark size={25}/><p>등록된 관련 근거가 없습니다.</p><span>수정 화면에서 근거를 입력하고 필요하면 파일을 첨부할 수 있습니다.</span></div>}
-    {files.some(file => !references.some(reference => reference.attachmentId === file.id)) && <details className="pw-reference-unlinked"><summary>연결하지 않은 첨부파일</summary>{files.filter(file => !references.some(reference => reference.attachmentId === file.id)).map(file => <div className="pw-reference-file" key={file.id}><FileText size={17}/><span><strong>{file.name}</strong><small>{Math.ceil(file.size / 1024)} KB · {file.status === 'quarantined' ? '검사 대기' : '테스트 허용'}</small></span>{editable && <Button type="button" variant="secondary" disabled={uploading || references.filter(hasReferenceContent).length >= 100} onClick={() => onChange([...references.filter(hasReferenceContent), { id: newId(), type: 'document', title: file.name.slice(0, 300), content: '', attachmentId: file.id }])}>근거에 연결</Button>}</div>)}</details>}
+    {files.some(file => !references.some(reference => reference.attachmentId === file.id)) && <details className="pw-reference-unlinked"><summary>연결하지 않은 첨부파일</summary>{files.filter(file => !references.some(reference => reference.attachmentId === file.id)).map(file => <div className="pw-reference-file" key={file.id}><FileText size={17}/><span><strong>{file.name}</strong><small>{Math.ceil(file.size / 1024)} KB · {file.status === 'quarantined' ? '검사 대기' : '테스트 허용'}</small></span>{workspace.currentUser.role === 'admin' && file.status === 'quarantined' && <Button type="button" variant="secondary" disabled={uploading} onClick={() => void allowTestFile(file.id)}>테스트 파일 허용</Button>}{file.status === 'test_allowed' && <a href={`/api/attachments/${encodeURIComponent(file.id)}`} aria-label={`${file.name} 다운로드`}><Download size={17}/></a>}{editable && <Button type="button" variant="secondary" disabled={uploading || references.filter(hasReferenceContent).length >= 100} onClick={() => onChange([...references.filter(hasReferenceContent), { id: newId(), type: 'document', title: file.name.slice(0, 300), content: '', attachmentId: file.id }])}>근거에 연결</Button>}</div>)}</details>}
   </div>;
 }
