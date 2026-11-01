@@ -1,0 +1,118 @@
+/* Blue brand accents with green completion and coral attention states. */
+:root {
+  --brand-primary: #1863dc;
+  --brand-deep: #153a70;
+  --success-green: #003c33;
+  --brand-primary-hover: #124fb5;
+  --pale-green: #edfce9;
+  --action-blue: #1863dc;
+  --pale-blue: #f1f5ff;
+  --focus-blue: #4c6ee6;
+  --coral: #ff7759;
+  --coral-ink: #9d3d29;
+  --pale-coral: #fff0eb;
+  --soft-stone: #eeece7;
+  --brand-line: #d6e2fa;
+}
+
+::selection { background: #dce8ff; }
+button:focus-visible, a:focus-visible,
+input:focus, select:focus, textarea:focus { outline-color: var(--focus-blue); }
+body input[type=checkbox], body input[type=radio] { accent-color: var(--brand-primary); }
+.btn.btn-primary { background: var(--brand-primary); }
+.btn.btn-primary:hover:not(:disabled) { background: var(--brand-primary-hover); }
+.btn.btn-secondary:hover:not(:disabled) { background: var(--pale-blue); border-color: var(--brand-line); }
+.badge.badge-dark { background: var(--brand-primary); }
+.badge.badge-success { background: var(--pale-green); color: var(--success-green); }
+.badge.badge-info { background: var(--pale-blue); color: var(--action-blue); }
+.badge.badge-warning { background: var(--pale-coral); color: var(--coral-ink); }
+body .progress-track > span { background: var(--action-blue); }
+.progress-track[aria-valuenow="100"] > span { background: var(--success-green); }
+body .text-link, body .calendar-link { color: var(--brand-primary); }
+.tabs button.active, .tabs button.selected, .tabs button[aria-selected=true] { color: var(--brand-primary); }
+body .form-error, body .toast-error { background: var(--pale-coral); border-color: #edb1a3; color: var(--coral-ink); }
+.toast-error .icon-btn:hover { background: #f7d9cd; }
+
+/* A few colored landmarks on the front door. */
+.brand .brand-mark { color: var(--brand-primary); }
+.brand .brand-period { color: var(--coral); }
+.hero-eyebrow .tiny-mark { background: var(--coral); }
+.hero-flow > div:nth-of-type(1) > span { background: var(--pale-blue); color: var(--brand-primary); border-color: transparent; }
+.hero-flow > div:nth-of-type(2) > span { background: var(--pale-blue); color: var(--action-blue); border-color: transparent; }
+.hero-flow > div:nth-of-type(3) > span { background: var(--pale-coral); color: var(--coral-ink); border-color: transparent; }
+.login-card .login-icon { background: var(--pale-blue); color: var(--brand-primary); }
+.login-card-intro .badge { background: var(--pale-blue); color: var(--action-blue); }
+.role-picker .role-option.selected { background: var(--brand-primary); border-color: var(--brand-primary); }
+.role-picker .role-option:hover:not(.selected) { background: #f5f8ff; border-color: var(--brand-line); }
+.login-person .avatar, .profile-button .avatar { background: #e2ebff; color: var(--brand-primary); }
+.landing .landing-footer { background: var(--brand-deep); color: #ccd9f0; }
+.landing-footer .brand-inverse { --canvas: var(--brand-deep); }
+.brand-inverse .brand-mark { color: #fff; }
+
+/* Workspace actions and attention markers. */
+.sidebar .org-symbol { color: var(--brand-primary); }
+.sidebar .nav-item.active { background: var(--brand-primary); }
+.sidebar .nav-item:hover:not(.active) { background: #f4f7ff; color: var(--brand-primary); }
+.sidebar .nav-count { background: var(--pale-coral); color: var(--coral-ink); }
+.sidebar .nav-item.active .nav-count { background: #e8efff; color: var(--brand-primary); }
+.demo-note > span, .bell-button i { background: var(--coral); }
+body .notification-dot { background: var(--coral); }
+body .notification-dot.read { background: #d8dedb; }
+.stats-grid .stat-card[data-accent="brand"] { background: #edf3ff; }
+.stats-grid .stat-card[data-accent="blue"] { background: var(--pale-blue); }
+.stats-grid .stat-card[data-accent="coral"] { background: #fff4ef; }
+.stats-grid .stat-card[data-accent="brand"] > strong,
+.stats-grid .stat-card[data-accent="brand"] > div svg { color: var(--brand-primary); }
+.stats-grid .stat-card[data-accent="blue"] > strong,
+.stats-grid .stat-card[data-accent="blue"] > div svg { color: var(--action-blue); }
+.stats-grid .stat-card[data-accent="coral"] > strong,
+.stats-grid .stat-card[data-accent="coral"] > div svg { color: var(--coral-ink); }
+.stats-grid .stat-card:hover { background: var(--soft-stone); }
+.dashboard-task .task-square { background: var(--pale-blue); color: var(--brand-primary); }
+.dashboard-task[data-kind="common"] .task-square { background: var(--pale-blue); color: var(--action-blue); }
+.timeline-point > span.current { background: var(--coral); border-color: var(--coral); }
+body .flow-callout { background: #f1f5ff; }
+.flow-callout .flow-callout-icon { background: #e0eaff; color: var(--brand-primary); }
+.flow-callout .flow-chips > span { background: #fff; border-color: var(--brand-line); color: var(--brand-primary); }
+
+/* Task status remains expressed in text as well as color. */
+.pw-unit-rail .pw-unit-button.active { background: var(--brand-primary); border-color: var(--brand-primary); }
+.pw-task-card[data-status="complete"] .pw-task-card-bottom > span:first-child { color: var(--success-green); }
+.pw-task-card[data-status="progress"] .pw-task-card-bottom > span:first-child { color: var(--action-blue); }
+.pw-task-card[data-status="attention"] .pw-task-card-bottom > span:first-child { color: var(--coral-ink); }
+body .pw-inbox { background: #f8fbff; border-color: #d9e5fa; }
+.pw-inbox-title > svg { color: var(--action-blue); }
+body .pw-step.is-done .pw-step-number { background: var(--success-green); }
+.pw-save-state > svg { color: var(--success-green); }
+body .pw-reference-link, body .management-task-link { color: var(--action-blue); }
+.pw-calendar .pw-calendar-day.selected { box-shadow: inset 0 0 0 2px var(--action-blue); }
+body .pw-calendar-day.today .pw-day-number { background: var(--brand-primary); }
+.pw-calendar .pw-calendar-chip { background: var(--pale-blue); color: var(--action-blue); }
+.pw-calendar .pw-calendar-chip.deadline { background: var(--pale-coral); color: var(--coral-ink); }
+.pw-calendar .pw-calendar-chip.done { background: var(--pale-green); color: var(--success-green); }
+.pw-calendar-mobile-dots i[data-status="progress"] { background: var(--action-blue); }
+.pw-calendar-mobile-dots i[data-status="attention"] { background: var(--coral-ink); }
+.pw-calendar-mobile-dots i[data-status="complete"] { background: var(--success-green); }
+
+/* Shared work, review and administration. */
+.management-common-card[data-kind="common"] .management-common-icon { background: var(--pale-blue); color: var(--action-blue); }
+.management-common-card[data-kind="directive"] .management-common-icon { background: var(--pale-coral); color: var(--coral-ink); }
+.management-stage[data-status] > span { background: var(--pale-blue); color: var(--action-blue); border-color: transparent; }
+.management-stage[data-status="pending"] > span { background: var(--pale-coral); color: var(--coral-ink); }
+.management-stage[data-status="registered"] > span,
+.management-stage[data-status="submitted"] > span { background: var(--pale-green); color: var(--success-green); }
+body .management-kind-picker > button.selected { background: #f5f8ff; border-color: var(--brand-primary); box-shadow: inset 0 0 0 1px var(--brand-primary); }
+.management-kind-picker > button.selected > span { color: var(--brand-primary); }
+.management-performance-card[data-status="confirmed"] .management-evaluation > svg,
+.management-performance-card[data-status="confirmed"] .management-evaluation > b { color: var(--success-green); }
+.management-performance-card[data-status="changes_requested"] .management-evaluation > svg,
+.management-performance-card[data-status="changes_requested"] .management-evaluation strong { color: var(--coral-ink); }
+body .management-info { background: var(--pale-blue); }
+.management-info > svg { color: var(--action-blue); }
+.management-directory td .management-permission, .management-feature-grid article > svg { color: var(--brand-primary); }
+body .management-department-cards > button.selected { background: #f4f7ff; border-color: var(--brand-primary); }
+.management-department-cards > button.selected > div, .management-department-cards > button.selected > svg { color: var(--brand-primary); }
+body .management-release-banner { background: #f1f5ff; }
+.management-release-banner .management-release-icon { background: var(--brand-primary); }
+.management-release-rail > span { background: var(--brand-primary); }
+.management-release-list > article:first-child .management-release-rail > span { background: var(--coral); }
