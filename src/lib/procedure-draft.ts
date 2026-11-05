@@ -6,7 +6,8 @@ export const PROCEDURE_PDF_LIMIT = 10 * 1024 * 1024;
 export interface ProcedurePage { page: number; text: string }
 export interface ProcedureSource { title: string; text: string; type: TaskReference['type']; url?: string; pages?: ProcedurePage[] }
 export interface ProcedureEvidence { sourceTitle: string; locator: string; excerpt: string }
-export interface ProcedureDraft { steps: WorkflowStep[]; references: TaskReference[]; evidence: Record<string, ProcedureEvidence>; warnings: string[] }
+export interface ProcedureAnalysis { summary: string; sources: Array<{ referenceId: string; sourceTitle: string; summary: string; locator: string; excerpt: string }> }
+export interface ProcedureDraft { steps: WorkflowStep[]; references: TaskReference[]; evidence: Record<string, ProcedureEvidence>; warnings: string[]; analysis?: ProcedureAnalysis }
 
 const numbered = /^(?:제\s*\d+\s*조(?:의\s*\d+)?(?:\([^)]*\))?|\d{1,3}[.)]\s*|[가-하][.)]\s*|[①-⑳]\s*|[-•○]\s*)/;
 const actions = /접수|신청|제출|검토|승인|심사|확인|작성|통보|배정|등록|취합|협의|지급|정산|보고|분석|처리|평가|결정|수집/;

@@ -52,12 +52,14 @@ test('AI route checks identity, source ownership, saved content and department l
       if (calls === 1) return Response.json({ models: [{ id: 'provider/test-model', response_format_modes: ['json_schema'] }] });
       const messages = JSON.parse(String(init?.body)).messages;
       assert.deepEqual(JSON.parse(messages[1].content).references.map((reference: { id: string }) => reference.id), ['saved-source']);
-      return Response.json({ model: 'provider/test-model', choices: [{ finish_reason: 'stop', message: { content: JSON.stringify({ steps: [{ id: 'review', title: '자료 검토', role: 'reviewer', description: '제출된 자료를 검토합니다.', output: '검토 결과', required: true, dependsOn: [], checklist: ['검토 완료'], evidence: { referenceId: 'saved-source', locator: '본문', quote: '검토자는 자료를 검토한다.' } }], warnings: [] }) } }] });
+      return Response.json({ model: 'provider/test-model', choices: [{ finish_reason: 'stop', message: { content: JSON.stringify({ summary: '작성된 자료를 검토하는 절차입니다.', sourceSummaries: [{ referenceId: 'saved-source', summary: '담당자가 작성한 자료를 검토자가 확인합니다.', locator: '본문', quote: '검토자는 자료를 검토한다.' }], steps: [{ id: 'review', title: '자료 검토', role: 'reviewer', description: '제출된 자료를 검토합니다.', output: '검토 결과', required: true, dependsOn: [], checklist: ['검토 완료'], evidence: { referenceId: 'saved-source', locator: '본문', quote: '검토자는 자료를 검토한다.' } }], warnings: [] }) } }] });
     };
     response = await POST(request());
     const result = await response.json();
     assert.equal(response.status, 200, JSON.stringify({ calls, result }));
     assert.equal(result.draft.steps.length, 1); assert.equal(calls, 2);
+    assert.equal(result.draft.analysis.sources[0].referenceId, 'saved-source');
+    assert.equal(result.draft.analysis.sources[0].sourceTitle, '점검 지침');
     assert.equal(JSON.parse(await readFile(file, 'utf8')).revision, state.revision);
     assert.deepEqual(JSON.parse(await readFile(file, 'utf8')).tasks.find((item: { id: string }) => item.id === task.id).workflow, task.workflow);
   } finally {
