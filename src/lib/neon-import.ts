@@ -8,7 +8,7 @@ export class NeonImportError extends Error {
 }
 
 const requiredCollections = ['users', 'departments', 'units', 'tasks', 'runs', 'handovers', 'commonTasks', 'sources', 'performances', 'delegations', 'audit', 'notifications', 'attachments', 'processedRequests'] as const;
-const optionalCollections = ['releases', 'departmentWorkPlans', 'unitScorePlans', 'unitEvaluations'] as const;
+const optionalCollections = ['releases', 'departmentWorkPlans', 'unitScorePlans', 'unitEvaluations', 'workTransfers'] as const;
 
 /** Validate the envelope without dropping newer or historical fields. */
 export function validateImportWorkspace(value: unknown): WorkspaceData {

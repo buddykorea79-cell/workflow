@@ -7,6 +7,7 @@ import { commonDistributionStatus, summarizeCommon, taskExecution } from './comm
 import { departmentWorkPlan, isDepartmentConfirmed, isRegisteredWork, userIdentity, workDivisionSnapshot } from './work-division';
 import { currentPersonPerformances, eligibleScoreUnits, getUnitEvaluation, getUnitScorePlan, hasCompletePerformance, missingPerformanceUnitIds, performanceUnitId, UNIT_SCORE_TOTAL } from './unit-evaluation';
 import { canManageDirective, canRecordDirectiveReport, directiveIssuerLabels, directiveReportStartMonth, isCentralDirective, isDirectiveCoordinator } from './directives';
+import { executePersonnelTransfer } from './personnel-handover';
 import type { AuditEvent, Command, CommonTask, CommonDistribution, Handover, PerformanceSubmissionStatus, Run, Source, Task, Unit, User, WorkflowStep, Workspace, WorkspaceData } from './types';
 
 export class DomainError extends Error { constructor(public status: number, public code: string, message: string) { super(message); } }
@@ -218,7 +219,10 @@ export function getWorkspace(state: WorkspaceData, userId: string, now = new Dat
     return { ...common, distributions, summary: summarizeCommon(distributions) };
   });
   const handovers = state.handovers.filter(h => [h.fromId, h.toId].includes(user.id) || (isManager(user) && (deptIds.has(h.departmentId) || deptIds.has(h.targetDepartmentId))));
+  const workTransfers = (state.workTransfers ?? []).filter(transfer => [transfer.fromId, transfer.toId, transfer.requestedBy].includes(user.id) || isManager(user) && deptIds.has(transfer.departmentId));
   const identityIds = new Set<string>([user.id]);
+  for (const unit of state.units.filter(item => deptIds.has(item.departmentId))) identityIds.add(unit.ownerId);
+  for (const transfer of workTransfers) [transfer.fromId, transfer.toId, transfer.requestedBy, transfer.approvedBy, transfer.resolvedBy].forEach(value => { if (value) identityIds.add(value); });
   for (const task of tasks) [task.primaryId, task.reviewerId, ...task.supportIds].forEach(value => identityIds.add(value));
   for (const run of runs) [run.primaryId, run.reviewerId, ...run.supportIds, ...run.notes.map(note => note.authorId)].forEach(value => identityIds.add(value));
   for (const handover of handovers) [handover.fromId, handover.toId, handover.approvedBy, handover.acceptedBy].forEach(value => { if (value) identityIds.add(value); });
@@ -239,7 +243,7 @@ export function getWorkspace(state: WorkspaceData, userId: string, now = new Dat
     return { ...item, status: evaluation ? 'evaluated' : plan?.submittedAt ? 'submitted' : 'not_submitted', submittedAt: plan?.submittedAt, evaluatedAt: evaluation?.evaluatedAt };
   });
   return { revision: state.revision, currentUser: user, users: state.users.filter(member => deptIds.has(member.departmentId)), departments: state.departments.filter(department => deptIds.has(department.id)), identities: state.users.filter(member => identityIds.has(member.id)).map(userIdentity), departmentDirectory: state.departments.filter(department => canManageCommon(user) || isDirectiveCoordinator(state, user, now) || directoryIds.has(department.id)), departmentWorkPlans, units: state.units.filter(u => deptIds.has(u.departmentId)), tasks, runs,
-    handovers, commonTasks,
+    handovers, workTransfers, commonTasks,
     sources: state.sources.filter(s => canReadSource(state, user, s, now)), performances: state.performances.filter(p => p.authorId === user.id || user.role === 'admin' || (user.role === 'head' ? p.departmentId === user.departmentId : !p.period && taskIds.has(p.taskId))), delegations: state.delegations.filter(d => taskIds.has(d.taskId)), audit, performanceSubmissionStatuses,
     notifications: state.notifications.filter(n => n.userId === user.id), attachments: state.attachments.filter(a => taskIds.has(a.taskId)).map(a => ({ ...a, storageKey: '' })), releases: state.releases ?? [], unitScorePlans: (state.unitScorePlans ?? []).filter(canReadEvaluation), unitEvaluations: (state.unitEvaluations ?? []).filter(canReadEvaluation),
     mode: process.env.DATABASE_URL ? 'connected' : 'local', integrations: { database: process.env.DATABASE_URL ? 'Neon PostgreSQL 연결' : '로컬 파일 저장', auth: process.env.IEUM_PROTOTYPE_MODE === 'true' ? '프로토타입 역할 선택' : process.env.NEON_AUTH_BASE_URL ? 'Neon 인증 연결' : '로컬 데모 계정', storage: process.env.IEUM_STORAGE_PROVIDER === 'neon' ? (['AWS_ENDPOINT_URL_S3', 'AWS_REGION', 'AWS_ACCESS_KEY_ID', 'AWS_SECRET_ACCESS_KEY'].every(key => process.env[key]?.trim()) ? 'Neon Object Storage 연결 설정됨' : 'Neon 저장소 설정 필요') : process.env.VERCEL ? '미연결 · Neon 저장소 설정 필요' : '로컬 격리 저장', bizrouter: process.env.BIZROUTER_API_KEY?.trim() && process.env.BIZROUTER_MODEL?.trim() ? '연결 설정됨 · 호출 미검증' : process.env.BIZROUTER_API_KEY?.trim() ? '모델 설정 필요 · 수기 작성 가능' : '미연결 · 수기 작성 가능', law: process.env.LAW_API_OC ? '키 설정됨 · 호출 미검증' : '미연결 · 수기 등록 가능' }, serverTime: now.toISOString() };
@@ -252,6 +256,11 @@ export function executeCommand(state: WorkspaceData, userId: string, raw: unknow
   const p = command.payload; let targetId = ''; let departmentId = user.departmentId; let detail = ''; let title = '';
   assertDefinitionCommand(state, user, command.type, p);
   switch (command.type) {
+    case 'transfer.emergency': case 'transfer.request': case 'transfer.approve': case 'transfer.reject': case 'transfer.cancel': {
+      const result = executePersonnelTransfer(state, user, command.type, p, now, fail);
+      ({ targetId, departmentId, detail, title } = result);
+      break;
+    }
     case 'department.confirm': case 'department.reopen': {
       const deptId = p.departmentId === undefined ? user.departmentId : required(p, 'departmentId'); scoped(user, deptId, true);
       if (!state.departments.some(department => department.id === deptId)) fail(422, 'DEPARTMENT_MISSING', '유효한 부서를 선택해 주세요.');

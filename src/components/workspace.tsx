@@ -1,7 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { ArrowDown, ArrowRight, ArrowUpRight, Bell, Building2, CalendarDays, Check, CheckCheck, ChevronDown, ChevronRight, CircleHelp, Clock3, FileText, FolderOpen, GitBranch, LayoutDashboard, LoaderCircle, LogOut, Menu, Search, Settings2, ShieldCheck, Sparkles, UserRound, Users, X } from 'lucide-react';
+import { ArrowDown, ArrowLeftRight, ArrowRight, ArrowUpRight, Bell, Building2, CalendarDays, Check, CheckCheck, ChevronDown, ChevronRight, CircleHelp, Clock3, FileText, FolderOpen, GitBranch, LayoutDashboard, LoaderCircle, LogOut, Menu, Search, Settings2, ShieldCheck, Sparkles, UserRound, Users, X } from 'lucide-react';
 import type { Department, Task, User, Workspace as WorkspaceData } from '@/lib/types';
 import { Badge, Brand, Button, EmptyState, Modal, Progress, TextLink, formatDate, roleLabels, type CommandFn } from './ui';
 import { PersonalWork, ScheduleView, TaskPanel, taskProgress } from './personal-work';
@@ -10,10 +10,11 @@ import { DepartmentDashboard, DepartmentWork } from './department-work';
 import { demoCandidates, demoDefaultDepartment, selectDemoUser, type DemoRole } from '@/lib/demo-login';
 import { LandingGuide, UsageGuide, type GuideSection } from './usage-guide';
 import type { GuideRole } from '@/lib/usage-guide';
+import { PersonnelHandover } from './personnel-handover';
 
-type View = 'dashboard' | 'personal' | 'department' | 'common' | 'schedule' | 'performance' | 'organization' | 'admin';
-const titles: Record<View, string> = { dashboard: '업무 홈', personal: '개인업무', department: '부서 업무분장', common: '공통업무 · 지시사항', schedule: '업무 일정', performance: '성과 · 평가', organization: '조직 · 구성원', admin: '관리자' };
-const navItems = [{ id: 'dashboard', icon: LayoutDashboard }, { id: 'personal', icon: FolderOpen }, { id: 'common', icon: GitBranch }, { id: 'schedule', icon: CalendarDays }, { id: 'performance', icon: CheckCheck }] as const;
+type View = 'dashboard' | 'personal' | 'department' | 'common' | 'schedule' | 'performance' | 'handover' | 'organization' | 'admin';
+const titles: Record<View, string> = { dashboard: '업무 홈', personal: '개인업무', department: '부서 업무분장', common: '공통업무 · 지시사항', schedule: '업무 일정', performance: '성과 · 평가', handover: '인수인계', organization: '조직 · 구성원', admin: '관리자' };
+const navItems = [{ id: 'dashboard', icon: LayoutDashboard }, { id: 'personal', icon: FolderOpen }, { id: 'common', icon: GitBranch }, { id: 'schedule', icon: CalendarDays }, { id: 'performance', icon: CheckCheck }, { id: 'handover', icon: ArrowLeftRight }] as const;
 const demoRoles = [{ id: 'member', label: '개인 담당자', icon: UserRound }, { id: 'lead', label: '팀장', icon: Users }, { id: 'manager', label: '부서 담당자', icon: Building2 }, { id: 'common', label: '공통업무 담당', icon: GitBranch }, { id: 'head', label: '부서장', icon: ShieldCheck }, { id: 'admin', label: '관리자', icon: Settings2 }];
 
 function DemoLogin({ users, departments, busy, error, onLogin }: { users: User[]; departments: Department[]; busy: boolean; error: string; onLogin: (id: string) => void }) {
@@ -160,7 +161,7 @@ export default function Workspace() {
     <div className="main-shell"><header className="topbar"><div className="breadcrumb"><button className="icon-btn mobile-toggle" aria-label="메뉴 열기" onClick={() => setMobileMenu(true)}><Menu size={20}/></button><span>워크스페이스</span><ChevronRight size={14}/><b>{titles[safeView]}</b></div><div className="topbar-actions"><div className="search-box"><Search size={17}/><input ref={searchRef} aria-label="업무 검색" placeholder="업무를 검색하세요" value={search} onFocus={() => setSearchOpen(true)} onChange={e => { setSearch(e.target.value); setSearchOpen(true); }}/><kbd>Ctrl K</kbd>
       {searchOpen && <><button className="popover-dismiss" aria-label="검색 닫기" onClick={() => setSearchOpen(false)}/><div className="search-popover"><div className="popover-heading"><b>{search ? '검색 결과' : '최근 업무'}</b><button className="icon-btn" aria-label="검색 닫기" onClick={() => setSearchOpen(false)}><X size={16}/></button></div>{results.map(task => <button className="search-result" key={task.id} onClick={() => openTask(task.id)}><FileText size={18}/><span><strong>{task.title}</strong><small>{task.code} · {workspace.units.find(u => u.id === task.unitId)?.title}</small></span><ArrowUpRight size={15}/></button>)}{!results.length && <p className="search-empty">일치하는 업무가 없습니다.</p>}</div></>}</div>
       <button className="icon-btn bell-button" aria-label="알림" onClick={() => setNotifications(!notifications)}><Bell size={19}/>{workspace.notifications.some(n => !n.read) && <i/>}</button><span className="topbar-rule"/><button className="session-button" aria-label="역할 전환" onClick={() => { setLoginError(''); setSwitching(true); }}><UserRound size={16}/><span>역할 전환</span></button><button className="icon-btn" aria-label="로그아웃" disabled={busy} onClick={logout}><LogOut size={18}/></button></div>
-      {notifications && <div className="notification-popover"><div className="popover-heading"><b>알림</b><button className="text-link" onClick={() => command('notification.read', { all: true })}>모두 읽음</button></div>{workspace.notifications.length ? workspace.notifications.map(n => <button className="notification-row" key={n.id} onClick={async () => { await command('notification.read', { notificationId: n.id }); setNotifications(false); if (workspace.tasks.some(t => t.id === n.targetId)) openTask(n.targetId); else navigate('common'); }}><span className={'notification-dot ' + (n.read ? 'read' : '')}/><span><b>{n.title}</b><small>{n.description}</small></span></button>) : <p className="search-empty">새로운 알림이 없습니다.</p>}</div>}
+      {notifications && <div className="notification-popover"><div className="popover-heading"><b>알림</b><button className="text-link" onClick={() => command('notification.read', { all: true })}>모두 읽음</button></div>{workspace.notifications.length ? workspace.notifications.map(n => <button className="notification-row" key={n.id} onClick={async () => { await command('notification.read', { notificationId: n.id }); setNotifications(false); if (n.type === 'handover') navigate('handover'); else if (workspace.tasks.some(t => t.id === n.targetId)) openTask(n.targetId); else navigate('common'); }}><span className={'notification-dot ' + (n.read ? 'read' : '')}/><span><b>{n.title}</b><small>{n.description}</small></span></button>) : <p className="search-empty">새로운 알림이 없습니다.</p>}</div>}
       </header>
       <main className="main-content" aria-busy={busy}>
         {safeView === 'dashboard' && (isHead ? <DepartmentDashboard key={user.id} workspace={workspace} command={command} onOpenTask={openTask} onRefresh={loadWorkspace} onManage={() => navigate('department')} onEvaluate={() => navigate('performance')}/> : <Dashboard workspace={workspace} navigate={navigate} onOpenTask={openTask}/>)}
@@ -169,6 +170,7 @@ export default function Workspace() {
         {safeView === 'common' && <CommonWork key={user.id} workspace={workspace} command={command} onOpenTask={openTask} onRefresh={loadWorkspace} onGoPersonal={() => navigate('personal')}/>}
         {safeView === 'schedule' && <ScheduleView key={user.id} workspace={workspace} command={command} onOpenTask={openTask}/>}
         {safeView === 'performance' && <PerformanceView key={user.id} workspace={workspace} command={command} onOpenTask={openTask}/>}
+        {safeView === 'handover' && <PersonnelHandover key={user.id} workspace={workspace} command={command} busy={busy} onOpenTask={openTask}/>}
         {safeView === 'organization' && <OrganizationView key={user.id} workspace={workspace} command={command}/>}
         {safeView === 'admin' && <AdminView workspace={workspace} command={command}/>}
       </main>

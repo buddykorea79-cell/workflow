@@ -9,7 +9,7 @@ export interface UserIdentity { id: string; name: string; departmentId: string; 
 export interface WorkDivisionSnapshot { units: Unit[]; tasks: (TaskVersion & { id: string; code: string; status: DefinitionStatus; commonId?: string })[]; members: UserIdentity[] }
 export interface WorkDivisionConfirmation { version: number; confirmedBy: string; confirmedAt: string; snapshot: WorkDivisionSnapshot }
 export interface DepartmentWorkPlan { departmentId: string; status: 'draft' | 'confirmed'; version: number; confirmedBy?: string; confirmedAt?: string; reopenedBy?: string; reopenedAt?: string; reason?: string; snapshot?: WorkDivisionSnapshot; history?: WorkDivisionConfirmation[] }
-export interface Unit { id: string; title: string; departmentId: string; ownerId: string; description: string; color: string; icon: string; deletedAt?: string }
+export interface Unit { id: string; title: string; departmentId: string; ownerId: string; description: string; color: string; icon: string; deletedAt?: string; transferOriginUnitId?: string }
 export interface Card { purpose: string; stakeholders: string; evidence: string; responsibility: string; procedure: string; finance: string; documents: string; issues: string; handover: string }
 export interface WorkflowStep { id: string; title: string; role: 'primary' | 'support' | 'reviewer'; description: string; output: string; required: boolean; dependsOn: string[]; checklist: string[]; startDate?: string; dueDate?: string; scheduleDetails?: string; done?: boolean }
 export interface Expense { id: string; date: string; description: string; amount: number }
@@ -21,6 +21,20 @@ export interface StepExecution { id: string; stepId: string; title: string; role
 export interface Note { id: string; authorId: string; body: string; createdAt: string; stepId?: string }
 export interface Run { id: string; taskId: string; title: string; period: string; definitionVersion: number; departmentId: string; primaryId: string; supportIds: string[]; reviewerId: string; status: RunStatus; dueDate: string; startedAt: string; completedAt?: string; updatedAt?: string; steps: StepExecution[]; notes: Note[]; startDate?: string; scheduleDetails?: string; cycleNumber?: number; previousRunId?: string; cycleManaged?: boolean; workflowSnapshot?: WorkflowStep[] }
 export interface Handover { id: string; title: string; taskIds: string[]; runIds: string[]; fromId: string; toId: string; departmentId: string; targetDepartmentId: string; status: HandoverStatus; effectiveAt: string; appliedAt?: string; summary: string; pendingItems: string; nextAction: string; notes: string; checklist: { id: string; title: string; checked: boolean }[]; revision: number; approvedBy?: string; approvedAt?: string; acceptedBy?: string; acceptedAt?: string; acceptedRevision?: number; createdAt: string; feedback?: string }
+export interface WorkTransferUnit { unitId: string; title: string; ownerId: string }
+export interface WorkTransferTask { taskId: string; code: string; title: string; unitId: string; unitTitle: string; primaryId: string; version: number; updatedAt: string }
+export interface WorkTransferEvent { id: string; action: 'requested' | 'emergency' | 'approved' | 'rejected' | 'cancelled'; actorId: string; actorName: string; at: string; note: string }
+export interface WorkTransfer {
+  id: string; kind: 'emergency' | 'reassignment' | 'direct'; status: 'pending' | 'completed' | 'rejected' | 'cancelled';
+  departmentId: string; fromId: string; fromName: string; toId: string; toName: string; requestedBy: string; requestedByName: string;
+  reason: string; createdAt: string; unitIds: string[]; taskIds: string[]; units: WorkTransferUnit[]; tasks: WorkTransferTask[]; runIds: string[];
+  approvedBy?: string; approvedAt?: string; resolvedBy?: string; resolvedAt?: string; resolutionReason?: string; appliedAt?: string;
+  unitMappings?: { fromUnitId: string; toUnitId: string; title: string }[];
+  executionOnly?: { runId: string; taskId: string; taskTitle: string; fromId: string; toId: string }[];
+  executions?: { runId: string; taskId: string; taskTitle: string; primaryId: string; reviewerId: string; departmentId: string; definitionVersion: number }[];
+  requestedRunIds?: string[];
+  reviewerChanges?: { taskId: string; runId?: string; fromId: string; toId: string }[]; events: WorkTransferEvent[];
+}
 export type CommonStage = 'team_pending' | 'person_pending' | 'registration_pending' | 'in_progress' | 'completed';
 export type CommonExecutionStatus = 'not_started' | 'in_progress' | 'review' | 'completed' | 'paused' | 'archived' | 'deleted';
 export type DirectiveIssuer = 'minister' | 'vice_minister' | 'office_head' | 'bureau_head';
@@ -41,6 +55,6 @@ export interface Delegation { id: string; taskId: string; fromId: string; toId: 
 export interface AuditEvent { id: string; actorId: string; action: string; targetType: string; targetId: string; title: string; detail: string; departmentId: string; createdAt: string }
 export interface Notification { id: string; title: string; description: string; type: 'handover' | 'task' | 'common'; targetId: string; read: boolean; userId: string }
 export interface Attachment { id: string; taskId: string; name: string; size: number; mime: string; sha256: string; storageKey: string; storageProvider?: 'local' | 'neon'; storageBucket?: string; status: 'quarantined' | 'test_allowed'; uploadedBy: string; createdAt: string }
-export interface WorkspaceData { revision: number; users: User[]; departments: Department[]; units: Unit[]; tasks: Task[]; runs: Run[]; handovers: Handover[]; commonTasks: CommonTask[]; sources: Source[]; performances: Performance[]; delegations: Delegation[]; audit: AuditEvent[]; notifications: Notification[]; attachments: Attachment[]; processedRequests: { id: string; fingerprint: string; actorId: string }[]; releases?: Release[]; departmentWorkPlans?: DepartmentWorkPlan[]; unitScorePlans?: UnitScorePlan[]; unitEvaluations?: UnitEvaluation[] }
+export interface WorkspaceData { revision: number; users: User[]; departments: Department[]; units: Unit[]; tasks: Task[]; runs: Run[]; handovers: Handover[]; workTransfers?: WorkTransfer[]; commonTasks: CommonTask[]; sources: Source[]; performances: Performance[]; delegations: Delegation[]; audit: AuditEvent[]; notifications: Notification[]; attachments: Attachment[]; processedRequests: { id: string; fingerprint: string; actorId: string }[]; releases?: Release[]; departmentWorkPlans?: DepartmentWorkPlan[]; unitScorePlans?: UnitScorePlan[]; unitEvaluations?: UnitEvaluation[] }
 export interface Workspace extends Omit<WorkspaceData, 'processedRequests'> { currentUser: User; identities?: UserIdentity[]; departmentDirectory?: Department[]; performanceSubmissionStatuses?: PerformanceSubmissionStatus[]; mode: 'local' | 'connected'; integrations: { database: string; auth: string; storage: string; bizrouter: string; law: string }; serverTime: string }
 export interface Command { type: string; payload: Record<string, unknown>; expectedRevision: number; requestId: string }
