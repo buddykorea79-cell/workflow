@@ -29,13 +29,11 @@ test('ordinary role defaults select data department accounts including its admin
   }
 });
 
-test('common demonstration only lists planning-department members with common permission', () => {
-  const department = demoDefaultDepartment('common');
-  const candidates = demoCandidates(users, 'common', 'dept-support');
-  assert.equal(department, 'dept-plan');
-  assert.deepEqual(candidates.map(item => item.id), ['u-jiho']);
-  assert.equal(selectDemoUser(candidates, 'common', 'u-doyun')?.id, 'u-jiho');
-  assert.deepEqual(demoCandidates(users.map(item => item.id === 'u-jiho' ? { ...item, active: false } : item), 'common', department), []);
+test('work officers use their organization role regardless of retired common permission', () => {
+  const candidates = demoCandidates(users, 'member', 'dept-plan');
+  assert.deepEqual(candidates.map(item => item.id), ['u-plan-other', 'u-jiho']);
+  assert.deepEqual(demoCandidates(users.map(item => ({ ...item, commonTaskPermission: false })), 'member', 'dept-plan').map(item => item.id), ['u-plan-other', 'u-jiho']);
+  assert.deepEqual(demoCandidates(users, 'common' as DemoRole, 'dept-plan'), []);
 });
 
 test('manual department selection stays scoped and stale account choices cannot cross departments', () => {

@@ -35,7 +35,7 @@ export function organizationUserChangeIssue(state: OrganizationState, actor: Use
   if (wasActive && ['head', 'manager'].includes(current.role) && (!remainsActive || next.role !== current.role || next.departmentId !== current.departmentId) && !state.users.some(user => user.id !== current.id && user.departmentId === current.departmentId && user.role === current.role && isOrganizationUserActive(user, now))) return issue('DEPARTMENT_OFFICER_REQUIRED', `${current.role === 'head' ? '부서장' : '부서 담당자'}를 먼저 후임으로 지정해 주세요. 기존 부서에 활성 담당자를 최소 1명 유지해야 합니다.`);
   const responsibilities = organizationResponsibilities(state, current.id, now);
   if ((next.departmentId !== current.departmentId || wasActive && !remainsActive) && responsibilities.length) return issue('PERSONNEL_RESPONSIBILITIES_REMAIN', `남은 업무 책임 ${responsibilities.length}건을 인수인계하거나 해제한 뒤 전보·비활성화를 처리해 주세요.`);
-  const assignmentChanged = next.role !== current.role || next.team !== current.team || !!next.commonTaskPermission !== !!current.commonTaskPermission;
+  const assignmentChanged = next.role !== current.role || next.team !== current.team;
   if (assignmentChanged) {
     if (responsibilities.some(item => item.kind === 'transfer')) return issue('PERSONNEL_TRANSFER_PENDING', '진행 중인 인수인계를 먼저 완료하거나 취소한 뒤 팀·역할을 변경해 주세요.');
     if (['head', 'admin'].includes(next.role) && responsibilities.some(item => ['unit', 'primary', 'run_primary'].includes(item.kind))) return issue('PERSONNEL_ROLE_CONFLICT', '부서장·관리자로 변경하기 전에 개인 소유 업무와 진행 회차를 인수인계해 주세요.');

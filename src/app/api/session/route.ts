@@ -12,7 +12,7 @@ export async function GET(request: NextRequest) {
       const signedUser = signedId ? activeUser(state, signedId) : undefined;
       const visible = state.users.filter(user => user.active && (!signedUser || signedUser.role === 'admin' || user.departmentId === signedUser.departmentId));
       return {
-        users: visible.map(({ id, name, initials, departmentId, team, role, title, color, active, endsAt, commonTaskPermission }) => ({ id, name, initials, departmentId, team, role, title, color, active, endsAt, commonTaskPermission: role === 'member' && departmentId === 'dept-plan' && !!commonTaskPermission })),
+        users: visible.map(({ id, name, initials, departmentId, team, role, title, color, active, endsAt }) => ({ id, name, initials, departmentId, team, role, title, color, active, endsAt })),
         departments: state.departments.filter(department => !signedUser || signedUser.role === 'admin' || department.id === signedUser.departmentId),
       };
     });

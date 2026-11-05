@@ -49,7 +49,7 @@ function recipient(state: WorkspaceData, toId: string, departmentId: string, now
   const person = state.users.find(user => user.id === toId);
   if (!person || !isActive(person, now)) return fail(422, 'TRANSFER_RECIPIENT_INACTIVE', '현재 재직 중인 인수자를 선택해 주세요.');
   if (person.departmentId !== departmentId) return fail(422, 'TRANSFER_RECIPIENT_SCOPE', '업무 소속 부서의 구성원에게만 인수인계할 수 있습니다.');
-  if (emergency ? person.role !== 'manager' : !['member', 'lead', 'manager'].includes(person.role)) return fail(422, 'TRANSFER_RECIPIENT_ROLE', emergency ? '긴급 이관을 받을 부서 담당자를 선택해 주세요.' : '개인 담당자·팀장·부서 담당자 중 인수자를 선택해 주세요.');
+  if (emergency ? person.role !== 'manager' : !['member', 'lead', 'manager'].includes(person.role)) return fail(422, 'TRANSFER_RECIPIENT_ROLE', emergency ? '긴급 이관을 받을 부서 담당자를 선택해 주세요.' : '업무 담당자·팀장·부서 담당자 중 인수자를 선택해 주세요.');
   return person;
 }
 

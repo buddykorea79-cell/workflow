@@ -1,3 +1,4 @@
+import { approveLatestCommon } from './common-approval-fixture';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
@@ -113,7 +114,7 @@ test('step completion targets the newest active execution and only the reviewer 
 
 test('a department directive stays uneditable until the assignee registers the same generated task', () => {
   const data = createSeed(now);
-  dispatch(data, 'u-minseo', 'common.create', { title: '시연 지시사항', description: '담당 부서에서 후속 업무를 수행합니다.', dueDate: '2026-11-30', frequency: 'once', requiredSteps: ['자료 정리', '결과 검토'], departmentIds: ['dept-plan'], kind: 'directive', directiveIssuer: 'bureau_head', instructedOn: '2026-10-01' });
+  dispatch(data, 'u-minseo', 'common.create', { title: '시연 지시사항', description: '담당 부서에서 후속 업무를 수행합니다.', dueDate: '2026-11-30', frequency: 'once', requiredSteps: ['자료 정리', '결과 검토'], departmentIds: ['dept-plan'], kind: 'directive', directiveIssuer: 'bureau_head', instructedOn: '2026-10-01' }); approveLatestCommon(data, now);
   const common = data.commonTasks[0]; const distribution = common.distributions[0]; const taskId = distribution.taskId!;
   assert.ok(taskId);
   rejects('REGISTRATION_REQUIRED', () => dispatch(data, 'u-minseo', 'task.configure', { taskId, budget: 1000 }));

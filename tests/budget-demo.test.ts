@@ -1,3 +1,4 @@
+import { approveLatestCommon } from './common-approval-fixture';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
@@ -85,13 +86,13 @@ test('budget demo: task, unit, role, workflow snapshot, run, and distribution re
 
 test('budget demo: the budget officer remains a member with common creation but no department/team allocation privilege', () => {
   const state = createSeed(now); const officer = state.users.find(user => user.id === 'u-jiho')!;
-  assert.equal(officer.role, 'member'); assert.equal(officer.departmentId, 'dept-plan'); assert.equal(officer.title, '예산 담당 주무관'); assert.equal(officer.commonTaskPermission, true);
+  assert.equal(officer.role, 'member'); assert.equal(officer.departmentId, 'dept-plan'); assert.equal(officer.title, '예산 담당 주무관'); assert.equal(officer.commonTaskPermission, undefined);
   const own = getWorkspace(state, officer.id, now);
   assert.equal(own.tasks.filter(task => task.id.startsWith(BUDGET_DEMO_PREFIX) && task.primaryId === officer.id).length, 6);
   assert.equal(own.commonTasks.filter(common => common.managerId === officer.id && common.id.startsWith(BUDGET_DEMO_PREFIX)).length, 2);
   assert.equal(own.tasks.some(task => task.id === 'budget-demo-task-data-demand'), false);
   assert.equal(getWorkspace(state, 'u-support-member', now).tasks.filter(task => task.id.startsWith(BUDGET_DEMO_PREFIX)).length, 3);
-  dispatch(state, officer.id, 'common.create', { title: '예산 담당자가 추가한 공통업무', description: '일반 직원의 부가 권한 확인', dueDate: '2026-12-31', frequency: 'once', requiredSteps: ['자료 준비', '부서장 검토'], departmentIds: ['dept-plan'] });
+  dispatch(state, officer.id, 'common.create', { title: '예산 담당자가 추가한 공통업무', description: '업무 담당자의 승인 요청 확인', dueDate: '2026-12-31', frequency: 'once', requiredSteps: ['자료 준비', '부서장 검토'], departmentIds: ['dept-plan'] }); approveLatestCommon(state, now);
   const common = state.commonTasks[0]; const distributionId = common.distributions[0].id;
   rejects('DEPARTMENT_ASSIGNMENT_DENIED', () => dispatch(state, officer.id, 'common.assignTeam', { commonId: common.id, distributionId, team: '예산팀', leadId: 'u-budget-lead' }));
   dispatch(state, 'u-minseo', 'common.assignTeam', { commonId: common.id, distributionId, team: '예산팀', leadId: 'u-budget-lead' });

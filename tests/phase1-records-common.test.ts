@@ -1,3 +1,4 @@
+import { approveLatestCommon } from './common-approval-fixture';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
@@ -66,7 +67,7 @@ test('common delivery: confirmed sending and receiving departments can receive i
   dispatch(state, 'u-head', 'department.confirm');
   const plans = structuredClone(state.departmentWorkPlans), units = structuredClone(state.units), tasks = structuredClone(state.tasks);
   for (const kind of ['common', 'directive']) {
-    dispatch(state, 'u-jiho', 'common.create', { kind, title: '새 긴급 요청', description: '확정 후에도 접수', departmentIds: ['dept-support'], dueDate: '2026-11-30', frequency: 'once', requiredSteps: ['자료 확인', '부서장 검토'], ...(kind === 'directive' ? { directiveIssuer: 'minister', instructedOn: '2026-11-05' } : {}) });
+    dispatch(state, 'u-jiho', 'common.create', { kind, title: '새 긴급 요청', description: '확정 후에도 접수', departmentIds: ['dept-support'], dueDate: '2026-11-30', frequency: 'once', requiredSteps: ['자료 확인', '부서장 검토'], ...(kind === 'directive' ? { directiveIssuer: 'minister', instructedOn: '2026-11-05' } : {}) }); approveLatestCommon(state, now);
     const common = state.commonTasks[0], distribution = common.distributions[0];
     assert.equal(distribution.status, 'pending');
     assert.equal(distribution.taskId, undefined);
@@ -77,6 +78,7 @@ test('common delivery: confirmed sending and receiving departments can receive i
   assert.deepEqual(state.tasks, tasks);
   const commonId = state.commonTasks[0].id;
   dispatch(state, 'u-jiho', 'common.distribute', { commonId, departmentIds: ['dept-plan'] });
+  approveLatestCommon(state, now, commonId);
   assert.equal(state.commonTasks[0].distributions.length, 2);
   assert.deepEqual(state.units, units);
   assert.deepEqual(state.tasks, tasks);

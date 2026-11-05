@@ -1,3 +1,4 @@
+import { approveLatestCommon } from './common-approval-fixture';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
@@ -15,7 +16,7 @@ function dispatch(state: WorkspaceData, actor: string, type: string, input: Reco
   Object.assign(state, candidate);
 }
 function rejects(code: string, action: () => void) { assert.throws(action, error => error instanceof DomainError && error.code === code); }
-function directive(state: WorkspaceData, extra: Record<string, unknown> = {}, actor = 'u-doyun') { dispatch(state, actor, 'common.create', { ...payload, ...extra }); return state.commonTasks[0].id; }
+function directive(state: WorkspaceData, extra: Record<string, unknown> = {}, actor = 'u-doyun') { dispatch(state, actor, 'common.create', { ...payload, ...extra }); approveLatestCommon(state, now); return state.commonTasks[0].id; }
 function common(state: WorkspaceData, id: string) { return state.commonTasks.find(item => item.id === id)!; }
 function registered(state: WorkspaceData, commonId: string) {
   const distributionId = common(state, commonId).distributions.find(item => item.departmentId === 'dept-support')!.id;
@@ -41,12 +42,13 @@ test('directives: new directives require a known issuer and valid instruction da
 
 test('directives: planning team jointly creates and manages minister/vice register without unrelated common or assignment authority', () => {
   const state = createSeed(now), person = state.users.find(user => user.id === 'u-seoyeon')!;
-  assert.equal(person.commonTaskPermission, false); assert.equal(isDirectiveCoordinator(state, person, now), true);
+  assert.equal(person.commonTaskPermission, undefined); assert.equal(isDirectiveCoordinator(state, person, now), true);
   const id = directive(state, {}, person.id); assert.equal(common(state, id).managerId, person.id);
-  rejects('COMMON_PERMISSION_REQUIRED', () => directive(state, { kind: 'common' }, person.id));
-  rejects('COMMON_PERMISSION_REQUIRED', () => directive(state, { directiveIssuer: 'office_head' }, person.id));
+  assert.equal(common(state, directive(state, { kind: 'common' }, person.id)).managerId, person.id);
+  assert.equal(common(state, directive(state, { directiveIssuer: 'office_head' }, person.id)).managerId, person.id);
   const foreignId = directive(state, { directiveIssuer: 'vice_minister' });
   dispatch(state, person.id, 'common.distribute', { commonId: foreignId, departmentIds: ['dept-innovation'] });
+  approveLatestCommon(state, now, foreignId);
   assert.equal(common(state, foreignId).distributions.length, 2);
   const distributionId = common(state, foreignId).distributions[0].id;
   rejects('DEPARTMENT_ASSIGNMENT_DENIED', () => dispatch(state, person.id, 'common.assignTeam', { commonId: foreignId, distributionId, leadId: 'u-support-lead', team: '데이터팀' }));

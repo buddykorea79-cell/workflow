@@ -37,7 +37,7 @@ const additions: [id: string, name: string, departmentId: string, team: string, 
 ];
 
 export function organizationDemoUsers(): User[] {
-  return additions.map(([id, name, departmentId, team, role, title], index) => ({ id, name, initials: name.slice(0, 1), departmentId, team, role, title, color: 'stone', active: true, commonTaskPermission: false, email: `${id.slice(2)}@ieum.example`, phone: `02-0000-${1101 + index}` }));
+  return additions.map(([id, name, departmentId, team, role, title], index) => ({ id, name, initials: name.slice(0, 1), departmentId, team, role, title, color: 'stone', active: true, email: `${id.slice(2)}@ieum.example`, phone: `02-0000-${1101 + index}` }));
 }
 
 /** Explicit one-time roster setup. Call inside transaction() for persisted data.

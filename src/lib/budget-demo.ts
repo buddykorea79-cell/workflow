@@ -30,7 +30,7 @@ export function applyBudgetDemo(state: WorkspaceData, now = new Date()): BudgetD
   const alreadyApplied = state.audit.some(event => event.action === 'demo.budget.setup' && event.targetId === BUDGET_DEMO_MARKER);
   if (!alreadyApplied) {
     const budgetOfficer = state.users.find(user => user.id === 'u-jiho')!;
-    if (budgetOfficer.title !== '예산 담당 주무관' || !budgetOfficer.commonTaskPermission) { budgetOfficer.title = '예산 담당 주무관'; budgetOfficer.commonTaskPermission = true; result.updatedUsers++; }
+    if (budgetOfficer.title !== '예산 담당 주무관') { budgetOfficer.title = '예산 담당 주무관'; result.updatedUsers++; }
   }
 
   const units: Unit[] = [

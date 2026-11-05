@@ -6,7 +6,7 @@ import type { User, Workspace } from '@/lib/types';
 import { isOrganizationUserActive, organizationResponsibilities, organizationUserChangeIssue } from '@/lib/organization-management';
 import { Badge, Button, Field, Modal, type CommandFn } from './ui';
 
-const roleNames: Record<User['role'], string> = { admin: '시스템 관리자', head: '부서장', manager: '부서 담당자', lead: '팀장', member: '개인 담당자' };
+const roleNames: Record<User['role'], string> = { admin: '시스템 관리자', head: '부서장', manager: '부서 담당자', lead: '팀장', member: '업무 담당자' };
 type Props = { workspace: Workspace; command: CommandFn; mode: 'department' | 'user' | User; onClose: () => void };
 
 export function OrganizationEditor({ workspace: w, command, mode, onClose }: Props) {
@@ -19,7 +19,6 @@ export function OrganizationEditor({ workspace: w, command, mode, onClose }: Pro
   const [title, setTitle] = useState(existing?.title || '');
   const [email, setEmail] = useState(existing?.email || '');
   const [phone, setPhone] = useState(existing?.phone || '');
-  const [commonTaskPermission, setCommonTaskPermission] = useState(!!existing?.commonTaskPermission);
   const [active, setActive] = useState(existing ? isOrganizationUserActive(existing, new Date(w.serverTime)) : true);
   const [reason, setReason] = useState('');
   const [saving, setSaving] = useState(false);
@@ -27,7 +26,7 @@ export function OrganizationEditor({ workspace: w, command, mode, onClose }: Pro
   if (w.currentUser.role !== 'admin') return null;
   const now = new Date(w.serverTime);
   const responsibilities = existing ? organizationResponsibilities(w, existing.id, now) : [];
-  const next = existing ? { ...existing, name: name.trim(), departmentId, team: team.trim(), role, title: title.trim(), email: email.trim().toLowerCase() || undefined, phone: phone.trim() || undefined, commonTaskPermission, active } : undefined;
+  const next = existing ? { ...existing, name: name.trim(), departmentId, team: team.trim(), role, title: title.trim(), email: email.trim().toLowerCase() || undefined, phone: phone.trim() || undefined, active } : undefined;
   if (next?.active && existing && !isOrganizationUserActive(existing, now)) delete next.endsAt;
   const issue = existing && next ? organizationUserChangeIssue(w, w.currentUser, existing, next, now) : undefined;
   const personnelChanges = existing ? w.audit.filter(event => event.targetId === existing.id && event.action === 'organization.userUpdate').slice(0, 10) : [];
@@ -36,7 +35,7 @@ export function OrganizationEditor({ workspace: w, command, mode, onClose }: Pro
   const submit = async (event: React.FormEvent) => {
     event.preventDefault(); if (saving || issue) return;
     setSaving(true); setError('');
-    const payload = mode === 'department' ? { name, shortName } : { name, departmentId, team, role, title, email, phone, commonTaskPermission, ...(existing ? { userId: existing.id, active, reason } : {}) };
+    const payload = mode === 'department' ? { name, shortName } : { name, departmentId, team, role, title, email, phone, ...(existing ? { userId: existing.id, active, reason } : {}) };
     try {
       if (await command(mode === 'department' ? 'organization.departmentCreate' : existing ? 'organization.userUpdate' : 'organization.userCreate', payload)) onClose();
       else setError('저장하지 못했습니다. 화면 위 안내 메시지를 확인하고 입력값 또는 남은 업무 책임을 정리해 주세요.');
@@ -61,7 +60,6 @@ export function OrganizationEditor({ workspace: w, command, mode, onClose }: Pro
           <Field label="이메일 · 선택"><input type="email" maxLength={254} value={email} onChange={event => setEmail(event.target.value)} autoComplete="off" /></Field>
           <Field label="전화번호 · 선택"><input type="tel" maxLength={30} value={phone} onChange={event => setPhone(event.target.value)} placeholder="예: 02-0000-0000" /></Field>
         </div>
-        <label className="organization-permission"><input type="checkbox" checked={role === 'admin' || commonTaskPermission} disabled={role === 'admin'} onChange={event => setCommonTaskPermission(event.target.checked)} /><span>공통업무 등록·총괄 권한</span></label>
         {existing && <>
           <section className="organization-responsibilities" aria-label="인사 변경 전 남은 업무 책임"><header><h3>남은 업무 책임</h3><Badge tone={responsibilities.length ? 'warning' : 'success'}>{responsibilities.length}건</Badge></header>
             <p>전보·비활성화는 아래 책임을 모두 정리한 후 저장할 수 있습니다. 팀·역할 변경도 현재 배정 자격을 유지해야 합니다.</p>

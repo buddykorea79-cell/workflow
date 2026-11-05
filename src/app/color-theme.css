@@ -1,6 +1,6 @@
 /* Blue brand accents with green completion and coral attention states. */
 :root {
-  --brand-primary: #1863dc;
+  --brand-primary: #205cd5;
   --brand-deep: #153a70;
   --success-green: #003c33;
   --brand-primary-hover: #124fb5;
@@ -13,6 +13,126 @@
   --pale-coral: #fff0eb;
   --soft-stone: #eeece7;
   --brand-line: #d6e2fa;
+}
+
+/* Shared reading system: clear surfaces, stable type sizes and visible hierarchy. */
+body { letter-spacing: -.015em; }
+body h1, body h2, body h3 { color: var(--ink); letter-spacing: -.025em; }
+button, input, select, textarea { line-height: 1.5; }
+body input:not([type=checkbox]):not([type=radio]), body select, body textarea {
+  background: #fff; border-color: #cbd6e4; border-radius: 10px; font-size: 15px; min-height: 44px;
+}
+body input::placeholder, body textarea::placeholder { color: #65758b; opacity: 1; }
+body input:focus, body select:focus, body textarea:focus { outline: 2px solid #205cd5; outline-offset: 1px; }
+body .btn { border-radius: 10px; font-size: 15px; min-height: 42px; padding: 10px 16px; font-weight: 650; }
+body .btn-secondary { border-color: #cbd6e4; color: #253c5b; }
+body .btn-ghost { background: #eaf0f7; color: #344b6c; }
+body .badge { font-size: 13px; font-weight: 650; padding: 5px 9px; border-radius: 6px; }
+body .badge-soft { background: #edf2f8; color: #405571; }
+body .badge-outline { color: #405571; border-color: #cbd6e4; }
+body .tabs { border-radius: 11px; padding: 4px; gap: 4px; background: #e9eef6; }
+body .tabs button { border-radius: 8px; min-height: 38px; padding: 9px 16px; color: #445774; font-size: 15px; font-weight: 550; }
+body .tabs button.active, body .tabs button.selected, body .tabs button[aria-selected=true] { background: #fff; color: #164ba8; box-shadow: 0 1px 4px #183c7014; font-weight: 700; }
+body .panel { border-color: var(--line); border-radius: 16px; box-shadow: 0 2px 5px #1c396b03; }
+body .page-heading h1 { font-size: clamp(26px, 2.5vw, 32px); font-weight: 730; }
+body .page-heading p:not(.eyebrow) { font-size: 15px; color: #52637a; line-height: 1.7; }
+body .eyebrow { font-size: 14px; color: #52637a; font-weight: 600; }
+body .data-table th { background: #f0f4f9; color: #415573; font-size: 14px; font-weight: 650; padding: 15px 18px; border-bottom: 1px solid var(--line); }
+body .data-table td { font-size: 15px; padding: 17px 18px; line-height: 1.65; }
+body .data-table tbody tr:hover { background: #f7faff; }
+body .data-table td small { font-size: 14px; color: #52637a; }
+body .field { font-size: 15px; color: #334965; font-weight: 650; }
+body .field > small { font-size: 14px; font-weight: 400; color: #52637a; }
+body .empty-state p { font-size: 15px; max-width: 420px; }
+
+/* Navigation stays distinct from the work canvas. */
+body .sidebar { padding: 28px 16px 16px; border-right-color: #dce4ee; background: #fff; }
+body .brand-button { margin-left: 12px; margin-bottom: 27px; }
+body .org-switch { border: 1px solid #dce4ee; border-radius: 12px; background: #f6f8fc; margin-bottom: 24px; }
+body .org-switch b { font-size: 15px; white-space: normal; line-height: 1.45; }
+body .org-switch small, body .profile-button small { font-size: 13px; color: #52637a; }
+body .nav-group-label { font-size: 13px; color: #64748b; font-weight: 650; margin-bottom: 10px; }
+body .sidebar .nav-item { min-height: 46px; padding: 11px 13px; border-radius: 10px; font-size: 15px; font-weight: 550; color: #405571; gap: 10px; border: 1px solid transparent; margin-bottom: 4px; }
+body .sidebar .nav-item.active { background: #eaf1ff; border-color: #d0e0fc; color: #164ba8; font-weight: 750; box-shadow: inset 3px 0 0 #205cd5; }
+body .sidebar .nav-item.active .nav-count { background: #205cd5; color: #fff; }
+body .sidebar .nav-count { min-width: 22px; height: 22px; border-radius: 7px; font-size: 12px; }
+body .sidebar-tail { padding-top: 24px; }
+body .profile-button { border-radius: 12px; border: 1px solid #e1e7f0; background: #f7f9fc; }
+body .topbar { height: 72px; padding: 0 32px; border-bottom-color: #dce4ee; }
+body .breadcrumb { color: #52637a; font-size: 14px; }
+body .breadcrumb b { font-weight: 650; color: #243b5a; }
+body .session-button { font-size: 14px; color: #425775; }
+body .main-content { padding: 32px; max-width: 1680px; }
+body .workspace-footer { background: #fff; font-size: 13px; color: #52637a; padding: 17px 32px; }
+body .search-box input { font-size: 14px !important; }
+body .modal { border-radius: 18px; background: #fff; box-shadow: 0 24px 80px #0e284f29; }
+body .modal-heading { background: #f7f9fc; padding: 24px 28px; }
+body .modal-heading h2 { font-size: 24px; font-weight: 700; }
+body .modal-heading p { font-size: 15px; }
+body .modal-content { background: #fff; }
+
+/* Overview and entry pages share the same contrast and spacing. */
+body .stat-card { border: 1px solid #dce4ee; border-radius: 16px; background: #fff; padding: 24px; }
+body .stats-grid .stat-card[data-accent] { background: #fff; }
+body .stats-grid .stat-card:hover { background: #f7faff; border-color: #b9cdf1; }
+body .stat-card > div { font-size: 15px; font-weight: 600; color: #415573; }
+body .stat-card > strong { font-size: 38px; font-weight: 700; }
+body .stat-card p { font-size: 14px; color: #52637a; white-space: normal; }
+body .dashboard-task { padding: 21px 0; }
+body .dashboard-task-info h3 { font-size: 16px; font-weight: 650; white-space: normal; }
+body .dashboard-task-info > span, body .dashboard-task-info small { color: #52637a; font-size: 14px; }
+body .flow-callout { border: 1px solid #d4e2f9; border-radius: 16px; }
+body .flow-callout p:not(.eyebrow) { color: #415573; font-size: 15px; }
+body .flow-chips { flex-wrap: wrap; font-size: 14px; }
+body .landing { background: #f5f7fb; }
+body .landing-nav { background: #fff; border: 1px solid #dce4ee; border-radius: 16px; }
+body .login-card { border-radius: 18px; border-color: #d2deed; box-shadow: 0 16px 48px #173a6809; }
+body .hero-description { color: #415573; font-size: 17px; font-weight: 400; }
+body .role-option { border-radius: 10px; font-size: 14px; font-weight: 600; color: #415573; }
+body .login-selects select { font-size: 14px; }
+body .login-footnote { color: #52637a; font-size: 14px; }
+
+/* Task details use the same surface and status language as the workspace. */
+body .td-panel { background: #fff; }
+body .td-header, body .td-tabs { background: #fff; }
+body .td-content { background: #f5f7fb; }
+body .td-tabs { gap: 20px; }
+body .td-tabs button { font-size: 15px; font-weight: 550; color: #52637a; min-height: 52px; }
+body .td-tabs button.active { color: #164ba8; font-weight: 750; }
+body .td-tabs button.active::after { background: #205cd5; }
+body .td-meta-tags span { background: #edf2f8; color: #405571; }
+body .td-btn { font-size: 14px !important; border-radius: 9px; }
+body .td-description { font-size: 15px; color: #52637a; }
+body .td-status-draft, body .td-status-revision { background: #edf2f8; color: #405571; }
+body .td-status-confirmed, body .td-run-completed { background: #e8f4ed; color: #236144; }
+body .td-status-review, body .td-badge-warning { background: #fff3dd; color: #855811; }
+body .cw-approval-section, body .cw-work, body .cw-query-panel { background: #fff; border-radius: 16px; }
+
+@media (min-width: 1181px) {
+  :root { --sidebar: 252px; }
+}
+@media (min-width: 761px) and (max-width: 1180px) {
+  :root { --sidebar: 232px; }
+  body .sidebar { padding-left: 10px; padding-right: 10px; }
+  body .main-content { padding: 26px 24px; }
+  body .topbar { padding: 0 24px; }
+}
+@media (max-width: 760px) {
+  body .sidebar { width: 262px; }
+  body .main-content { padding: 24px 16px; }
+  body .topbar { height: 64px; padding: 0 14px; gap: 8px; }
+  body .topbar .breadcrumb b { font-size: 14px; }
+  body .search-box { display: none; }
+  body .page-heading { gap: 16px; }
+  body .page-heading h1 { font-size: 27px; }
+  body .stat-card { padding: 18px 16px; }
+  body .stat-card > strong { font-size: 32px; }
+  body .stat-card p { font-size: 13px; }
+  body .workspace-footer { padding: 18px 16px; }
+  body .modal-heading { padding: 20px; }
+  body .modal-heading h2 { font-size: 22px; }
+  body .modal-content { padding: 20px; }
+  body .td-tabs { gap: 18px; padding-left: 20px; padding-right: 20px; }
 }
 
 ::selection { background: #dce8ff; }

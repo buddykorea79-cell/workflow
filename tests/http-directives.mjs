@@ -27,6 +27,15 @@ async function command(userId, type, payload, expected = 200) {
   const state = await workspace(userId);
   return (await request('/api/commands', { user: userId, method: 'POST', body: { type, payload, expectedRevision: state.revision, requestId: randomUUID() }, expected })).data;
 }
+async function approveCommon(authorId, commonId) {
+  const common = (await workspace(authorId)).commonTasks.find(item => item.id === commonId);
+  const approval = common?.approvalRequests?.find(item => item.status === 'pending');
+  assert.ok(approval, 'A pending request must exist before source department-head approval.');
+  const sourceHead = directory.users.find(user => user.departmentId === approval.departmentId && user.role === 'head' && user.active);
+  assert.ok(sourceHead, 'The original author department must have an active head.');
+  await command(sourceHead.id, 'common.approve', { commonId, requestId: approval.id });
+  return workspace(authorId);
+}
 
 const { data: directory } = await request('/api/session');
 const planning = directory.departments.find(item => item.name === '기획재정담당관실');
@@ -38,12 +47,12 @@ const member = directory.users.find(user => user.departmentId === support.id && 
 const lead = directory.users.find(user => user.departmentId === support.id && user.role === 'lead' && user.team === member?.team);
 const head = directory.users.find(user => user.departmentId === support.id && user.role === 'head');
 const coordinator = directory.users.find(user => user.departmentId === planning.id && user.team === '기획팀' && user.role === 'lead');
-const coordinatorMember = directory.users.find(user => user.departmentId === planning.id && user.team === '기획팀' && user.role === 'member' && !user.commonTaskPermission);
+const coordinatorMember = directory.users.find(user => user.departmentId === planning.id && user.team === '기획팀' && user.role === 'member');
 const outsider = directory.users.find(user => user.departmentId === innovation.id && user.role === 'member');
 assert.ok(owner && member && lead && head && coordinator && coordinatorMember && outsider, 'Expected role fixtures are present.');
 await Promise.all([owner, member, lead, head, coordinator, coordinatorMember, outsider].map(user => login(user.id)));
 let state = await workspace(owner.id);
-assert.equal(state.currentUser.commonTaskPermission, true, 'The authenticated owner must have common-task management permission.');
+assert.equal(state.currentUser.role, 'manager', 'The authenticated author uses an ordinary organizational role.');
 const today = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Seoul', year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date(state.serverTime));
 const month = today.slice(0, 7);
 function shiftedMonth(delta) { const [year, number] = month.split('-').map(Number); return new Date(Date.UTC(year, number - 1 + delta, 1)).toISOString().slice(0, 7); }
@@ -59,11 +68,17 @@ state = await command(owner.id, 'common.create', create);
 const commonId = state.commonTasks.find(item => item.title === create.title).id;
 const commonOf = w => w.commonTasks.find(item => item.id === commonId);
 const distributionOf = w => commonOf(w)?.distributions.find(item => item.departmentId === support.id);
+assert.equal(commonOf(state).publicationStatus, 'pending');
+assert.equal(commonOf(state).distributions.length, 0);
+assert.equal(state.tasks.some(item => item.commonId === commonId), false);
+assert.equal((await workspace(coordinator.id)).commonTasks.some(item => item.id === commonId), false);
+pass('Unapproved directives create neither recipient work nor central visibility');
+state = await approveCommon(owner.id, commonId);
 const distributionId = distributionOf(state).id, taskId = distributionOf(state).taskId;
 assert.equal(commonOf(state).directiveIssuer, 'minister');
 assert.equal(commonOf(state).instructedOn, instructedOn);
 assert.ok(taskId);
-pass('Directive metadata persists and department tasks are created');
+pass('Source department-head approval preserves directive metadata and creates department tasks');
 
 for (const user of [coordinator, coordinatorMember]) {
   const central = await workspace(user.id);
@@ -82,18 +97,30 @@ pass('Receiving departments remain scoped and cannot manage another author’s d
 
 state = await command(owner.id, 'common.create', { ...create, title: `${marker} 국장 지시사항`, directiveIssuer: 'bureau_head', departmentIds: [support.id] });
 const localId = state.commonTasks.find(item => item.title === `${marker} 국장 지시사항`).id;
+state = await approveCommon(owner.id, localId);
 assert.equal((await workspace(coordinator.id)).commonTasks.some(item => item.id === localId), false);
-await command(coordinatorMember.id, 'common.create', { ...create, title: `${marker} 일반업무 권한 검사`, kind: 'common', directiveIssuer: undefined, instructedOn: undefined }, 403);
+state = await command(coordinatorMember.id, 'common.create', { ...create, title: `${marker} 일반업무 작성 검사`, kind: 'common', directiveIssuer: undefined, instructedOn: undefined });
+const ordinaryCommon = state.commonTasks.find(item => item.title === `${marker} 일반업무 작성 검사`);
+assert.equal(ordinaryCommon.publicationStatus, 'pending');
+assert.equal(ordinaryCommon.distributions.length, 0);
+await approveCommon(coordinatorMember.id, ordinaryCommon.id);
 state = await command(coordinatorMember.id, 'common.create', { ...create, title: `${marker} 차관 지시사항`, directiveIssuer: 'vice_minister', departmentIds: [innovation.id] });
-assert.ok(state.commonTasks.some(item => item.title === `${marker} 차관 지시사항`));
-pass('Central authority covers minister/vice-minister directives, not all common or lower-level work');
+const viceDirective = state.commonTasks.find(item => item.title === `${marker} 차관 지시사항`);
+state = await approveCommon(coordinatorMember.id, viceDirective.id);
+assert.equal(state.commonTasks.find(item => item.id === viceDirective.id).publicationStatus, 'approved');
+pass('Ordinary planning staff can request common work while central oversight remains limited to minister directives');
 
 state = await command(coordinator.id, 'directive.updateMetadata', { commonId, directiveIssuer: 'minister', instructedOn });
 assert.equal(commonOf(state).instructedOn, instructedOn);
 await command(coordinator.id, 'directive.updateMetadata', { commonId, directiveIssuer: 'bureau_head', instructedOn }, 403);
 state = await command(coordinatorMember.id, 'common.distribute', { commonId, departmentIds: [planning.id] });
+assert.equal(commonOf(state).distributions.length, 2);
+state = await workspace(owner.id);
+const additionalApproval = commonOf(state).approvalRequests.find(item => item.status === 'pending');
+assert.ok(additionalApproval && additionalApproval.departmentId === owner.departmentId && additionalApproval.requestedBy === coordinatorMember.id);
+state = await approveCommon(owner.id, commonId);
 assert.equal(commonOf(state).distributions.length, 3);
-pass('Planning team can update minister metadata and distribute centrally without reclassification bypass');
+pass('Planning metadata rules are enforced and added recipients require the original author department-head approval');
 
 const report = { commonId, distributionId, month, achievements: '합성 검증: 자료를 수집하고 첫 실행 결과를 점검했습니다.', nextPlan: '다음 달 결과 검토', issues: '검증용 특이사항 없음' };
 await command(member.id, 'directive.saveMonthlyReport', report, [403, 409]);

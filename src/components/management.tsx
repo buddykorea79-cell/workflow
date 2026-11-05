@@ -12,13 +12,12 @@ type CommandFn = (type: string, payload: Record<string, unknown>) => Promise<boo
 type Props = { workspace: Workspace; command: CommandFn };
 type TaskProps = Props & { onOpenTask: (id: string) => void };
 
-const roleNames: Record<User['role'], string> = { admin: '시스템 관리자', head: '부서장', manager: '부서 담당자', lead: '팀장', member: '개인 담당자' };
+const roleNames: Record<User['role'], string> = { admin: '시스템 관리자', head: '부서장', manager: '부서 담당자', lead: '팀장', member: '업무 담당자' };
 const stages: Record<CommonDistribution['status'], string> = { pending: '부서 접수', team_assigned: '팀 배정 완료', person_assigned: '개인 등록 대기', registered: '수행 중', assigned: '수행 중', submitted: '완료' };
 const stageIndex: Record<CommonDistribution['status'], number> = { pending: 0, team_assigned: 1, person_assigned: 2, registered: 3, assigned: 3, submitted: 4 };
 const day = (value: string) => value ? value.slice(0, 10).replaceAll('-', '.') : '미지정';
 const deptName = (w: Workspace, id: string) => w.departments.find(d => d.id === id)?.name || '부서';
 const userName = (w: Workspace, id?: string) => w.users.find(user => user.id === id)?.name || '미배정';
-const isCommonManager = (user: User) => user.role === 'admin' || !!user.commonTaskPermission;
 
 export { CommonWork } from './common-work';
 
@@ -56,23 +55,23 @@ export function OrganizationView({ workspace: w, command }: Props) {
         <header><div><Building2 size={18} /><h2>{department.name}</h2></div><span>{members.length}명 표시</span></header>
         {groups.map(group => <section className="management-team-group" key={group.key} aria-label={`${department.name} ${group.title}`}>
           <header><h3>{group.title}</h3><span>{group.members.length}명</span></header>
-          <div className="table-wrap"><table className="data-table"><thead><tr><th>구성원 / ID</th><th>팀 / 직위</th><th>권한</th><th>이메일 / 전화번호</th><th>상태</th></tr></thead><tbody>{[...group.members].sort((a, b) => memberOrder[a.role] - memberOrder[b.role] || a.name.localeCompare(b.name, 'ko')).map(user => <tr key={user.id}><td><button className="management-user-link" onClick={() => setProfile(user)}><span className="management-person-avatar">{user.name.slice(0, 1)}</span><span><strong>{user.name}</strong><small>{user.id}</small></span></button></td><td>{user.team}<small>{user.title}</small></td><td><span>{roleNames[user.role]}</span>{(user.commonTaskPermission || user.role === 'admin') && <small className="management-permission"><ShieldCheck size={13} />공통업무 관리</small>}</td><td><span>{user.email || '미등록'}</span><small>{user.phone || '미등록'}</small></td><td><Badge tone={isOrganizationUserActive(user, new Date(w.serverTime)) ? 'success' : 'outline'}>{isOrganizationUserActive(user, new Date(w.serverTime)) ? '활성' : '비활성'}</Badge></td></tr>)}</tbody></table></div>
+          <div className="table-wrap"><table className="data-table"><thead><tr><th>구성원 / ID</th><th>팀 / 직위</th><th>권한</th><th>이메일 / 전화번호</th><th>상태</th></tr></thead><tbody>{[...group.members].sort((a, b) => memberOrder[a.role] - memberOrder[b.role] || a.name.localeCompare(b.name, 'ko')).map(user => <tr key={user.id}><td><button className="management-user-link" onClick={() => setProfile(user)}><span className="management-person-avatar">{user.name.slice(0, 1)}</span><span><strong>{user.name}</strong><small>{user.id}</small></span></button></td><td>{user.team}<small>{user.title}</small></td><td><span>{roleNames[user.role]}</span></td><td><span>{user.email || '미등록'}</span><small>{user.phone || '미등록'}</small></td><td><Badge tone={isOrganizationUserActive(user, new Date(w.serverTime)) ? 'success' : 'outline'}>{isOrganizationUserActive(user, new Date(w.serverTime)) ? '활성' : '비활성'}</Badge></td></tr>)}</tbody></table></div>
         </section>)}
       </section>;
     })}</div>
     {!users.length && <EmptyState title="검색 결과가 없습니다." description="이름이나 필터를 바꿔 다시 찾아보세요." />}<p className="management-caption"><ShieldCheck size={15} />이름, 연락처, 부서와 권한은 시연을 위한 가상 데이터입니다.</p>
-    {visibleProfile && <Modal title="구성원 정보" onClose={() => setProfile(null)}><div className="management-profile"><div className="management-profile-identity"><span className="management-person-avatar">{visibleProfile.name.slice(0, 1)}</span><div><h2>{visibleProfile.name}</h2><p>{visibleProfile.title}</p></div><Badge>{roleNames[visibleProfile.role]}</Badge></div><dl><div><dt>ID</dt><dd>{visibleProfile.id}</dd></div><div><dt>부서</dt><dd>{deptName(w, visibleProfile.departmentId)}</dd></div><div><dt>팀</dt><dd>{visibleProfile.team}</dd></div><div><dt>이메일</dt><dd>{visibleProfile.email || '미등록'}</dd></div><div><dt>전화번호</dt><dd>{visibleProfile.phone || '미등록'}</dd></div><div><dt>공통업무 관리</dt><dd>{isCommonManager(visibleProfile) ? '권한 있음' : '권한 없음'}</dd></div></dl></div><div className="form-actions">{isAdmin && <Button onClick={() => { setEditor(visibleProfile); setProfile(null); }}>인사정보 변경</Button>}<Button variant="secondary" onClick={() => setProfile(null)}>닫기</Button></div></Modal>}
+    {visibleProfile && <Modal title="구성원 정보" onClose={() => setProfile(null)}><div className="management-profile"><div className="management-profile-identity"><span className="management-person-avatar">{visibleProfile.name.slice(0, 1)}</span><div><h2>{visibleProfile.name}</h2><p>{visibleProfile.title}</p></div><Badge>{roleNames[visibleProfile.role]}</Badge></div><dl><div><dt>ID</dt><dd>{visibleProfile.id}</dd></div><div><dt>부서</dt><dd>{deptName(w, visibleProfile.departmentId)}</dd></div><div><dt>팀</dt><dd>{visibleProfile.team}</dd></div><div><dt>이메일</dt><dd>{visibleProfile.email || '미등록'}</dd></div><div><dt>전화번호</dt><dd>{visibleProfile.phone || '미등록'}</dd></div></dl></div><div className="form-actions">{isAdmin && <Button onClick={() => { setEditor(visibleProfile); setProfile(null); }}>인사정보 변경</Button>}<Button variant="secondary" onClick={() => setProfile(null)}>닫기</Button></div></Modal>}
     {editor && <OrganizationEditor key={typeof editor === 'object' ? editor.id : editor} workspace={w} command={command} mode={editor} onClose={() => setEditor(null)} />}
   </div>;
 }
 
 const implemented = [
-  ['권한별 시연 로그인', '시스템 관리자, 부서장, 부서 담당자, 팀장, 개인 담당자의 역할에 따라 메뉴와 작업 권한을 적용합니다.'],
+  ['권한별 시연 로그인', '시스템 관리자, 부서장, 부서 담당자, 팀장, 업무 담당자의 역할에 따라 메뉴와 작업 권한을 적용합니다.'],
   ['부서별 조직과 구성원', '일반 직원과 부서장은 자기 부서의 구성원·연락처·권한을 확인하고, 관리자는 전체 부서를 그룹별로 조회합니다.'],
   ['부서 업무분장 확정', '부서장은 팀·직원·단위업무·세부업무를 한 화면에서 확인하고 부서 전체 업무분장을 확정합니다. 확정 후 업무 내용 변경을 잠그며, 사유를 남겨 재작성을 허용할 수 있습니다.'],
   ['단위업무와 세부업무', '단위업무는 업무 묶음, 세부업무는 실행 과제로 구분해 묶어서 표시합니다. 본인 단위업무와 직접 만든 세부업무를 추가·수정·삭제·복원하고 세부업무의 소속 단위를 변경합니다. 휴지통 복원, 비어 있지 않은 단위업무의 삭제 보호, 공통업무 원본의 삭제 제한을 적용합니다.'],
-  ['공통업무 단계별 배정', '부서 접수 → 팀 배정 → 개인 배정 → 내 업무 등록 → 수행·완료를 구분하고, 공통업무 담당자가 대상 부서별 배정·진행 현황을 한눈에 확인합니다.'],
-  ['지시사항과 통합 진행 현황', '지시사항을 부서 세부업무로 자동 생성하고, 공통업무 관리자는 자신이 배포한 업무의 진행률을 확인합니다.'],
+  ['공통업무 단계별 배정', '업무 담당자 작성 → 부서장 승인 → 대상 부서 접수 → 팀·담당자 배정 → 내 업무 등록 → 수행·완료를 구분합니다.'],
+  ['지시사항과 통합 진행 현황', '부서장 승인 후 공통업무·지시사항을 지정 부서에 접수하며, 작성자는 배포한 업무의 배정·진행 현황을 확인합니다.'],
   ['예산·집행·업무 근거', '사업 예산과 집행 내역, 법령·지침·국정과제·지시사항을 세부업무에 추가합니다.'],
   ['AI 근거 분석과 절차 흐름도', '저장한 법령·지침·생산 문서를 BizRouter로 분석해 근거 인용과 역할·순서를 연결한 절차 초안을 만들고, 검토 후 절차도로 적용합니다.'],
   ['업무 절차·일정과 회차 이력', '절차별 일정을 등록하고 한 회차가 모두 끝나면 같은 절차로 다음 회차를 시작합니다. 회차별 일정·체크리스트·완료 기록·결과를 보존하고 지난 회차를 읽기 전용으로 확인합니다.'],

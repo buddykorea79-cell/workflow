@@ -1,3 +1,4 @@
+import { approveLatestCommon } from './common-approval-fixture';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
@@ -16,7 +17,7 @@ function dispatch(state: WorkspaceData, actor: string, type: string, payload: Re
 }
 function rejects(code: string, action: () => void) { assert.throws(action, e => e instanceof DomainError && e.code === code); }
 function createCommon(state: WorkspaceData, extra: Record<string, unknown> = {}) {
-  dispatch(state, 'u-minseo', 'common.create', { title: '사업별 공통 점검', description: '각 부서의 추진 상황 점검', dueDate: '2026-12-01', frequency: 'once', requiredSteps: ['접수', '결과 검토'], departmentIds: ['dept-support'], projectName: '행정 효율화 사업', ...(extra.kind === 'directive' ? { directiveIssuer: 'minister', instructedOn: '2026-10-01' } : {}), ...extra });
+  dispatch(state, 'u-minseo', 'common.create', { title: '사업별 공통 점검', description: '각 부서의 추진 상황 점검', dueDate: '2026-12-01', frequency: 'once', requiredSteps: ['접수', '결과 검토'], departmentIds: ['dept-support'], projectName: '행정 효율화 사업', ...(extra.kind === 'directive' ? { directiveIssuer: 'minister', instructedOn: '2026-10-01' } : {}), ...extra }); approveLatestCommon(state, now);
   return state.commonTasks[0];
 }
 function assignData(state: WorkspaceData, commonId: string, distributionId: string) {
@@ -31,7 +32,7 @@ test('v2: demo directory contains the three requested departments and complete f
   assert.equal(state.users.length, 33);
   for (const department of state.departments) assert.equal(new Set(state.users.filter(u => u.departmentId === department.id).map(u => u.role)).size, 5);
   assert.ok(state.users.every(u => u.email?.endsWith('@ieum.example') && /^02-0000-\d{4}$/.test(u.phone ?? '')));
-  assert.ok(state.users.some(u => u.role !== 'admin' && u.commonTaskPermission));
+  assert.ok(state.users.every(u => u.commonTaskPermission === undefined));
 });
 
 test('v2: a missing local session requires login instead of impersonating a seeded member', async () => {
@@ -39,13 +40,14 @@ test('v2: a missing local session requires login instead of impersonating a seed
   await assert.rejects(currentUserId(request), e => e instanceof DomainError && e.code === 'SIGN_IN_REQUIRED');
 });
 
-test('v2: common permission is independent from org role and all mode distributes to every department', () => {
+test('v2: any work officer requests publication and head approval delivers all selected departments', () => {
   const state = seed();
   const payload = { title: '기관 공통', description: '전 부서 수행', dueDate: '2026-12-01', frequency: 'once', requiredSteps: ['결과 검토'], departmentIds: ['dept-plan'], distributionMode: 'all' };
-  rejects('COMMON_PERMISSION_REQUIRED', () => dispatch(state, 'u-seoyeon', 'common.create', payload));
-  dispatch(state, 'u-minseo', 'common.create', payload);
+  dispatch(state, 'u-seoyeon', 'common.create', payload);
+  assert.equal(state.commonTasks[0].distributions.length, 0);
+  approveLatestCommon(state, now);
   assert.equal(state.commonTasks[0].distributions.length, 3);
-  assert.equal(state.commonTasks[0].managerId, 'u-minseo');
+  assert.equal(state.commonTasks[0].managerId, 'u-seoyeon');
 });
 
 test('v2: common tasks enforce department → team → person → personal registration without shortcuts', () => {
@@ -66,7 +68,7 @@ test('v2: common tasks enforce department → team → person → personal regis
   rejects('PERSON_ASSIGNMENT_REQUIRED', () => dispatch(state, 'u-support-member', 'common.register', { ...ref, unitId: 'unit-data' }));
 });
 
-test('v2: directive creation immediately creates department detail and registration transfers the same task', () => {
+test('v2: approved directive creates department detail and registration transfers the same task', () => {
   const state = seed(); const common = createCommon(state, { kind: 'directive' }); const distributionId = common.distributions[0].id;
   const placeholder = state.tasks.find(t => t.commonId === common.id)!; assert.ok(placeholder); assert.equal(placeholder.primaryId, 'u-doyun'); assert.equal(placeholder.references?.[0].type, 'directive');
   rejects('REGISTRATION_REQUIRED', () => dispatch(state, 'u-doyun', 'task.configure', { taskId: placeholder.id, description: '배정 절차 우회' }));
@@ -74,6 +76,7 @@ test('v2: directive creation immediately creates department detail and registrat
   assert.equal(state.tasks.filter(t => t.commonId === common.id).length, 1);
   assert.equal(state.tasks.find(t => t.id === placeholder.id)!.primaryId, 'u-support-member');
   dispatch(state, 'u-minseo', 'common.distribute', { commonId: common.id, departmentIds: ['dept-plan', 'dept-support'] });
+  approveLatestCommon(state, now, common.id);
   assert.equal(state.tasks.filter(t => t.commonId === common.id).length, 2);
 });
 
@@ -93,8 +96,9 @@ test('v2: common owner sees cross-department aggregate progress without unrelate
 
 test('v2: failed directive delivery is atomic if a target department has no responsible staff', () => {
   const state = seed(); dispatch(state, 'u-admin', 'organization.departmentCreate', { name: '빈 부서', shortName: '빈부서' });
+  dispatch(state, 'u-minseo', 'common.create', { title: '빈 부서 포함 배포', description: '승인 처리의 원자성 확인', dueDate: '2026-12-01', frequency: 'once', requiredSteps: ['접수', '결과 검토'], departmentIds: ['dept-support', state.departments.at(-1)!.id], kind: 'directive', directiveIssuer: 'minister', instructedOn: '2026-10-01' });
   const before = JSON.stringify(state);
-  rejects('DEPARTMENT_STAFF_REQUIRED', () => createCommon(state, { kind: 'directive', departmentIds: ['dept-support', state.departments.at(-1)!.id] }));
+  rejects('DEPARTMENT_STAFF_REQUIRED', () => approveLatestCommon(state, now));
   assert.equal(JSON.stringify(state), before);
 });
 

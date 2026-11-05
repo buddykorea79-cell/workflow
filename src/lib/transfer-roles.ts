@@ -46,11 +46,11 @@ export function residualTransferRoles(state: TransferRoleState, fromId: string, 
 export function transferRoleRecipientError(state: TransferRoleState, role: WorkTransferRole, recipient: User, now = new Date()): string {
   if (!recipient.active || recipient.endsAt && new Date(recipient.endsAt) <= now || recipient.departmentId !== role.departmentId) return '같은 부서의 활성 구성원을 선택해 주세요.';
   if (role.kind === 'delegation_revoke') return '';
-  if (role.kind === 'common_manager') return recipient.role === 'admin' || recipient.role !== 'head' && recipient.commonTaskPermission ? '' : '공통업무 관리 권한이 있는 후임을 선택해 주세요.';
+  if (role.kind === 'common_manager') return recipient.role !== 'head' ? '' : '업무 담당자·팀장·부서 담당자·관리자 중 후임을 선택해 주세요.';
   if (role.kind.startsWith('distribution_')) {
     const distribution = state.commonTasks.find(common => common.id === role.commonId)?.distributions.find(item => item.id === role.targetId);
     if (!distribution || recipient.team !== distribution.team) return '현재 배정된 팀의 후임을 선택해 주세요.';
-    return role.kind === 'distribution_lead' ? recipient.role === 'lead' ? '' : '팀장 역할의 후임을 선택해 주세요.' : ['member', 'manager', 'lead'].includes(recipient.role) ? '' : '개인 담당자·팀장·부서담당자 중 선택해 주세요.';
+    return role.kind === 'distribution_lead' ? recipient.role === 'lead' ? '' : '팀장 역할의 후임을 선택해 주세요.' : ['member', 'manager', 'lead'].includes(recipient.role) ? '' : '업무 담당자·팀장·부서담당자 중 선택해 주세요.';
   }
   const task = state.tasks.find(item => item.id === role.taskId);
   const run = role.kind.startsWith('run_') ? state.runs.find(item => item.id === role.targetId) : undefined;
@@ -59,7 +59,7 @@ export function transferRoleRecipientError(state: TransferRoleState, role: WorkT
     if (!['head', 'manager', 'lead'].includes(recipient.role)) return '부서장·부서담당자·팀장 중 검토자를 선택해 주세요.';
     if (assignments.some(item => item.primaryId === recipient.id || item.supportIds?.includes(recipient.id))) return '수행·지원 담당자는 같은 업무의 검토자가 될 수 없습니다.';
   } else {
-    if (!['member', 'manager', 'lead'].includes(recipient.role)) return '개인 담당자·팀장·부서담당자 중 지원담당자를 선택해 주세요.';
+    if (!['member', 'manager', 'lead'].includes(recipient.role)) return '업무 담당자·팀장·부서담당자 중 지원담당자를 선택해 주세요.';
     if (assignments.some(item => item.primaryId === recipient.id || item.reviewerId === recipient.id)) return '주담당·검토자와 다른 지원담당자를 선택해 주세요.';
   }
   return '';

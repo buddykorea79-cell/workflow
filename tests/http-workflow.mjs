@@ -41,14 +41,25 @@ function userFor(dept, role, directory, predicate = () => true) {
   const found = directory.users.find(u => u.departmentId === dept && u.role === role && u.active && predicate(u));
   assert.ok(found, `Missing ${role} in ${dept}`); return found;
 }
+async function approveCommon(authorId, commonId) {
+  const common = (await workspace(authorId)).commonTasks.find(item => item.id === commonId);
+  const approval = common?.approvalRequests?.find(item => item.status === 'pending');
+  assert.ok(approval, 'A pending request must exist before source department-head approval.');
+  const head = userFor(approval.departmentId, 'head', directory);
+  await command(head.id, 'common.approve', { commonId, requestId: approval.id });
+  return workspace(authorId);
+}
 
 const unauth = await request('/api/workspace', { expected: 401 });
 check('A login is required before workspace data is returned', () => assert.equal(unauth.data.code, 'SIGN_IN_REQUIRED'));
 const { data: directory } = await request('/api/session');
 check('All three requested departments exist', () => assert.deepEqual(new Set(directory.departments.map(d => d.name)), new Set(['기획재정담당관실', '데이터정보화담당관실', '혁신행정담당관실'])));
-check('Fictional users include IDs, names, contact details and roles', () => assert.ok(directory.users.length >= 15 && directory.users.every(u => u.id && u.name && u.email?.endsWith('@ieum.example') && u.phone && u.role)));
+check('The public demo directory includes role selection data without contact details', () => {
+  assert.ok(directory.users.length >= 15 && directory.users.every(u => u.id && u.name && u.departmentId && u.role));
+  assert.ok(directory.users.every(u => !Object.hasOwn(u, 'email') && !Object.hasOwn(u, 'phone') && !Object.hasOwn(u, 'commonTaskPermission')));
+});
 
-const creator = directory.users.find(u => u.commonTaskPermission && u.role === 'manager');
+const creator = directory.users.find(u => u.role === 'member' && u.active);
 assert.ok(creator);
 const targetDept = directory.departments.find(d => d.id !== creator.departmentId);
 const otherDept = directory.departments.find(d => d.id !== creator.departmentId && d.id !== targetDept.id);
@@ -59,6 +70,14 @@ const targetHead = userFor(targetDept.id, 'head', directory);
 const otherHead = userFor(otherDept.id, 'head', directory);
 const admin = directory.users.find(u => u.role === 'admin');
 assert.ok(admin);
+// Other isolated HTTP checks may have confirmed these fixture departments.
+// Reopen only the departments where this scenario assigns and edits work.
+for (const head of [targetHead, otherHead]) {
+  const existing = await login(head.id);
+  if (existing.departmentWorkPlans?.some(plan => plan.departmentId === head.departmentId && plan.status === 'confirmed')) {
+    await command(head.id, 'department.reopen', { departmentId: head.departmentId, reason: `${marker} 격리 HTTP 시나리오의 배정·수정 준비` });
+  }
+}
 await login(creator.id);
 const now = (await workspace(creator.id)).serverTime;
 const date = new Date(now); date.setUTCDate(date.getUTCDate() + 20);
@@ -66,14 +85,20 @@ const dueDate = date.toISOString().slice(0, 10);
 const currentYear = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Seoul', year: 'numeric' }).format(new Date(now));
 const period = `${currentYear}-H2`;
 const commonPayload = { title: `${marker} 공통업무`, description: '격리된 HTTP 검증용 공통업무입니다.', projectName: `${marker} 사업`, dueDate, frequency: 'half_yearly', requiredSteps: ['자료 준비', '결과 검토', '최종 제출'], departmentIds: [targetDept.id], distributionMode: 'selected', kind: 'common' };
-const deniedCreate = await command(targetMember.id, 'common.create', commonPayload, 403);
-check('Common creation requires an explicit permission', () => assert.equal(deniedCreate.code, 'COMMON_PERMISSION_REQUIRED'));
 let state = await command(creator.id, 'common.create', commonPayload);
 let common = state.commonTasks.find(c => c.title === commonPayload.title);
 assert.ok(common);
 const commonId = common.id;
+check('An ordinary staff member can request common work without a special permission', () => {
+  assert.equal(common.managerId, creator.id); assert.equal(common.publicationStatus, 'pending'); assert.equal(common.distributions.length, 0);
+});
+const approval = common.approvalRequests.find(item => item.status === 'pending');
+await command(targetHead.id, 'common.approve', { commonId, requestId: approval.id }, 403);
+await command(admin.id, 'common.approve', { commonId, requestId: approval.id }, 403);
+state = await approveCommon(creator.id, commonId);
+common = state.commonTasks.find(c => c.id === commonId);
 const distributionId = common.distributions[0].id;
-check('A non-admin common manager can distribute outside their department', () => assert.ok(common.managerId === creator.id && common.distributions.length === 1 && common.distributions[0].departmentId === targetDept.id && common.distributions[0].status === 'pending'));
+check('Only source department-head approval publishes work to the selected department', () => assert.ok(common.publicationStatus === 'approved' && common.managerId === creator.id && common.distributions.length === 1 && common.distributions[0].departmentId === targetDept.id && common.distributions[0].status === 'pending'));
 
 const deniedTeam = await command(creator.id, 'common.assignTeam', { commonId, distributionId, team: targetLead.team, leadId: targetLead.id }, 403);
 check('A common manager cannot perform another department’s team assignment', () => assert.equal(deniedTeam.code, 'DEPARTMENT_ASSIGNMENT_DENIED'));
@@ -150,8 +175,10 @@ check('A final unit evaluation persists the 50-point total and department-head f
 await command(targetMember.id, 'performance.saveHalf', { ...performancePayload, period: `${currentYear}-H1`, title: `${marker} 다른 반기 성과` });
 
 state = await command(creator.id, 'common.create', { ...commonPayload, title: `${marker} 전체 부서 공통업무`, distributionMode: 'all' });
-check('All-department distribution expands to all three departments', () => assert.equal(state.commonTasks.find(c => c.title === `${marker} 전체 부서 공통업무`).distributions.length, 3));
+state = await approveCommon(creator.id, state.commonTasks.find(c => c.title === `${marker} 전체 부서 공통업무`).id);
+check('Approved all-department distribution expands to all three departments', () => assert.equal(state.commonTasks.find(c => c.title === `${marker} 전체 부서 공통업무`).distributions.length, 3));
 state = await command(creator.id, 'common.create', { ...commonPayload, title: `${marker} 지시사항`, kind: 'directive', directiveIssuer: 'minister', instructedOn: new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Seoul', year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date(state.serverTime)), departmentIds: [otherDept.id] });
+state = await approveCommon(creator.id, state.commonTasks.find(c => c.title === `${marker} 지시사항`).id);
 const directive = state.commonTasks.find(c => c.title === `${marker} 지시사항`);
 assert.ok(directive?.distributions[0].taskId);
 const directiveTaskId = directive.distributions[0].taskId;
@@ -160,7 +187,7 @@ const otherManager = userFor(otherDept.id, 'manager', directory);
 const otherLead = userFor(otherDept.id, 'lead', directory);
 const otherMember = userFor(otherDept.id, 'member', directory, u => u.team === otherLead.team);
 state = await login(otherManager.id);
-check('A directive immediately creates the target department’s detail task', () => assert.ok(state.tasks.some(t => t.id === directiveTaskId && t.references.some(r => r.type === 'directive'))));
+check('An approved directive creates the target department’s detail task', () => assert.ok(state.tasks.some(t => t.id === directiveTaskId && t.references.some(r => r.type === 'directive'))));
 await command(otherManager.id, 'task.configure', { taskId: directiveTaskId, description: '등록 전에 변경 시도' }, 409);
 await command(otherManager.id, 'performance.saveHalf', { ...performancePayload, taskId: directiveTaskId }, 409);
 await command(otherManager.id, 'common.assignTeam', { commonId: directive.id, distributionId: directiveDistributionId, team: otherLead.team, leadId: otherLead.id });

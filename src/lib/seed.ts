@@ -7,24 +7,24 @@ export { createRun, commonWorkflow, defaultCard, defaultWorkflow, koreaDate, off
 export function createSeed(now = new Date()): WorkspaceData {
   const iso = now.toISOString(); const today = koreaDate(now); const year = today.slice(0, 4); const month = today.slice(5, 7); const period = `${year}년 ${Math.ceil(Number(month) / 3)}분기`;
   const users: WorkspaceData['users'] = [
-    { id: 'u-minseo', name: '김담당', initials: '김', departmentId: 'dept-plan', team: '기획팀', role: 'manager', title: '부서 업무담당', color: 'stone', active: true, commonTaskPermission: true },
+    { id: 'u-minseo', name: '김담당', initials: '김', departmentId: 'dept-plan', team: '기획팀', role: 'manager', title: '부서 업무담당', color: 'stone', active: true },
     { id: 'u-jiho', name: '박주무관', initials: '박', departmentId: 'dept-plan', team: '기획팀', role: 'member', title: '주무관', color: 'stone', active: true },
     { id: 'u-seoyeon', name: '정주무관', initials: '정', departmentId: 'dept-plan', team: '기획팀', role: 'member', title: '주무관', color: 'stone', active: true },
     { id: 'u-head', name: '한과장', initials: '한', departmentId: 'dept-plan', team: '기획팀', role: 'head', title: '기획재정담당관', color: 'stone', active: true },
-    { id: 'u-admin', name: '이관리자', initials: '이', departmentId: 'dept-plan', team: '시스템운영팀', role: 'admin', title: '시스템 관리자', color: 'stone', active: true, commonTaskPermission: true },
-    { id: 'u-doyun', name: '오담당', initials: '오', departmentId: 'dept-support', team: '데이터팀', role: 'manager', title: '부서 업무담당', color: 'stone', active: true, commonTaskPermission: true },
+    { id: 'u-admin', name: '이관리자', initials: '이', departmentId: 'dept-plan', team: '시스템운영팀', role: 'admin', title: '시스템 관리자', color: 'stone', active: true },
+    { id: 'u-doyun', name: '오담당', initials: '오', departmentId: 'dept-support', team: '데이터팀', role: 'manager', title: '부서 업무담당', color: 'stone', active: true },
     { id: 'u-support-head', name: '최과장', initials: '최', departmentId: 'dept-support', team: '데이터팀', role: 'head', title: '데이터정보화담당관', color: 'stone', active: true },
     { id: 'u-plan-lead', name: '이팀장', initials: '이', departmentId: 'dept-plan', team: '기획팀', role: 'lead', title: '기획팀장', color: 'stone', active: true },
     { id: 'u-support-lead', name: '김팀장', initials: '김', departmentId: 'dept-support', team: '데이터팀', role: 'lead', title: '데이터팀장', color: 'stone', active: true },
     { id: 'u-support-member', name: '송주무관', initials: '송', departmentId: 'dept-support', team: '데이터팀', role: 'member', title: '주무관', color: 'stone', active: true },
-    { id: 'u-support-admin', name: '나관리자', initials: '나', departmentId: 'dept-support', team: '시스템운영팀', role: 'admin', title: '시스템 관리자', color: 'stone', active: true, commonTaskPermission: true },
+    { id: 'u-support-admin', name: '나관리자', initials: '나', departmentId: 'dept-support', team: '시스템운영팀', role: 'admin', title: '시스템 관리자', color: 'stone', active: true },
     { id: 'u-innovation-manager', name: '강담당', initials: '강', departmentId: 'dept-innovation', team: '혁신팀', role: 'manager', title: '부서 업무담당', color: 'stone', active: true },
     { id: 'u-innovation-head', name: '유과장', initials: '유', departmentId: 'dept-innovation', team: '혁신팀', role: 'head', title: '혁신행정담당관', color: 'stone', active: true },
     { id: 'u-innovation-lead', name: '박팀장', initials: '박', departmentId: 'dept-innovation', team: '혁신팀', role: 'lead', title: '혁신팀장', color: 'stone', active: true },
     { id: 'u-innovation-member', name: '임주무관', initials: '임', departmentId: 'dept-innovation', team: '혁신팀', role: 'member', title: '주무관', color: 'stone', active: true },
-    { id: 'u-innovation-admin', name: '서관리자', initials: '서', departmentId: 'dept-innovation', team: '시스템운영팀', role: 'admin', title: '시스템 관리자', color: 'stone', active: true, commonTaskPermission: true },
+    { id: 'u-innovation-admin', name: '서관리자', initials: '서', departmentId: 'dept-innovation', team: '시스템운영팀', role: 'admin', title: '시스템 관리자', color: 'stone', active: true },
   ];
-  users.forEach((user, index) => { user.email = `${user.id.slice(2)}@ieum.example`; user.phone = `02-0000-${String(index + 1001)}`; user.commonTaskPermission ??= false; });
+  users.forEach((user, index) => { user.email = `${user.id.slice(2)}@ieum.example`; user.phone = `02-0000-${String(index + 1001)}`; });
   const units: WorkspaceData['units'] = [
     { id: 'unit-budget', title: '예산 관리', departmentId: 'dept-plan', ownerId: 'u-minseo', description: '예산 편성부터 집행 점검까지', color: 'sage', icon: 'wallet' },
     { id: 'unit-strategy', title: '기획 · 성과 관리', departmentId: 'dept-plan', ownerId: 'u-minseo', description: '목표를 계획하고 성과를 기록합니다', color: 'gold', icon: 'chart' },

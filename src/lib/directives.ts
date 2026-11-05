@@ -10,7 +10,7 @@ export function isDirectiveCoordinator(state: Pick<WorkspaceData, 'departments'>
 }
 
 export function canManageDirective(state: Pick<WorkspaceData, 'departments'>, user: User, common: CommonTask, now = new Date()) {
-  return common.kind === 'directive' && user.active && (!user.endsAt || new Date(user.endsAt) > now) && user.role !== 'head' && (user.role === 'admin' || common.managerId === user.id && user.commonTaskPermission === true || isCentralDirective(common) && isDirectiveCoordinator(state, user, now));
+  return common.kind === 'directive' && user.active && (!user.endsAt || new Date(user.endsAt) > now) && user.role !== 'head' && (user.role === 'admin' || common.managerId === user.id || isCentralDirective(common) && isDirectiveCoordinator(state, user, now));
 }
 
 export const directiveReportStartMonth = (common: CommonTask, distribution: CommonDistribution) => (common.instructedOn || distribution.distributedAt).slice(0, 7);

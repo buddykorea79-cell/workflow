@@ -28,8 +28,10 @@ async function command(user, type, payload, expected = 200) {
   return (await request('/api/commands', { user, method: 'POST', body: { type, payload, expectedRevision: state.revision, requestId: randomUUID() }, expected })).data;
 }
 const { data: directory } = await request('/api/session');
-const owner = directory.users.find(u => u.role === 'manager' && u.commonTaskPermission);
+const owner = directory.users.find(u => u.role === 'member' && u.active);
 assert.ok(owner);
+const sourceHead = directory.users.find(u => u.departmentId === owner.departmentId && u.role === 'head' && u.active);
+assert.ok(sourceHead);
 const target = directory.departments.find(d => d.id !== owner.departmentId);
 const manager = directory.users.find(u => u.departmentId === target.id && u.role === 'manager');
 const lead = directory.users.find(u => u.departmentId === target.id && u.role === 'lead');
@@ -41,6 +43,13 @@ let state = await command(owner.id, 'common.create', { title: `${marker} 배정�
 const commonId = state.commonTasks.find(c => c.title.startsWith(marker)).id;
 const commonOf = w => w.commonTasks.find(c => c.id === commonId);
 const distOf = w => commonOf(w).distributions.find(d => d.departmentId === target.id);
+check('An ordinary staff author requests approval before any department receives work', () => {
+  const c = commonOf(state); assert.equal(c.publicationStatus, 'pending'); assert.equal(c.distributions.length, 0);
+});
+const approval = commonOf(state).approvalRequests.find(request => request.status === 'pending');
+assert.ok(approval && approval.departmentId === owner.departmentId);
+await command(sourceHead.id, 'common.approve', { commonId, requestId: approval.id });
+state = await workspace(owner.id);
 const distributionId = distOf(state).id;
 check('Owner sees all departments and the initial assignment backlog', () => {
   const c = commonOf(state);

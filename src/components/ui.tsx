@@ -45,5 +45,5 @@ export function Progress({ value }: { value: number }) { const safe = Math.max(0
 export function Field({ label, children, span = false }: { label: string; children: ReactNode; span?: boolean }) { return <label className={`field ${span ? 'field-span' : ''}`}><span>{label}</span>{children}</label>; }
 export function Brand({ inverse = false }: { inverse?: boolean }) { return <span className={`brand ${inverse ? 'brand-inverse' : ''}`}><span className="brand-mark" aria-hidden="true"><i/><i/></span><span>온이음<span className="brand-period">.</span></span></span>; }
 export function TextLink({ children, onClick }: { children: ReactNode; onClick: () => void }) { return <button className="text-link" type="button" onClick={onClick}>{children}<ArrowUpRight size={15}/></button>; }
-export const roleLabels: Record<string, string> = { admin: '관리자', head: '부서장', manager: '부서 담당자', lead: '팀장', member: '개인 담당자' };
+export const roleLabels: Record<string, string> = { admin: '관리자', head: '부서장', manager: '부서 담당자', lead: '팀장', member: '업무 담당자' };
 export const formatDate = (value: string) => value ? new Date(value.includes('T') ? value : `${value}T12:00:00+09:00`).toLocaleDateString('ko-KR', { timeZone: 'Asia/Seoul', month: 'numeric', day: 'numeric' }) : '미지정';

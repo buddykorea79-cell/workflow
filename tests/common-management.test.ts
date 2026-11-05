@@ -1,3 +1,4 @@
+import { approveLatestCommon } from './common-approval-fixture';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
@@ -16,7 +17,7 @@ function rejects(code: string, action: () => void) { assert.throws(action, error
 const common = (state: WorkspaceData, commonId = 'common-budget') => state.commonTasks.find(item => item.id === commonId)!;
 const row = (state: WorkspaceData, commonId = 'common-budget', userId = 'u-minseo', departmentId = 'dept-plan', at = now) => getWorkspace(state, userId, at).commonTasks.find(item => item.id === commonId)!.distributions.find(item => item.departmentId === departmentId)!;
 function createShared(state: WorkspaceData) {
-  dispatch(state, 'u-minseo', 'common.create', { title: '공통 배정 대시보드 검증', description: '부서별 배정과 실제 수행 확인', dueDate: '2026-11-30', frequency: 'quarterly', requiredSteps: ['자료 준비', '수행', '결과 검토', '제출'], departmentIds: ['dept-plan', 'dept-support', 'dept-innovation'] }); return state.commonTasks[0].id;
+  dispatch(state, 'u-minseo', 'common.create', { title: '공통 배정 대시보드 검증', description: '부서별 배정과 실제 수행 확인', dueDate: '2026-11-30', frequency: 'quarterly', requiredSteps: ['자료 준비', '수행', '결과 검토', '제출'], departmentIds: ['dept-plan', 'dept-support', 'dept-innovation'] }); approveLatestCommon(state, now); return state.commonTasks[0].id;
 }
 function registerData(state: WorkspaceData, commonId: string) {
   const distributionId = common(state, commonId).distributions.find(item => item.departmentId === 'dept-support')!.id;

@@ -1,3 +1,4 @@
+import { approveLatestCommon } from './common-approval-fixture';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
@@ -78,20 +79,21 @@ test('work division: all personal definition routes, trash restore, admin overri
 
 test('work division: common delivery can reach a confirmed inbox while staged and legacy assignments remain locked', () => {
   const state = createSeed(now);
-  dispatch(state, 'u-jiho', 'common.create', { title: '배정 대기 공통업무', description: '잠금 전에 접수', departmentIds: ['dept-support'], dueDate: '2026-11-30', frequency: 'once', requiredSteps: ['자료 확인', '부서장 검토'] });
+  dispatch(state, 'u-jiho', 'common.create', { title: '배정 대기 공통업무', description: '잠금 전에 접수', departmentIds: ['dept-support'], dueDate: '2026-11-30', frequency: 'once', requiredSteps: ['자료 확인', '부서장 검토'] }); approveLatestCommon(state, now);
   const commonId = state.commonTasks[0].id; const distributionId = state.commonTasks[0].distributions[0].id;
   confirmData(state);
   for (const type of ['common.assignTeam', 'common.assignPerson', 'common.register']) rejects('DEPARTMENT_CONFIRMED', () => dispatch(state, 'u-admin', type, { commonId, distributionId, unitId: dataUnitId }));
   rejects('DEPARTMENT_CONFIRMED', () => dispatch(state, 'u-admin', 'common.assign', { commonId, departmentId: 'dept-support' }));
   const beforeTasks = structuredClone(state.tasks), beforeUnits = structuredClone(state.units);
   for (const kind of ['common', 'directive']) {
-    dispatch(state, 'u-jiho', 'common.create', { kind, title: '확정 후 추가', description: '접수함에 보관', departmentIds: ['dept-support'], dueDate: '2026-11-30', frequency: 'once', requiredSteps: ['검토'], ...(kind === 'directive' ? { directiveIssuer: 'minister', instructedOn: '2026-10-31' } : {}) });
+    dispatch(state, 'u-jiho', 'common.create', { kind, title: '확정 후 추가', description: '접수함에 보관', departmentIds: ['dept-support'], dueDate: '2026-11-30', frequency: 'once', requiredSteps: ['검토'], ...(kind === 'directive' ? { directiveIssuer: 'minister', instructedOn: '2026-10-31' } : {}) }); approveLatestCommon(state, now);
     assert.equal(state.commonTasks[0].distributions[0].status, 'pending');
     assert.equal(state.commonTasks[0].distributions[0].taskId, undefined);
   }
   assert.deepEqual(state.tasks, beforeTasks); assert.deepEqual(state.units, beforeUnits);
-  dispatch(state, 'u-jiho', 'common.create', { title: '기획부서용', description: '잠금되지 않은 부서', departmentIds: ['dept-plan'], dueDate: '2026-11-30', frequency: 'once', requiredSteps: ['검토'] });
+  dispatch(state, 'u-jiho', 'common.create', { title: '기획부서용', description: '잠금되지 않은 부서', departmentIds: ['dept-plan'], dueDate: '2026-11-30', frequency: 'once', requiredSteps: ['검토'] }); approveLatestCommon(state, now);
   dispatch(state, 'u-jiho', 'common.distribute', { commonId: state.commonTasks[0].id, departmentIds: ['dept-support'] });
+  approveLatestCommon(state, now);
   assert.equal(state.commonTasks[0].distributions.at(-1)?.status, 'pending');
 });
 

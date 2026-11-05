@@ -10,7 +10,7 @@ const now = new Date('2026-11-05T03:00:00Z');
 const fromId = 'u-support-member', toId = 'u-role-successor', managerId = 'u-doyun', headId = 'u-support-head', departmentId = 'dept-support';
 function fixture() {
   const state = createSeed(now); state.handovers = [];
-  state.users.push({ ...state.users.find(user => user.id === fromId)!, id: toId, name: '역할후임', role: 'lead', commonTaskPermission: true });
+  state.users.push({ ...state.users.find(user => user.id === fromId)!, id: toId, name: '역할후임', role: 'lead', commonTaskPermission: false });
   return state;
 }
 function dispatch(state: WorkspaceData, actor: string, type: string, payload: Record<string, unknown>, minutes = 0) {
@@ -88,7 +88,7 @@ test('role transfer: recipient authority and team are checked again when approvi
     const state = fixture(); addCommon(state);
     const transferId = request(state, [`${kind}:${kind === 'common_manager' ? 'common-roles' : 'dist-roles'}`]);
     const target = state.users.find(user => user.id === toId)!;
-    if (kind === 'common_manager') target.commonTaskPermission = false; else target.team = '정보기획팀';
+    if (kind === 'common_manager') target.role = 'head'; else target.team = '정보기획팀';
     denied(state, headId, 'transfer.approve', { transferId }, 'TRANSFER_ROLE_RECIPIENT');
   }
 });

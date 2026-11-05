@@ -21,13 +21,14 @@ async function login(id) {
   return data;
 }
 async function command(user, type, payload, expected = 200) {
+  if (!cookies.has(user)) await login(user);
   const { data: state } = await request('/api/workspace', { user });
   return (await request('/api/commands', { user, method: 'POST', expected, body: { type, payload, expectedRevision: state.revision, requestId: randomUUID() } })).data;
 }
 const { data: directory } = await request('/api/session');
 const budgetUser = directory.users.find(user => user.id === 'u-jiho');
-check('Budget common owner remains a planning-department personal staff account', () => {
-  assert.equal(budgetUser.departmentId, 'dept-plan'); assert.equal(budgetUser.role, 'member'); assert.equal(budgetUser.commonTaskPermission, true); assert.match(budgetUser.title, /예산/);
+check('Budget common owner remains an ordinary planning-department staff account', () => {
+  assert.equal(budgetUser.departmentId, 'dept-plan'); assert.equal(budgetUser.role, 'member'); assert.equal(Object.hasOwn(budgetUser, 'commonTaskPermission'), false); assert.match(budgetUser.title, /예산/);
 });
 check('Data department supplies all ordinary demonstration roles', () => {
   for (const role of ['member', 'lead', 'manager', 'head', 'admin']) assert.ok(directory.users.some(user => user.departmentId === 'dept-support' && user.role === role && user.active));
@@ -52,8 +53,19 @@ check('Budget staff manages cross-department common examples', () => {
   assert.ok(ownedCommon.every(common => common.summary.totalDepartments === common.distributions.length));
 });
 const created = await command(budgetUser.id, 'common.create', { title: `예산총괄 검증 ${randomUUID().slice(0, 8)}`, description: '격리된 시연 계정 권한 검증용 업무', dueDate: ownedCommon[0].dueDate, frequency: 'once', requiredSteps: ['요구자료 작성', '결과 검토'], departmentIds: ['dept-support'], distributionMode: 'selected', kind: 'common' });
-check('A personal staff account with common permission can create department-wide work', () => assert.equal(created.commonTasks[0].managerId, budgetUser.id));
-const deniedCommon = created.commonTasks[0];
+const requestedCommon = created.commonTasks[0];
+check('Ordinary budget staff can request common work without a special permission', () => {
+  assert.equal(requestedCommon.managerId, budgetUser.id); assert.equal(requestedCommon.publicationStatus, 'pending'); assert.equal(requestedCommon.distributions.length, 0);
+});
+const sourceHead = directory.users.find(user => user.departmentId === budgetUser.departmentId && user.role === 'head' && user.active);
+const approval = requestedCommon.approvalRequests.find(request => request.status === 'pending');
+assert.ok(sourceHead && approval);
+await command(sourceHead.id, 'common.approve', { commonId: requestedCommon.id, requestId: approval.id });
+const { data: approved } = await request('/api/workspace', { user: budgetUser.id });
+const deniedCommon = approved.commonTasks.find(common => common.id === requestedCommon.id);
+check('Source department-head approval publishes the requested recipient department', () => {
+  assert.equal(deniedCommon.publicationStatus, 'approved'); assert.equal(deniedCommon.distributions.length, 1); assert.equal(deniedCommon.distributions[0].departmentId, 'dept-support');
+});
 const distribution = deniedCommon.distributions[0];
 const lead = directory.users.find(user => user.departmentId === 'dept-support' && user.role === 'lead');
 const denied = await command(budgetUser.id, 'common.assignTeam', { commonId: deniedCommon.id, distributionId: distribution.id, leadId: lead.id, team: lead.team }, 403);

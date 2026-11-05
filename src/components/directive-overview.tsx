@@ -41,7 +41,7 @@ export function DirectiveMetadataEditor({ workspace: w, common, command, onClose
   const [instructedOn, setInstructedOn] = useState(common.instructedOn || '');
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
-  const onlyCentral = w.currentUser.role !== 'admin' && !(common.managerId === w.currentUser.id && w.currentUser.commonTaskPermission === true);
+  const onlyCentral = w.currentUser.role !== 'admin' && !(common.managerId === w.currentUser.id);
   return <Modal title="지시정보 수정" description={common.title} onClose={onClose}><form className="form-stack" onSubmit={async event => {
     event.preventDefault(); if (!issuer || !instructedOn || saving) return;
     setSaving(true); setError('');
