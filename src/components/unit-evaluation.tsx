@@ -3,7 +3,7 @@
 import { useState } from 'react';
 import { ArrowRight, ArrowUpRight, CalendarDays, CheckCheck, CheckCircle2, ChevronRight, ClipboardCheck, FileText, FolderOpen, LockKeyhole, Pencil, Plus, Save, Search, Send, ShieldCheck, SlidersHorizontal, Undo2, Users } from 'lucide-react';
 import type { Performance, UnitScorePlan, User, Workspace } from '@/lib/types';
-import { currentPersonPerformances, eligibleScoreUnits, getUnitEvaluation, getUnitScorePlan, hasCompletePerformance, missingPerformanceUnitIds, personUnitPerformanceSummary } from '@/lib/unit-evaluation';
+import { currentPersonPerformances, eligibleScoreUnits, scoreUnitsForPeriod, getUnitEvaluation, getUnitScorePlan, hasCompletePerformance, missingPerformanceUnitIds, personUnitPerformanceSummary } from '@/lib/unit-evaluation';
 import { Badge, Button, EmptyState, Field, Modal, type CommandFn } from './ui';
 import './unit-evaluation.css';
 
@@ -13,7 +13,12 @@ const statusLabels: Record<Performance['status'], string> = { draft: '작성 완
 const periodName = (value: string) => `${value.slice(0, 4)}년 ${value.endsWith('H1') ? '상반기' : '하반기'}`;
 const scoreText = (value: number) => Number(value.toFixed(2)).toLocaleString('ko-KR');
 const dateText = (value: string) => new Date(value).toLocaleString('ko-KR', { timeZone: 'Asia/Seoul', year: 'numeric', month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' });
-const personName = (w: Workspace, id: string) => w.users.find(user => user.id === id)?.name || '담당자';
+const personName = (w: Workspace, id: string) => w.users.find(user => user.id === id)?.name || w.identities?.find(user => user.id === id)?.name || '담당자';
+function performancePeople(w: Workspace): User[] {
+  const people = [...w.users];
+  for (const identity of w.identities ?? []) if (!people.some(person => person.id === identity.id)) people.push({ ...identity, initials: identity.name.slice(0, 1), role: 'member', title: '전출 직원', active: false, color: '#64748b' });
+  return people;
+}
 const isRegistered = (w: Workspace, taskId: string, commonId?: string) => !commonId || !!w.commonTasks.find(common => common.id === commonId)?.distributions.some(item => item.taskId === taskId && ['registered', 'assigned', 'submitted'].includes(item.status));
 const activeTasks = (w: Workspace, personId: string) => w.tasks.filter(task => task.primaryId === personId && !task.deletedAt && task.status !== 'archived' && w.units.some(unit => unit.id === task.unitId && !unit.deletedAt) && isRegistered(w, task.id, task.commonId));
 
@@ -43,7 +48,8 @@ export function PerformanceView({ workspace: w, command, onOpenTask }: Props) {
   const user = w.currentUser;
   const isReviewer = user.role === 'head' || user.role === 'admin';
   const scopeDepartment = user.role === 'admin' ? departmentId : user.departmentId;
-  const people = isReviewer ? w.users.filter(person => person.departmentId === scopeDepartment && person.role !== 'head' && person.role !== 'admin' && (person.active || w.performances.some(item => item.authorId === person.id && item.period === period) || getUnitEvaluation(w, person.id, period))).sort((a, b) => a.team.localeCompare(b.team, 'ko') || a.name.localeCompare(b.name, 'ko')) : [user];
+  const hasHistoricalEvaluation = (personId: string) => (w.unitScorePlans ?? []).some(plan => plan.personId === personId && plan.period === period && plan.departmentId === scopeDepartment) || (w.unitEvaluations ?? []).some(evaluation => evaluation.personId === personId && evaluation.period === period && evaluation.departmentId === scopeDepartment) || w.performances.some(item => item.authorId === personId && item.period === period && item.departmentId === scopeDepartment);
+  const people = isReviewer ? performancePeople(w).filter(person => hasHistoricalEvaluation(person.id) || person.departmentId === scopeDepartment && !['head', 'admin'].includes(person.role) && person.active).sort((a, b) => a.team.localeCompare(b.team, 'ko') || a.name.localeCompare(b.name, 'ko')) : [user];
   const teams = [...new Set(people.map(person => person.team))];
   const filteredPeople = people.filter(person => (team === 'all' || person.team === team) && `${person.name} ${person.team}`.toLowerCase().includes(query.trim().toLowerCase()));
   const person = filteredPeople.find(item => item.id === selectedPerson) || filteredPeople.find(item => currentPersonPerformances(w, item.id, period).length > 0) || filteredPeople.find(item => eligibleScoreUnits(w, item.id).length > 0) || filteredPeople[0];
@@ -51,9 +57,9 @@ export function PerformanceView({ workspace: w, command, onOpenTask }: Props) {
   const summary = person ? personUnitPerformanceSummary(w, person.id, period) : undefined;
   const ownEvaluation = getUnitEvaluation(w, user.id, period);
   const ownPlan = getUnitScorePlan(w, user.id, period);
-  const ownTasks = activeTasks(w, user.id);
+  const ownTasks = activeTasks(w, user.id).filter(task => !ownPlan || task.departmentId === ownPlan.departmentId);
   const canEdit = !isReviewer && !ownEvaluation && !ownPlan?.submittedAt && ownTasks.length > 0;
-  const ownUnits = eligibleScoreUnits(w, user.id);
+  const ownUnits = scoreUnitsForPeriod(w, user.id, period);
   const totalPerformanceCount = summaries.reduce((sum, item) => sum + item.performances.length, 0);
   const evaluated = summaries.filter(item => item.evaluation).length;
   const ready = summaries.filter(item => item.plan?.submittedAt && !item.evaluation).length;
@@ -101,16 +107,17 @@ function PersonPerformance({ workspace: w, command, onOpenTask, person, period, 
   const { plan, evaluation } = summary;
   const submitted = !!plan?.submittedAt;
   const self = person.id === w.currentUser.id;
-  const currentUnits = eligibleScoreUnits(w, person.id);
-  const stalePlan = !!plan && !evaluation && (plan.departmentId !== person.departmentId || plan.allocations.length !== currentUnits.length || currentUnits.some(unit => !plan.allocations.some(item => item.unitId === unit.id)));
+  const currentUnits = scoreUnitsForPeriod(w, person.id, period);
+  const evaluationDepartment = plan?.departmentId ?? summary.performances[0]?.departmentId ?? person.departmentId;
+  const stalePlan = !!plan && !submitted && !evaluation && (plan.allocations.length !== currentUnits.length || currentUnits.some(unit => !plan.allocations.some(item => item.unitId === unit.id)));
   const ratedUnits = summary.units.filter(unit => plan?.allocations.some(allocation => allocation.unitId === unit.unitId));
   const ratedPerformances = ratedUnits.flatMap(unit => unit.performances);
-  const needsChanges = summary.performances.some(item => item.departmentId === person.departmentId && item.status === 'changes_requested');
+  const needsChanges = summary.performances.some(item => item.departmentId === evaluationDepartment && item.status === 'changes_requested');
   const hasEvidence = ratedPerformances.some(item => ['review', 'confirmed'].includes(item.status));
   const canEvaluate = isReviewer && !self && !!plan && submitted && !evaluation && !stalePlan && hasEvidence && !needsChanges;
-  const missingUnitIds = missingPerformanceUnitIds(w, plan?.allocations || [], summary.performances, person.departmentId);
+  const missingUnitIds = missingPerformanceUnitIds(w, plan?.allocations || [], summary.performances, evaluationDepartment);
   const incompleteUnits = ratedUnits.filter(unit => missingUnitIds.includes(unit.unitId));
-  const incompleteRecords = summary.performances.filter(item => item.departmentId === person.departmentId && !hasCompletePerformance(item));
+  const incompleteRecords = summary.performances.filter(item => item.departmentId === evaluationDepartment && !hasCompletePerformance(item));
   const canSubmit = self && !isReviewer && !!plan && !submitted && !evaluation && !stalePlan && summary.totalMaxScore === 50 && incompleteUnits.length === 0 && incompleteRecords.length === 0 && ratedPerformances.length > 0 && !needsChanges;
   const allValid = ratedUnits.length > 0 && ratedUnits.every(unit => scores[unit.unitId] !== '' && Number.isFinite(Number(scores[unit.unitId])) && Number(scores[unit.unitId]) >= 0 && Number(scores[unit.unitId]) <= (unit.maxScore || 0) && Math.abs(Number(scores[unit.unitId]) * 100 - Math.round(Number(scores[unit.unitId]) * 100)) < 0.000001);
   const scoreTotal = ratedUnits.reduce((sum, unit) => sum + (Number(scores[unit.unitId]) || 0), 0);
@@ -133,6 +140,7 @@ function PersonPerformance({ workspace: w, command, onOpenTask, person, period, 
   };
   return <section className="ue-person-detail" aria-label={`${person.name} 성과 상세`}>
     <header className="ue-person-heading"><span className="ue-avatar ue-avatar-large">{person.name.slice(0, 1)}</span><div><span>{w.departments.find(department => department.id === person.departmentId)?.name} · {person.team}</span><h2>{person.name}<small>{person.title}</small></h2><p>{periodName(period)} · 단위업무 {summary.units.length}개 · 세부업무 성과 {summary.performances.length}건</p></div><div className="ue-total-score"><span>{evaluation ? '개인 평가 총점' : '업무 비중 합계'}</span><strong>{evaluation ? scoreText(summary.totalScore || 0) : plan ? scoreText(summary.totalMaxScore) : '—'}<small>/ 50</small></strong><Badge tone={evaluation ? 'success' : plan ? 'info' : 'soft'}>{evaluation ? '평가 완료' : submitted ? '제출 완료 · 평가 대기' : '미제출'}</Badge></div></header>
+    {evaluationDepartment !== person.departmentId && <div className="ue-notice"><FileText size={18} /><div><strong>이전 부서에서 수행한 성과입니다.</strong><p>기존 성과와 업무 비중을 보존하며, 배점 당시 부서장이 평가합니다. 현재 담당 업무의 접근 권한은 변경되지 않습니다.</p></div></div>}
     {!plan && <div className="ue-notice"><SlidersHorizontal size={18} /><div><strong>단위업무의 업무 비중을 먼저 설정해 주세요.</strong><p>{self ? '각 단위업무의 업무 비중을 합계 50점으로 저장하고, 성과를 확인한 뒤 제출하기를 눌러 주세요.' : `${person.name}님이 업무 비중과 성과를 모두 제출한 뒤 평가를 진행할 수 있습니다.`}</p></div>{self && currentUnits.length > 0 && <Button variant="secondary" onClick={onWeights}>업무 비중 설정 <ArrowRight size={14} /></Button>}</div>}
     {stalePlan && <div className="ue-notice ue-notice-warning"><ClipboardCheck size={18} /><div><strong>단위업무 구성이 변경되었습니다.</strong><p>변경된 단위업무에 맞게 업무 비중을 다시 저장해야 합니다. 이미 제출했다면 먼저 제출을 회수해 주세요.</p></div>{self && !submitted && <Button variant="secondary" onClick={onWeights}>업무 비중 다시 설정</Button>}</div>}
     {evaluation && <div className="ue-notice"><LockKeyhole size={18} /><div><strong>{personName(w, evaluation.evaluatedBy)}님이 평가를 확정했습니다.</strong><p>{new Date(evaluation.evaluatedAt).toLocaleDateString('ko-KR')} · 평가 당시의 업무 비중과 성과를 보존합니다.</p></div></div>}
@@ -152,7 +160,7 @@ function PersonPerformance({ workspace: w, command, onOpenTask, person, period, 
             const source = performance as Performance & { taskTitle?: string };
             const task = w.tasks.find(task => task.id === performance.taskId);
             const canOpen = !!task;
-            return <section className="ue-performance" key={performance.id}><div className="ue-performance-heading"><span><FileText size={14} />세부업무</span>{canOpen ? <button type="button" className="ue-task-link" onClick={() => onOpenTask(performance.taskId)}>{source.taskTitle || task.title}<ArrowUpRight size={14} /></button> : <strong>{source.taskTitle || '기존 세부업무'}</strong>}<Badge tone={performance.status === 'changes_requested' ? 'warning' : 'soft'}>{evaluation ? '평가 반영' : performance.status === 'confirmed' ? '기존 확정 성과' : !submitted && performance.status === 'review' ? '작성 완료 · 제출 전' : statusLabels[performance.status]}</Badge></div><h4>{performance.title}</h4><p>{performance.description}</p>{performance.metricName && performance.value !== undefined && <div className="ue-individual-metric">{performance.metricName}<strong>{scoreText(performance.value)} {performance.unit}</strong></div>}<div className="ue-evidence"><span>성과 근거</span><p>{performance.evidence}</p></div>{performance.status === 'changes_requested' && <div className="ue-correction"><p><strong>보완 의견</strong>{performance.comment || '성과 내용과 근거를 보완해 주세요.'}</p></div>}{self && !submitted && !evaluation && performance.status !== 'confirmed' && task && !task.deletedAt && task.status !== 'archived' && <div className="ue-performance-actions"><Button variant="secondary" type="button" onClick={() => onEdit(performance)}><Pencil size={14} />{performance.status === 'changes_requested' ? '성과 보완' : '성과 수정'}</Button></div>}</section>;
+            return <section className="ue-performance" key={performance.id}><div className="ue-performance-heading"><span><FileText size={14} />세부업무</span>{canOpen ? <button type="button" className="ue-task-link" onClick={() => onOpenTask(performance.taskId)}>{source.taskTitle || task.title}<ArrowUpRight size={14} /></button> : <strong>{source.taskTitle || '기존 세부업무'}</strong>}<Badge tone={performance.status === 'changes_requested' ? 'warning' : 'soft'}>{evaluation ? '평가 반영' : performance.status === 'confirmed' ? '기존 확정 성과' : !submitted && performance.status === 'review' ? '작성 완료 · 제출 전' : statusLabels[performance.status]}</Badge></div><h4>{performance.title}</h4><p>{performance.description}</p>{performance.metricName && performance.value !== undefined && <div className="ue-individual-metric">{performance.metricName}<strong>{scoreText(performance.value)} {performance.unit}</strong></div>}<div className="ue-evidence"><span>성과 근거</span><p>{performance.evidence}</p></div>{performance.status === 'changes_requested' && <div className="ue-correction"><p><strong>보완 의견</strong>{performance.comment || '성과 내용과 근거를 보완해 주세요.'}</p></div>}{self && !submitted && !evaluation && performance.status !== 'confirmed' && performance.authorId === w.currentUser.id && <div className="ue-performance-actions"><Button variant="secondary" type="button" onClick={() => onEdit(performance)}><Pencil size={14} />{performance.status === 'changes_requested' ? '성과 보완' : '성과 수정'}</Button></div>}</section>;
           })}{!unit.performances.length && <p className="ue-no-performance"><FileText size={16} />이 단위업무에 등록된 반기 성과가 없습니다.</p>}</div>
           {isRated && <div className="ue-unit-rating"><div><span><ShieldCheck size={15} />부서장 평가</span>{!evaluation && submitted && !evidence.length && <small>제출된 성과가 없어 0점으로 평가합니다.</small>}</div>{evaluation ? <><strong className="ue-readonly-score">{scoreText(unit.score || 0)}<small>/ {scoreText(unit.maxScore || 0)}점</small></strong>{unit.comment && <p className="ue-rating-comment">{unit.comment}</p>}</> : isReviewer ? <><label className="ue-score-input"><span className="sr-only">{unit.unitTitle} 평가 점수</span><input type="number" min="0" max={unit.maxScore || 0} step="0.01" required disabled={!canEvaluate || !evidence.length} value={score} aria-invalid={scoreInvalid} onChange={event => setScores(previous => ({ ...previous, [unit.unitId]: event.target.value }))} placeholder="점수" /><span>/ {scoreText(unit.maxScore || 0)}점</span></label><label className="ue-unit-comment"><span className="sr-only">{unit.unitTitle} 평가 의견</span><textarea rows={2} maxLength={5000} disabled={!canEvaluate} value={comments[unit.unitId] || ''} onChange={event => setComments(previous => ({ ...previous, [unit.unitId]: event.target.value }))} placeholder="이 단위업무의 성과에 대한 의견을 남겨 주세요. (선택)" /></label>{scoreInvalid && <p className="form-error">점수는 0점부터 업무 비중 {scoreText(unit.maxScore || 0)}점 이내로 입력해 주세요.</p>}</> : <span className="ue-awaiting">{submitted ? '부서장 평가 대기' : '제출 후 평가 진행'}</span>}</div>}
         </article>;
@@ -175,7 +183,7 @@ function PersonPerformance({ workspace: w, command, onOpenTask, person, period, 
 }
 
 function WeightEditor({ workspace: w, command, period, plan, onClose }: { workspace: Workspace; command: CommandFn; period: string; plan?: UnitScorePlan; onClose: () => void }) {
-  const units = eligibleScoreUnits(w, w.currentUser.id);
+  const units = scoreUnitsForPeriod(w, w.currentUser.id, period);
   const [values, setValues] = useState<Record<string, string>>(() => Object.fromEntries(units.map(unit => [unit.id, String(plan?.allocations.find(item => item.unitId === unit.id)?.maxScore ?? '')])));
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
@@ -185,7 +193,8 @@ function WeightEditor({ workspace: w, command, period, plan, onClose }: { worksp
 }
 
 export function PerformanceEditor({ workspace: w, command, period, existing, fixedTaskId, embedded = false, onClose }: { workspace: Workspace; command: CommandFn; period: string; existing?: Performance; fixedTaskId?: string; embedded?: boolean; onClose: () => void }) {
-  const tasks = activeTasks(w, w.currentUser.id);
+  const plan = getUnitScorePlan(w, w.currentUser.id, period);
+  const tasks = activeTasks(w, w.currentUser.id).filter(task => !plan || task.departmentId === plan.departmentId);
   const current = currentPersonPerformances(w, w.currentUser.id, period);
   const record = existing || (fixedTaskId ? current.find(item => item.taskId === fixedTaskId) : undefined);
   const pinnedTaskId = fixedTaskId || record?.taskId;
@@ -201,7 +210,8 @@ export function PerformanceEditor({ workspace: w, command, period, existing, fix
   const [error, setError] = useState('');
   const [saved, setSaved] = useState(false);
   const locked = !!getUnitScorePlan(w, w.currentUser.id, period)?.submittedAt || !!getUnitEvaluation(w, w.currentUser.id, period) || record?.status === 'confirmed';
-  const valid = !locked && eligible.some(task => task.id === taskId) && !!title.trim() && !!description.trim() && !!evidence.trim() && (value === '' || Number.isFinite(Number(value)));
+  const ownHistoricalRecord = record?.authorId === w.currentUser.id && record.period === period && record.taskId === taskId;
+  const valid = !locked && (ownHistoricalRecord || eligible.some(task => task.id === taskId)) && !!title.trim() && !!description.trim() && !!evidence.trim() && (value === '' || Number.isFinite(Number(value)));
   const form = <form className="form-stack ue-performance-editor" onSubmit={async event => {
     event.preventDefault(); if (!valid || saving) return;
     setSaving(true); setError(''); setSaved(false);
@@ -212,10 +222,11 @@ export function PerformanceEditor({ workspace: w, command, period, existing, fix
     } catch (cause) { setError(cause instanceof Error ? cause.message : '성과를 저장하지 못했습니다.'); }
     finally { setSaving(false); }
   }}>
+    {ownHistoricalRecord && !eligible.length && <div className="ue-notice"><FileText size={18} /><div><strong>인수인계 전 작성한 내 성과를 보완합니다.</strong><p>이 성과의 작성자·당시 부서·단위업무는 보존됩니다. 후임자의 업무 내용은 변경하지 않습니다.</p></div></div>}
     {record?.status === 'changes_requested' && record.comment && <div className="ue-notice"><ClipboardCheck size={18} /><div><strong>부서장 보완 의견</strong><p>{record.comment}</p></div></div>}
     <p className="ue-footnote">{periodName(period)} 성과를 저장합니다. 성과 · 평가에서 단위업무별 업무 비중을 정한 뒤 제출하기를 눌러 주세요.</p>
-    {pinnedTaskId ? <div className="ue-editor-task"><FolderOpen size={17} /><div><small>{w.units.find(item => item.id === tasks.find(task => task.id === pinnedTaskId)?.unitId)?.title}</small><strong>{tasks.find(task => task.id === pinnedTaskId)?.title || '세부업무'}</strong></div></div> : <Field label="세부업무"><select required disabled={saving || locked} value={taskId} onChange={event => { setTaskId(event.target.value); setSaved(false); }}><option value="">성과를 기록할 업무 선택</option>{eligible.map(task => <option key={task.id} value={task.id}>{w.units.find(item => item.id === task.unitId)?.title} › {task.title}</option>)}</select></Field>}
-    {!eligible.length && <p role="alert" className="ue-validation">새로 작성할 세부업무가 없습니다. 이미 작성한 성과는 단위업무별 성과 목록에서 수정할 수 있습니다.</p>}
+    {pinnedTaskId ? <div className="ue-editor-task"><FolderOpen size={17} /><div><small>{w.units.find(item => item.id === tasks.find(task => task.id === pinnedTaskId)?.unitId)?.title}</small><strong>{tasks.find(task => task.id === pinnedTaskId)?.title || '이전 담당 업무 · ' + (record?.title || '기존 성과')}</strong></div></div> : <Field label="세부업무"><select required disabled={saving || locked} value={taskId} onChange={event => { setTaskId(event.target.value); setSaved(false); }}><option value="">성과를 기록할 업무 선택</option>{eligible.map(task => <option key={task.id} value={task.id}>{w.units.find(item => item.id === task.unitId)?.title} › {task.title}</option>)}</select></Field>}
+    {!eligible.length && !ownHistoricalRecord && <p role="alert" className="ue-validation">새로 작성할 세부업무가 없습니다. 이미 작성한 성과는 단위업무별 성과 목록에서 수정할 수 있습니다.</p>}
     {locked && <p className="ue-validation">제출되었거나 평가가 확정된 성과입니다. 제출한 성과는 성과 · 평가에서 제출을 회수한 후 수정할 수 있습니다.</p>}
     <fieldset disabled={saving || locked} className="ue-editor-fields" onChange={() => setSaved(false)}>
       <Field label="성과 제목"><input required maxLength={150} value={title} onChange={event => setTitle(event.target.value)} placeholder="예: 예산 집행 자료의 정확도 및 처리 속도 개선" /></Field>

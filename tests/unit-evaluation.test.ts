@@ -94,10 +94,11 @@ test('unit evaluation: bounded per-unit scores, complete score set and submitted
   }
 });
 
-test('unit evaluation: unit composition changes invalidate old plans before evaluation', () => {
+test('unit evaluation: submitted allocations survive later unit composition changes', () => {
   const state = createSeed(now); setPlan(state); addPerformance(state); submitPerson(state); const input = evaluationInput(state);
   state.units.push({ ...eligibleScoreUnits(state, personId)[0], id: 'new-unit', title: '새로 추가된 업무' });
-  rejects('SCORE_PLAN_STALE', () => dispatch(state, headId, 'performance.evaluatePerson', input));
+  dispatch(state, headId, 'performance.evaluatePerson', input);
+  assert.equal(getUnitEvaluation(state, personId, period)?.totalScore, 42.5);
 });
 
 test('unit evaluation: confirmed total and evidence snapshot survive later record or task changes; writes are frozen', () => {
@@ -283,10 +284,10 @@ test('unit submission: managers see same-department status metadata without priv
   assert.ok(!getWorkspace(state, foreignManager.id, now).performanceSubmissionStatuses?.some(item => item.personId === personId));
 });
 
-test('unit submission: a changed unit list can be recovered by withdrawing and resubmitting a fresh plan', () => {
+test('unit submission: employee can elect to include new units by withdrawing and resubmitting a fresh plan', () => {
   const state = createSeed(now); state.performances = []; setPlan(state); addPerformance(state, personId, undefined, { status: 'draft' }); submitPerson(state);
   dispatch(state, personId, 'unit.create', { title: '제출 후 추가한 단위업무', description: '다음 수행을 위한 새 단위업무' });
-  rejects('SCORE_PLAN_STALE', () => dispatch(state, headId, 'performance.evaluatePerson', evaluationInput(state)));
+  assert.ok(!getUnitScorePlan(state, personId, period)!.allocations.some(unit => unit.unitTitle === '제출 후 추가한 단위업무'));
   rejects('PERFORMANCE_SUBMITTED', () => setPlan(state));
   dispatch(state, personId, 'performance.withdrawSubmission', { period });
   setPlan(state); submitPerson(state);

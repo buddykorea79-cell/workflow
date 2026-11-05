@@ -11,6 +11,24 @@ export function eligibleScoreUnits(state: Pick<WorkspaceData, 'units' | 'users'>
   return state.units.filter(unit => !unit.deletedAt && unit.ownerId === personId && unit.departmentId === person?.departmentId);
 }
 
+/** A period keeps the units evidenced by its saved plan and the author's own records.
+ * Moving today's assignment must not erase the work that is being evaluated. */
+export function scoreUnitsForPeriod(state: EvaluationState, personId: string, period: string) {
+  const plan = getUnitScorePlan(state, personId, period);
+  const records = currentPersonPerformances(state, personId, period);
+  const person = state.users.find(user => user.id === personId);
+  const departmentId = plan?.departmentId ?? records[0]?.departmentId ?? person?.departmentId;
+  const units = new Map<string, { id: string; title: string; departmentId: string }>();
+  for (const allocation of plan?.allocations ?? []) units.set(allocation.unitId, { id: allocation.unitId, title: allocation.unitTitle, departmentId: plan!.departmentId });
+  for (const unit of eligibleScoreUnits(state, personId).filter(unit => unit.departmentId === departmentId)) units.set(unit.id, { id: unit.id, title: unit.title, departmentId: unit.departmentId });
+  for (const record of records.filter(record => record.departmentId === departmentId)) {
+    const unitId = performanceUnitId(state, record);
+    const unit = state.units.find(unit => unit.id === unitId);
+    if (unitId && (unit || !plan) && !units.has(unitId)) units.set(unitId, { id: unitId, title: unit?.title || '이전 단위업무', departmentId: record.departmentId });
+  }
+  return [...units.values()];
+}
+
 /** Keep one latest half-year record per task. Legacy per-run records have no period and are excluded. */
 export function currentPersonPerformances(state: Pick<WorkspaceData, 'performances'>, personId: string, period: string): Performance[] {
   const items = state.performances.filter(performance => performance.authorId === personId && performance.period === period);
@@ -37,8 +55,7 @@ export function personUnitPerformanceSummary(state: EvaluationState, personId: s
   const evaluation = getUnitEvaluation(state, personId, period);
   const performances: (Performance | UnitPerformanceSnapshot)[] = evaluation ? evaluation.performanceSnapshot : currentPersonPerformances(state, personId, period);
   const units: { unitId: string; unitTitle: string; maxScore?: number; score?: number; comment?: string }[] = evaluation ? evaluation.scores.map(score => ({ unitId: score.unitId, unitTitle: score.unitTitle, maxScore: score.maxScore, score: score.score, comment: score.comment })) : [
-    ...eligibleScoreUnits(state, personId).map(unit => ({ unitId: unit.id, unitTitle: unit.title, maxScore: plan?.allocations.find(allocation => allocation.unitId === unit.id)?.maxScore, score: undefined, comment: undefined })),
-    ...(plan?.allocations.filter(allocation => !eligibleScoreUnits(state, personId).some(unit => unit.id === allocation.unitId)).map(allocation => ({ ...allocation, score: undefined, comment: undefined })) ?? []),
+    ...scoreUnitsForPeriod(state, personId, period).map(unit => ({ unitId: unit.id, unitTitle: unit.title, maxScore: plan?.allocations.find(allocation => allocation.unitId === unit.id)?.maxScore, score: undefined, comment: undefined })),
   ];
   // Keep historical or moved-unit evidence visible even before a score plan has been saved.
   for (const performance of performances) {

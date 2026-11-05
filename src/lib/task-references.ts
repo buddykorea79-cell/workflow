@@ -8,3 +8,8 @@ export function hasReferenceContent(reference: TaskReference) {
 export function referencesForSave(references: TaskReference[]) {
   return references.filter(hasReferenceContent);
 }
+
+/** Changing a file must never silently carry the previous file's extracted text. */
+export function referenceWithFile(reference: TaskReference, file: { id: string; name: string }, extractedText: string, keepVerifiedText = false): TaskReference {
+  return { ...reference, title: reference.title.trim() || file.name.slice(0, 300), attachmentId: file.id, content: keepVerifiedText ? reference.content : extractedText.slice(0, 10000) };
+}

@@ -1,4 +1,5 @@
 import { runWorkflow } from './work-cycles';
+import { commonDeadline } from './common-deadline';
 import type { CommonDistribution, CommonExecutionStatus, CommonStage, CommonSummary, CommonTask, Run, Task, WorkspaceData } from './types';
 
 const timestamp = (value?: string) => value && Number.isFinite(Date.parse(value)) ? Date.parse(value) : 0;
@@ -66,14 +67,16 @@ export function commonDistributionStatus(state: Pick<WorkspaceData, 'users' | 't
   const eligibleActors = [...new Set(nextActorIds)].filter(active);
   if (nextActorIds.length && !eligibleActors.length) nextAction += ' 해당 역할의 활성 담당자도 확인해 주세요.';
   nextActorIds = eligibleActors;
-  const dueDate = execution.run?.dueDate ?? task?.dueDate ?? common.dueDate;
+  const dueDate = commonDeadline(common, execution.run);
+  const executionDueDate = execution.run?.dueDate ?? task?.dueDate;
+  const scheduleExceedsDeadline = !!executionDueDate && executionDueDate > dueDate;
   const today = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Seoul', year: 'numeric', month: '2-digit', day: '2-digit' }).format(now);
   const overdue = /^\d{4}-\d{2}-\d{2}$/.test(dueDate) && dueDate < today && stage !== 'completed' && !['paused', 'archived', 'deleted'].includes(executionStatus);
   const updatedAt = latestTimestamp([distribution.distributedAt, distribution.teamAssignedAt, distribution.personAssignedAt, distribution.registeredAt, task?.updatedAt, task?.deletedAt, unit?.deletedAt, execution.run?.startedAt, execution.run?.completedAt, execution.run?.updatedAt, ...(execution.run?.steps.flatMap(step => [step.completedAt, ...step.checklist.map(item => item.completedAt)]) ?? []), ...(execution.run?.notes.map(note => note.createdAt) ?? [])], distribution.distributedAt);
   // status stays compatible with older clients, while stage is the explicit
   // read model. Never leave a stale submitted badge on a new unfinished run.
   const status = registered ? executionStatus === 'completed' ? 'submitted' : distribution.status === 'assigned' ? 'assigned' : 'registered' : distribution.status;
-  return { ...distribution, status, stage, executionStatus, nextActorIds, nextAction, currentAssigneeId: registered ? execution.run?.primaryId ?? task?.primaryId : undefined, taskOwnerId: registered ? task?.primaryId : undefined, progress: execution.progress, completedSteps: execution.completedSteps, totalSteps: execution.totalSteps, dueDate, updatedAt, overdue, unitTitle: unit?.title, taskTitle: task?.title, runId: execution.run?.id, period: execution.run?.period, progressSource: execution.source };
+  return { ...distribution, status, stage, executionStatus, nextActorIds, nextAction, currentAssigneeId: registered ? execution.run?.primaryId ?? task?.primaryId : undefined, taskOwnerId: registered ? task?.primaryId : undefined, progress: execution.progress, completedSteps: execution.completedSteps, totalSteps: execution.totalSteps, dueDate, executionDueDate, scheduleExceedsDeadline, updatedAt, overdue, unitTitle: unit?.title, taskTitle: task?.title, runId: execution.run?.id, period: execution.run?.period, progressSource: execution.source };
 }
 
 /** The denominator is the already permission-filtered department assignments.

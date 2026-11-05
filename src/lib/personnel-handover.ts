@@ -1,6 +1,7 @@
-import { randomUUID } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import { z } from 'zod';
 import type { Run, Task, Unit, User, WorkTransfer, WorkTransferEvent, WorkspaceData } from './types';
+import { residualTransferRoles, transferRoleRecipientError } from './transfer-roles';
 
 type Fail = (status: number, code: string, message: string) => never;
 type Result = { targetId: string; departmentId: string; title: string; detail: string };
@@ -13,6 +14,30 @@ const isActive = (user: User, now: Date) => user.active && (!user.endsAt || new 
 const eligibleTask = (state: WorkspaceData, task: Task) => !task.deletedAt && task.status !== 'archived' && state.units.some(unit => unit.id === task.unitId && !unit.deletedAt);
 const coordinator = (user: User, departmentId: string) => user.role === 'admin' || user.role === 'manager' && user.departmentId === departmentId;
 const departmentHead = (user: User, departmentId: string) => user.role === 'head' && user.departmentId === departmentId;
+
+/** Definition identity excludes execution progress and the separately recorded
+ * expenses/produced documents. Draft edits may not increment task.version. */
+function definitionFingerprint(task: Task): string {
+  const definition = {
+    title: task.title, description: task.description, departmentId: task.departmentId,
+    unitId: task.unitId, primaryId: task.primaryId, supportIds: [...task.supportIds].sort(),
+    reviewerId: task.reviewerId, status: task.status, priority: task.priority,
+    frequency: task.frequency, dueDate: task.dueDate, tags: [...task.tags].sort(),
+    completionCriteria: task.completionCriteria, card: task.card, sourceIds: [...task.sourceIds].sort(),
+    commonId: task.commonId, budget: task.budget,
+    workflow: task.workflow.map(step => ({
+      id: step.id, title: step.title, role: step.role, description: step.description,
+      output: step.output, required: step.required, dependsOn: step.dependsOn,
+      checklist: step.checklist, startDate: step.startDate, dueDate: step.dueDate,
+      scheduleDetails: step.scheduleDetails,
+    })),
+    references: (task.references ?? []).filter(reference => reference.type !== 'document').map(reference => ({
+      id: reference.id, type: reference.type, title: reference.title, content: reference.content,
+      url: reference.url, attachmentId: reference.attachmentId,
+    })),
+  };
+  return createHash('sha256').update(JSON.stringify(definition)).digest('hex');
+}
 
 function parse<T>(schema: z.ZodType<T>, input: unknown, fail: Fail): T {
   const result = schema.safeParse(input);
@@ -33,7 +58,7 @@ function event(transfer: WorkTransfer, user: User, action: WorkTransferEvent['ac
 }
 
 function notify(state: WorkspaceData, userIds: string[], transfer: WorkTransfer, title: string) {
-  for (const userId of new Set(userIds)) state.notifications.unshift({ id: id('notification'), userId, title, description: `${transfer.fromName} → ${transfer.toName} · 단위 ${transfer.unitIds.length}개 / 세부 ${transfer.taskIds.length}건 / 진행 ${transfer.runIds.length}회차`, type: 'handover', targetId: transfer.id, read: false });
+  for (const userId of new Set(userIds)) state.notifications.unshift({ id: id('notification'), userId, title, description: transfer.kind === 'roles' ? `${transfer.fromName} → ${transfer.toName} · 남은 역할 ${transfer.roles?.length ?? 0}건` : `${transfer.fromName} → ${transfer.toName} · 단위 ${transfer.unitIds.length}개 / 세부 ${transfer.taskIds.length}건 / 진행 ${transfer.runIds.length}회차`, type: 'handover', targetId: transfer.id, read: false });
 }
 
 function audit(state: WorkspaceData, user: User, transfer: WorkTransfer, action: string, title: string, detail: string, now: Date) {
@@ -85,7 +110,7 @@ function snapshotTransfer(state: WorkspaceData, user: User, input: z.infer<typeo
     requestedBy: user.id, requestedByName: user.name, reason: input.reason, createdAt: now.toISOString(),
     unitIds: units.map(unit => unit.id), taskIds: tasks.map(task => task.id),
     units: units.map(unit => ({ unitId: unit.id, title: unit.title, ownerId: unit.ownerId })),
-    tasks: tasks.map(task => ({ taskId: task.id, code: task.code, title: task.title, unitId: task.unitId, unitTitle: state.units.find(unit => unit.id === task.unitId)!.title, primaryId: task.primaryId, version: task.version, updatedAt: task.updatedAt })),
+    tasks: tasks.map(task => ({ taskId: task.id, code: task.code, title: task.title, unitId: task.unitId, unitTitle: state.units.find(unit => unit.id === task.unitId)!.title, primaryId: task.primaryId, version: task.version, updatedAt: task.updatedAt, definitionFingerprint: definitionFingerprint(task) })),
     runIds: runs.map(run => run.id), requestedRunIds: explicitRuns.map(run => run.id),
     executionOnly: runs.filter(run => !tasks.some(task => task.id === run.taskId)).map(run => ({ runId: run.id, taskId: run.taskId, taskTitle: state.tasks.find(task => task.id === run.taskId)?.title ?? run.title, fromId: input.fromId, toId: input.toId })),
     executions: runs.map(run => ({ runId: run.id, taskId: run.taskId, taskTitle: state.tasks.find(task => task.id === run.taskId)?.title ?? run.title, primaryId: run.primaryId, reviewerId: run.reviewerId, departmentId: run.departmentId, definitionVersion: run.definitionVersion })), events: [],
@@ -102,6 +127,7 @@ function uniqueTitle(state: WorkspaceData, title: string, ownerId: string, depar
 
 /** Moves current responsibility, while completed executions and historical snapshots remain intact. */
 function apply(state: WorkspaceData, transfer: WorkTransfer, user: User, now: Date, fail: Fail) {
+  if (transfer.kind === 'roles') return applyRoles(state, transfer, user, now, fail);
   const target = recipient(state, transfer.toId, transfer.departmentId, now, transfer.kind === 'emergency', fail);
   const { units, tasks } = selectedWork(state, transfer.departmentId, transfer.fromId, transfer.unitIds, transfer.taskIds, fail, transfer.runIds.length > 0);
   for (const original of transfer.executions ?? []) {
@@ -116,7 +142,7 @@ function apply(state: WorkspaceData, transfer: WorkTransfer, user: User, now: Da
   }
   for (const task of tasks) {
     const original = transfer.tasks.find(item => item.taskId === task.id);
-    if (!original || task.unitId !== original.unitId || task.primaryId !== original.primaryId || task.version !== original.version || task.updatedAt !== original.updatedAt) fail(409, 'TRANSFER_TASK_CHANGED', '요청 이후 세부업무가 변경되었습니다. 최신 내용을 확인하고 다시 요청해 주세요.');
+    if (!original || task.unitId !== original.unitId || task.primaryId !== original.primaryId || task.version !== original.version || (original.definitionFingerprint ? definitionFingerprint(task) !== original.definitionFingerprint : task.updatedAt !== original.updatedAt)) fail(409, 'TRANSFER_TASK_CHANGED', original && !original.definitionFingerprint ? '이전 형식의 요청 이후 업무가 변경되었습니다. 최신 업무로 취소 후 다시 요청해 주세요.' : '요청 이후 업무 기준이나 담당 역할이 변경되었습니다. 최신 내용을 확인하고 다시 요청해 주세요.');
   }
   const movingRuns = state.runs.filter(run => run.departmentId === transfer.departmentId && run.status !== 'completed' && run.primaryId === transfer.fromId && (transfer.taskIds.includes(run.taskId) || transfer.runIds.includes(run.id)));
   let replacementReviewer: User | undefined;
@@ -185,6 +211,85 @@ function apply(state: WorkspaceData, transfer: WorkTransfer, user: User, now: Da
   transfer.status = 'completed'; transfer.appliedAt = now.toISOString(); transfer.resolvedBy = user.id; transfer.resolvedAt = now.toISOString();
 }
 
+function applyRoles(state: WorkspaceData, transfer: WorkTransfer, user: User, now: Date, fail: Fail) {
+  const target = state.users.find(person => person.id === transfer.toId);
+  if (!target || !isActive(target, now) || target.departmentId !== transfer.departmentId) fail(422, 'TRANSFER_RECIPIENT_SCOPE', '같은 부서의 활성 후임을 확인해 주세요.');
+  const current = residualTransferRoles(state, transfer.fromId, transfer.departmentId, now);
+  const roles = transfer.roles ?? [];
+  if (!roles.length) fail(422, 'TRANSFER_EMPTY', '정리할 역할을 선택해 주세요.');
+  for (const role of roles) {
+    const latest = current.find(item => item.id === role.id);
+    if (!latest || latest.fingerprint !== role.fingerprint) fail(409, 'TRANSFER_ROLE_CHANGED', '요청 이후 역할 배정 또는 업무 기준이 달라졌습니다. 최신 역할로 다시 요청해 주세요.');
+    const error = transferRoleRecipientError(state, latest, target!, now);
+    if (error) fail(422, 'TRANSFER_ROLE_RECIPIENT', error);
+  }
+  if ((state.workTransfers ?? []).some(other => other.id !== transfer.id && other.status === 'pending' && (other.roles?.some(role => roles.some(item => item.id === role.id)) || overlaps(other, [], transfer.taskIds, state.tasks.filter(task => transfer.taskIds.includes(task.id)), transfer.runIds)))) fail(409, 'DUPLICATE_HANDOVER', '관련 업무에 다른 인수인계 요청이 진행 중입니다. 먼저 정리해 주세요.');
+  const taskRoles = new Map<string, typeof roles>();
+  for (const role of roles) {
+    if (role.kind === 'task_support' || role.kind === 'task_reviewer') {
+      taskRoles.set(role.targetId, [...(taskRoles.get(role.targetId) ?? []), role]);
+    } else if (role.kind === 'run_support' || role.kind === 'run_reviewer') {
+      const run = state.runs.find(item => item.id === role.targetId)!;
+      if (role.kind === 'run_support') run.supportIds = [...new Set(run.supportIds.map(personId => personId === transfer.fromId ? target!.id : personId))];
+      else run.reviewerId = target!.id;
+      if (run.primaryId === run.reviewerId || run.supportIds.includes(run.reviewerId)) fail(409, 'SELF_REVIEW', '수행·지원과 검토 역할은 서로 달라야 합니다.');
+      run.updatedAt = now.toISOString();
+    } else if (role.kind === 'common_manager') {
+      const common = state.commonTasks.find(item => item.id === role.targetId)!;
+      common.managerId = target!.id; common.version++;
+    } else if (role.kind === 'distribution_lead' || role.kind === 'distribution_assignee') {
+      const distribution = state.commonTasks.find(item => item.id === role.commonId)!.distributions.find(item => item.id === role.targetId)!;
+      if (role.kind === 'distribution_lead') { distribution.leadId = target!.id; distribution.teamAssignedAt = now.toISOString(); }
+      else { distribution.assigneeId = target!.id; distribution.personAssignedAt = now.toISOString(); }
+    } else {
+      state.delegations.find(item => item.id === role.targetId)!.revokedAt = now.toISOString();
+    }
+  }
+  for (const [taskId, selected] of taskRoles) {
+    const task = state.tasks.find(item => item.id === taskId)!;
+    const confirmed = task.versions.at(-1);
+    const changeRoles = (assignment: { primaryId?: string; supportIds?: string[]; reviewerId?: string }) => {
+      if (selected.some(role => role.kind === 'task_support') && assignment.supportIds?.includes(transfer.fromId)) assignment.supportIds = [...new Set(assignment.supportIds.map(personId => personId === transfer.fromId ? target!.id : personId))];
+      if (selected.some(role => role.kind === 'task_reviewer') && assignment.reviewerId === transfer.fromId) assignment.reviewerId = target!.id;
+      if (assignment.primaryId === assignment.reviewerId || assignment.reviewerId && assignment.supportIds?.includes(assignment.reviewerId)) fail(409, 'SELF_REVIEW', '수행·지원과 검토 역할은 서로 달라야 합니다.');
+    };
+    changeRoles(task); task.updatedAt = now.toISOString();
+    if (confirmed) {
+      const next = structuredClone(confirmed); changeRoles(next);
+      task.version = Math.max(task.version, confirmed.version) + 1;
+      task.versions.push({ ...next, version: task.version, confirmedBy: user.id, confirmedAt: now.toISOString() });
+    }
+  }
+  transfer.status = 'completed'; transfer.appliedAt = now.toISOString(); transfer.resolvedBy = user.id; transfer.resolvedAt = now.toISOString();
+}
+
+function requestRoles(state: WorkspaceData, user: User, payload: Record<string, unknown>, now: Date, fail: Fail): Result {
+  const input = parse(z.object({ departmentId: value, fromId: value, toId: value, roleIds: z.array(value.max(300)).min(1).max(2000), reason }), payload, fail);
+  if (!coordinator(user, input.departmentId) && !departmentHead(user, input.departmentId) && !(user.id === input.fromId && user.departmentId === input.departmentId)) fail(403, 'TRANSFER_REQUEST_DENIED', '본인 역할 또는 담당 부서의 역할만 정리 요청할 수 있습니다.');
+  const source = state.users.find(person => person.id === input.fromId), target = state.users.find(person => person.id === input.toId);
+  if (!source || !target || source.id === target.id) fail(422, 'TRANSFER_RECIPIENT_ROLE', '기존 담당자와 다른 후임을 선택해 주세요.');
+  if (new Set(input.roleIds).size !== input.roleIds.length) fail(422, 'TRANSFER_DUPLICATE_SELECTION', '역할 선택이 중복되었습니다.');
+  const available = residualTransferRoles(state, input.fromId, input.departmentId, now);
+  const roles = input.roleIds.map(roleId => {
+    const role = available.find(item => item.id === roleId);
+    if (!role) return fail(409, 'TRANSFER_ROLE_CHANGED', '인계자의 현재 역할만 선택할 수 있습니다. 목록을 새로 확인해 주세요.');
+    const error = transferRoleRecipientError(state, role, target!, now);
+    if (error) return fail(422, 'TRANSFER_ROLE_RECIPIENT', error);
+    return role;
+  });
+  const heads = state.users.filter(person => departmentHead(person, input.departmentId) && isActive(person, now));
+  if (!heads.length) fail(409, 'TRANSFER_APPROVER_REQUIRED', '승인할 부서장을 확인해 주세요.');
+  const taskIds = [...new Set(roles.flatMap(role => role.taskId ? [role.taskId] : []))];
+  const runIds = roles.filter(role => role.kind.startsWith('run_')).map(role => role.targetId);
+  const tasks = state.tasks.filter(task => taskIds.includes(task.id));
+  if ((state.workTransfers ?? []).some(item => item.status === 'pending' && (item.roles?.some(role => roles.some(selected => selected.id === role.id)) || overlaps(item, [], taskIds, tasks, runIds))) || state.handovers.some(item => !['completed', 'cancelled'].includes(item.status) && (item.taskIds.some(id => taskIds.includes(id)) || item.runIds.some(id => runIds.includes(id))))) fail(409, 'DUPLICATE_HANDOVER', '관련 업무나 역할에 진행 중인 인수인계가 있습니다. 먼저 처리해 주세요.');
+  const transfer: WorkTransfer = { id: id('transfer'), kind: 'roles', status: 'pending', departmentId: input.departmentId, fromId: source!.id, fromName: source!.name, toId: target!.id, toName: target!.name, requestedBy: user.id, requestedByName: user.name, reason: input.reason, createdAt: now.toISOString(), unitIds: [], taskIds, units: [], tasks: tasks.map(task => ({ taskId: task.id, code: task.code, title: task.title, unitId: task.unitId, unitTitle: state.units.find(unit => unit.id === task.unitId)?.title ?? '기존 업무', primaryId: task.primaryId, version: task.version, updatedAt: task.updatedAt })), runIds: [...new Set(runIds)], roles, events: [] };
+  event(transfer, user, 'requested', `${input.reason} · 남은 역할 ${roles.length}건`, now);
+  (state.workTransfers ??= []).unshift(transfer);
+  notify(state, heads.map(head => head.id), transfer, '남은 역할 정리 승인 요청');
+  return { targetId: transfer.id, departmentId: transfer.departmentId, title: '남은 역할 정리 승인 요청', detail: `${source!.name} → ${target!.name} · 역할 ${roles.length}건 · ${input.reason}` };
+}
+
 function cancelOverlapping(state: WorkspaceData, transfer: WorkTransfer, user: User, now: Date) {
   const note = `긴급 이관으로 기존 요청 취소: ${transfer.reason}`;
   const tasks = state.tasks.filter(task => transfer.taskIds.includes(task.id));
@@ -200,6 +305,7 @@ function cancelOverlapping(state: WorkspaceData, transfer: WorkTransfer, user: U
 }
 
 function execute(state: WorkspaceData, user: User, type: string, payload: Record<string, unknown>, now: Date, fail: Fail): Result {
+  if (type === 'transfer.rolesRequest') return requestRoles(state, user, payload, now, fail);
   if (type === 'transfer.emergency' || type === 'transfer.request') {
     const emergency = type === 'transfer.emergency';
     const input = parse(emergency ? emergencyInput : requestInput, payload, fail);
@@ -243,7 +349,7 @@ function execute(state: WorkspaceData, user: User, type: string, payload: Record
       if (state.handovers.some(item => !['completed', 'cancelled'].includes(item.status) && (item.taskIds.some(taskId => transfer.taskIds.includes(taskId)) || item.runIds.some(runId => transfer.runIds.includes(runId))))) fail(409, 'DUPLICATE_HANDOVER', '새로 생성된 다른 인수인계 요청을 먼저 정리해 주세요.');
       apply(state, transfer, user, now, fail);
       transfer.approvedBy = user.id; transfer.approvedAt = now.toISOString();
-      event(transfer, user, 'approved', input.reason ?? '부서장 승인으로 업무 배정 완료', now); title = '부서장 승인 · 인수인계 배정 완료';
+      event(transfer, user, 'approved', input.reason ?? (transfer.kind === 'roles' ? '부서장 승인으로 남은 역할 정리 완료' : '부서장 승인으로 업무 배정 완료'), now); title = transfer.kind === 'roles' ? '부서장 승인 · 남은 역할 정리 완료' : '부서장 승인 · 인수인계 배정 완료';
     } else {
       if (!input.reason) fail(422, 'TRANSFER_REASON_REQUIRED', '반려 사유를 입력해 주세요.');
       transfer.status = 'rejected'; transfer.resolvedBy = user.id; transfer.resolvedAt = now.toISOString(); transfer.resolutionReason = input.reason;
@@ -255,7 +361,7 @@ function execute(state: WorkspaceData, user: User, type: string, payload: Record
     event(transfer, user, 'cancelled', transfer.resolutionReason, now); title = '인수인계 요청 취소';
   } else return fail(422, 'UNKNOWN_COMMAND', '지원하지 않는 인수인계 작업입니다.');
   notify(state, [transfer.requestedBy, transfer.fromId, transfer.toId], transfer, title);
-  return { targetId: transfer.id, departmentId: transfer.departmentId, title, detail: `${transfer.fromName} → ${transfer.toName} · 단위 ${transfer.unitIds.length}개 / 세부 ${transfer.taskIds.length}건 / 진행 ${transfer.runIds.length}회차${transfer.resolutionReason ? ` · ${transfer.resolutionReason}` : ''}` };
+  return { targetId: transfer.id, departmentId: transfer.departmentId, title, detail: `${transfer.fromName} → ${transfer.toName} · ${transfer.kind === 'roles' ? `역할 ${transfer.roles?.length ?? 0}건` : `단위 ${transfer.unitIds.length}개 / 세부 ${transfer.taskIds.length}건 / 진행 ${transfer.runIds.length}회차`}${transfer.resolutionReason ? ` · ${transfer.resolutionReason}` : ''}` };
 }
 
 export function executePersonnelTransfer(state: WorkspaceData, user: User, type: string, payload: Record<string, unknown>, now: Date, fail: Fail): Result {

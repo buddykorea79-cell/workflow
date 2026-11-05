@@ -130,7 +130,9 @@ test('cycles: common distribution returns to new execution with its own schedule
   assert.equal(commonDistributionStatus(state, common, distribution, now).stage, 'completed');
   dispatch(state, owner, 'run.nextCycle', payload(state, commonTaskId));
   const next = commonDistributionStatus(state, common, distribution, now);
-  assert.equal(next.stage, 'in_progress'); assert.equal(next.progress, 0); assert.equal(next.dueDate, '2026-12-20');
+  assert.equal(next.stage, 'in_progress'); assert.equal(next.progress, 0);
+  assert.equal(next.dueDate, '2026-11-20'); // Central quarterly deadline remains fixed within the reporting period.
+  assert.equal(next.executionDueDate, '2026-12-20'); assert.equal(next.scheduleExceedsDeadline, true);
 });
 
 test('cycles: an unpublished revised procedure must be confirmed before repeating its execution', () => {

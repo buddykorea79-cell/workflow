@@ -114,7 +114,13 @@ export default function Workspace() {
       const response = await fetch('/api/commands', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ type, payload, expectedRevision: currentRef.current.revision, requestId: crypto.randomUUID() }) });
       const result = await response.json();
       if (!response.ok) { if (response.status === 409) await loadWorkspace(); if (response.status === 401) setWorkspace(null); throw new Error(result.error || '요청을 처리하지 못했습니다.'); }
-      currentRef.current = result; setWorkspace(result); setNotice({ text: '변경 내용을 저장했습니다.' }); return true;
+      currentRef.current = result; setWorkspace(result); setNotice({ text: '변경 내용을 저장했습니다.' });
+      if (type.startsWith('organization.user') || type === 'organization.departmentCreate') {
+        setUsers([]); setDepartments([]);
+        try { await loadSession(); }
+        catch { setNotice({ text: '변경은 저장했습니다. 시연 계정 목록을 새로 불러오려면 화면을 새로고침해 주세요.', error: true }); }
+      }
+      return true;
     } catch (error) { setNotice({ text: error instanceof Error ? error.message : '저장하지 못했습니다.', error: true }); return false; }
     finally { locked.current = false; setBusy(false); }
   };

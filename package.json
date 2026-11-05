@@ -9,6 +9,7 @@
     "typecheck": "tsc --noEmit",
     "test": "tsx --test tests/*.test.ts",
     "neon:check": "node --env-file=.env.local --import tsx scripts/check-neon.ts",
+    "neon:files:check": "node --env-file=.env.local --import tsx scripts/check-neon-files.ts",
     "neon:import": "node --env-file=.env.local --import tsx scripts/import-local-neon.ts",
     "neon:import:apply": "node --env-file=.env.local --import tsx scripts/import-local-neon.ts --apply",
     "neon:storage:setup": "node --env-file=.env.local --import tsx scripts/setup-neon-storage.ts"

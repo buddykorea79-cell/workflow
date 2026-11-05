@@ -1,5 +1,8 @@
 'use client';
 
+import { commonDeadline } from '@/lib/common-deadline';
+import { currentPeriod } from '@/lib/schedule';
+
 import { useState, type ReactNode } from 'react';
 import { ArrowRight, CalendarDays, Check, CheckCircle2, ChevronDown, FileText, History, LockKeyhole, Pencil, RotateCcw, UserRound, X } from 'lucide-react';
 import type { Run, Task, WorkflowStep, Workspace } from '@/lib/types';
@@ -83,6 +86,9 @@ function CycleScheduleForm({ workspace: w, task, latest, cycleNumber, mode, comm
   }));
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
+  const common = w.commonTasks.find(item => item.id === task.commonId);
+  const reportingRun = isNext && common && validDate(startDate) ? { period: currentPeriod(common.frequency, new Date(`${startDate}T12:00:00+09:00`)) } : latest;
+  const deadline = common ? commonDeadline(common, reportingRun) : undefined;
   const updateStart = (value: string) => {
     if (validDate(startDate) && validDate(value)) {
       const shift = Math.round((dayValue(value) - dayValue(startDate)) / 86_400_000);
@@ -113,6 +119,7 @@ function CycleScheduleForm({ workspace: w, task, latest, cycleNumber, mode, comm
   }}>
     <div className="wc-form-heading"><div><span>{isNext ? '새로운 업무 사이클' : '이번 업무 사이클'}</span><h3>{cycleNumber}회차 일정 등록</h3></div><button type="button" className="icon-btn" aria-label="일정 등록 닫기" disabled={saving} onClick={onClose}><X size={18} /></button></div>
     <p className="wc-form-description">{isNext ? '등록된 절차를 새 일정에 적용합니다. 완료 표시·체크리스트·결과물은 새로 시작하며 지난 회차의 기록은 보존합니다.' : '만들어진 절차별로 날짜와 이번 회차에서 수행할 세부 내용을 입력하세요. 저장한 날짜는 전체 일정에도 표시됩니다.'}</p>
+    {deadline && <p className={validDate(dueDate) && dueDate > deadline ? "wc-warning" : "wc-note"} role="status">중앙 제출기한: {deadline}. {validDate(dueDate) && dueDate > deadline ? "내부 종료일이 중앙 제출기한을 넘습니다. 저장해도 제출기한은 연장되지 않고 중앙 기준으로 지연 표시됩니다." : "회차 일정을 수정해도 중앙 제출기한은 유지됩니다."}</p>}
     <fieldset disabled={saving || disabled} className="wc-form-fields">
     <div className="form-grid"><Field label="회차 이름" span><input required maxLength={150} value={title} onChange={event => setTitle(event.target.value)} /></Field><Field label="회차 시작일"><input type="date" required value={startDate} onChange={event => updateStart(event.target.value)} /></Field><Field label="회차 종료일"><input type="date" required min={startDate || undefined} value={dueDate} onChange={event => { setDueDate(event.target.value); setError(''); }} /></Field><Field label="이번 회차 세부 내용" span><textarea rows={3} maxLength={5000} value={scheduleDetails} placeholder="이번 회차의 목표, 대상, 제출 일정 등을 입력하세요." onChange={event => setScheduleDetails(event.target.value)} /></Field></div>
     <p className="wc-note"><CalendarDays size={14} />시작일을 바꾸면 이전 절차의 일정 간격을 유지해 함께 옮깁니다. 각 날짜를 개별 조정할 수 있습니다.</p>

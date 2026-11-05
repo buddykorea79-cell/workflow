@@ -76,16 +76,23 @@ test('work division: all personal definition routes, trash restore, admin overri
   dispatch(state, 'u-jiho', 'unit.create', { title: '다른 부서 독립 작성', description: '잠금 범위 밖' });
 });
 
-test('work division: common delivery, staged and legacy assignments cannot add work to a confirmed department', () => {
+test('work division: common delivery can reach a confirmed inbox while staged and legacy assignments remain locked', () => {
   const state = createSeed(now);
   dispatch(state, 'u-jiho', 'common.create', { title: '배정 대기 공통업무', description: '잠금 전에 접수', departmentIds: ['dept-support'], dueDate: '2026-11-30', frequency: 'once', requiredSteps: ['자료 확인', '부서장 검토'] });
   const commonId = state.commonTasks[0].id; const distributionId = state.commonTasks[0].distributions[0].id;
   confirmData(state);
   for (const type of ['common.assignTeam', 'common.assignPerson', 'common.register']) rejects('DEPARTMENT_CONFIRMED', () => dispatch(state, 'u-admin', type, { commonId, distributionId, unitId: dataUnitId }));
   rejects('DEPARTMENT_CONFIRMED', () => dispatch(state, 'u-admin', 'common.assign', { commonId, departmentId: 'dept-support' }));
-  for (const kind of ['common', 'directive']) rejects('DEPARTMENT_CONFIRMED', () => dispatch(state, 'u-jiho', 'common.create', { kind, title: '확정 후 추가', description: '부서 잠금', departmentIds: ['dept-support'], dueDate: '2026-11-30', frequency: 'once', requiredSteps: ['검토'] }));
+  const beforeTasks = structuredClone(state.tasks), beforeUnits = structuredClone(state.units);
+  for (const kind of ['common', 'directive']) {
+    dispatch(state, 'u-jiho', 'common.create', { kind, title: '확정 후 추가', description: '접수함에 보관', departmentIds: ['dept-support'], dueDate: '2026-11-30', frequency: 'once', requiredSteps: ['검토'], ...(kind === 'directive' ? { directiveIssuer: 'minister', instructedOn: '2026-10-31' } : {}) });
+    assert.equal(state.commonTasks[0].distributions[0].status, 'pending');
+    assert.equal(state.commonTasks[0].distributions[0].taskId, undefined);
+  }
+  assert.deepEqual(state.tasks, beforeTasks); assert.deepEqual(state.units, beforeUnits);
   dispatch(state, 'u-jiho', 'common.create', { title: '기획부서용', description: '잠금되지 않은 부서', departmentIds: ['dept-plan'], dueDate: '2026-11-30', frequency: 'once', requiredSteps: ['검토'] });
-  rejects('DEPARTMENT_CONFIRMED', () => dispatch(state, 'u-jiho', 'common.distribute', { commonId: state.commonTasks[0].id, departmentIds: ['dept-support'] }));
+  dispatch(state, 'u-jiho', 'common.distribute', { commonId: state.commonTasks[0].id, departmentIds: ['dept-support'] });
+  assert.equal(state.commonTasks[0].distributions.at(-1)?.status, 'pending');
 });
 
 test('work division: scheduled handovers cannot silently change a confirmed division and resume only after reopening', () => {

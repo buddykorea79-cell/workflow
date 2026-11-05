@@ -5,9 +5,10 @@ import { z } from 'zod';
 import { createRun, commonWorkflow, defaultCard, defaultWorkflow, koreaDate, snapshot } from './seed';
 import { commonDistributionStatus, summarizeCommon, taskExecution } from './common-status';
 import { departmentWorkPlan, isDepartmentConfirmed, isRegisteredWork, userIdentity, workDivisionSnapshot } from './work-division';
-import { currentPersonPerformances, eligibleScoreUnits, getUnitEvaluation, getUnitScorePlan, hasCompletePerformance, missingPerformanceUnitIds, performanceUnitId, UNIT_SCORE_TOTAL } from './unit-evaluation';
+import { currentPersonPerformances, scoreUnitsForPeriod, getUnitEvaluation, getUnitScorePlan, hasCompletePerformance, missingPerformanceUnitIds, performanceUnitId, UNIT_SCORE_TOTAL } from './unit-evaluation';
 import { canManageDirective, canRecordDirectiveReport, directiveIssuerLabels, directiveReportStartMonth, isCentralDirective, isDirectiveCoordinator } from './directives';
 import { executePersonnelTransfer } from './personnel-handover';
+import { organizationIdentityIssue, organizationUserChangeIssue } from './organization-management';
 import type { AuditEvent, Command, CommonTask, CommonDistribution, Handover, PerformanceSubmissionStatus, Run, Source, Task, Unit, User, WorkflowStep, Workspace, WorkspaceData } from './types';
 
 export class DomainError extends Error { constructor(public status: number, public code: string, message: string) { super(message); } }
@@ -46,7 +47,7 @@ export function assertDefinitionWritable(state: WorkspaceData, user: User, depar
 }
 /** Central definition gate covers both current commands and legacy mutation paths. */
 function assertDefinitionCommand(state: WorkspaceData, user: User, type: string, p: Record<string, unknown>) {
-  const taskDefinition = type.startsWith('task.') && type !== 'task.setProgress';
+  const taskDefinition = type.startsWith('task.') && !['task.setProgress', 'task.record'].includes(type);
   const unitDefinition = type.startsWith('unit.');
   const commonDefinition = type.startsWith('common.');
   const delegationDefinition = type.startsWith('delegation.');
@@ -66,14 +67,9 @@ function assertDefinitionCommand(state: WorkspaceData, user: User, type: string,
   }
   if (commonDefinition) {
     const common = state.commonTasks.find(item => item.id === p.commonId);
-    if (type === 'common.create') {
-      departments.add(user.departmentId);
-      const targets = p.distributionMode === 'all' ? state.departments.map(item => item.id) : Array.isArray(p.departmentIds) ? p.departmentIds : [];
-      targets.forEach(value => { if (typeof value === 'string') departments.add(value); });
-    } else if (type === 'common.distribute') {
-      const owner = state.users.find(item => item.id === common?.managerId); if (owner) departments.add(owner.departmentId);
-      if (Array.isArray(p.departmentIds)) p.departmentIds.forEach(value => { if (typeof value === 'string' && !common?.departmentIds.includes(value)) departments.add(value); });
-    } else if (type === 'common.assign') departments.add(typeof p.departmentId === 'string' ? p.departmentId : user.departmentId);
+    // Delivery adds an inbox item, not an approved departmental assignment.
+    if (type === 'common.create' || type === 'common.distribute') { /* existing assignments remain locked */ }
+    else if (type === 'common.assign') departments.add(typeof p.departmentId === 'string' ? p.departmentId : user.departmentId);
     else { const distribution = common?.distributions.find(item => item.id === p.distributionId); if (distribution) departments.add(distribution.departmentId); }
   }
   if (handoverDefinition) {
@@ -180,6 +176,8 @@ function makeCommonTask(state: WorkspaceData, common: CommonTask, departmentId: 
   return { id: id('task'), code: `WK-${String(state.tasks.length + 1).padStart(3, '0')}`, title: common.title, description: common.description, unitId, departmentId, primaryId, supportIds: [], reviewerId, status: 'draft', priority: common.kind === 'directive' ? 'high' : 'medium', frequency: common.frequency, dueDate: common.dueDate, tags: [common.kind === 'directive' ? '지시사항' : '공통업무', ...(common.projectName ? [common.projectName] : [])], version: 1, completionCriteria: '공통 필수 절차 수행 및 부서장 결과 검토', card: defaultCard(common.description), workflow: commonWorkflow(common.requiredSteps), sourceIds: [], versions: [], commonId: common.id, budget: 0, expenses: [], references: common.kind === 'directive' ? [{ id: id('reference'), type: 'directive', title: common.title, content: common.description }] : [], createdAt: now.toISOString(), updatedAt: now.toISOString() };
 }
 function createDirectiveTask(state: WorkspaceData, common: CommonTask, distribution: CommonDistribution, now: Date) {
+  // A confirmed division can receive directives without adding provisional units or tasks.
+  if (isDepartmentConfirmed(state, distribution.departmentId)) return;
   const manager = state.users.find(u => u.departmentId === distribution.departmentId && u.role === 'manager' && u.active);
   const head = state.users.find(u => u.departmentId === distribution.departmentId && u.role === 'head' && u.active);
   if (!manager || !head) fail(422, 'DEPARTMENT_STAFF_REQUIRED', '지시사항을 받을 부서의 담당자와 부서장을 먼저 등록해 주세요.');
@@ -234,6 +232,7 @@ export function getWorkspace(state: WorkspaceData, userId: string, now = new Dat
     const { snapshot: _snapshot, history: _history, ...metadata } = plan; return metadata;
   });
   const canReadEvaluation = (item: { personId: string; departmentId: string }) => user.role === 'admin' || user.role === 'head' && item.departmentId === user.departmentId || item.personId === user.id;
+  for (const item of [...(state.unitScorePlans ?? []), ...(state.unitEvaluations ?? []), ...state.performances.filter(performance => performance.period).map(performance => ({ personId: performance.authorId, departmentId: performance.departmentId }))].filter(canReadEvaluation)) identityIds.add(item.personId);
   const submissionKeys = new Map<string, { personId: string; departmentId: string; period: string }>();
   for (const item of [...(state.unitScorePlans ?? []), ...(state.unitEvaluations ?? []), ...state.performances.filter(performance => performance.period).map(performance => ({ personId: performance.authorId, departmentId: performance.departmentId, period: performance.period! }))]) {
     if (item.personId === user.id || isManager(user) && deptIds.has(item.departmentId)) submissionKeys.set(`${item.personId}:${item.period}`, { personId: item.personId, departmentId: item.departmentId, period: item.period });
@@ -256,7 +255,7 @@ export function executeCommand(state: WorkspaceData, userId: string, raw: unknow
   const p = command.payload; let targetId = ''; let departmentId = user.departmentId; let detail = ''; let title = '';
   assertDefinitionCommand(state, user, command.type, p);
   switch (command.type) {
-    case 'transfer.emergency': case 'transfer.request': case 'transfer.approve': case 'transfer.reject': case 'transfer.cancel': {
+    case 'transfer.emergency': case 'transfer.request': case 'transfer.rolesRequest': case 'transfer.approve': case 'transfer.reject': case 'transfer.cancel': {
       const result = executePersonnelTransfer(state, user, command.type, p, now, fail);
       ({ targetId, departmentId, detail, title } = result);
       break;
@@ -318,8 +317,33 @@ export function executeCommand(state: WorkspaceData, userId: string, raw: unknow
       uniqueUnitTitle(state, unit); delete unit.deletedAt;
       targetId = unit.id; departmentId = unit.departmentId; detail = unit.title; title = '개인 단위업무 복원'; break;
     }
-    case 'organization.departmentCreate': { if (user.role !== 'admin') fail(403, 'ADMIN_REQUIRED', '기관 관리자만 조직을 등록할 수 있습니다.'); const input = parse(z.object({ name: text.max(100), shortName: text.max(10) }), p); if (state.departments.some(d => d.name === input.name)) fail(409, 'DUPLICATE_DEPARTMENT', '같은 이름의 부서가 있습니다.'); const department = { ...input, id: id('dept') }; state.departments.push(department); targetId = department.id; detail = department.name; title = '조직 등록'; break; }
-    case 'organization.userCreate': { if (user.role !== 'admin') fail(403, 'ADMIN_REQUIRED', '기관 관리자만 구성원을 등록할 수 있습니다.'); const input = parse(z.object({ name: text.max(50), departmentId: text, team: text.max(100), role: z.enum(['admin', 'head', 'manager', 'lead', 'member']), title: text.max(100), email: z.email().optional(), phone: z.string().max(30).optional(), commonTaskPermission: z.boolean().default(false) }), p); if (!state.departments.some(d => d.id === input.departmentId)) fail(422, 'DEPARTMENT_MISSING', '소속 부서를 선택해 주세요.'); const member: User = { ...input, id: id('user'), initials: input.name.slice(-2), color: 'stone', active: true }; state.users.push(member); targetId = member.id; departmentId = member.departmentId; detail = `${member.name} · ${member.title}`; title = '검증용 구성원 등록'; break; }
+    case 'organization.departmentCreate': {
+      if (user.role !== 'admin') fail(403, 'ADMIN_REQUIRED', '기관 관리자만 조직을 등록할 수 있습니다.');
+      const input = parse(z.object({ name: text.max(100), shortName: text.max(10) }), p);
+      if (state.departments.some(department => department.name.trim().toLowerCase() === input.name.toLowerCase() || department.shortName.trim().toLowerCase() === input.shortName.toLowerCase())) fail(409, 'DUPLICATE_DEPARTMENT', '같은 부서 이름 또는 짧은 이름이 있습니다.');
+      const department = { ...input, id: id('dept') }; state.departments.push(department);
+      targetId = department.id; departmentId = department.id; detail = `${department.name} · 부서장과 부서 담당자를 등록해 주세요.`; title = '조직 등록'; break;
+    }
+    case 'organization.userCreate': case 'organization.userUpdate': {
+      if (user.role !== 'admin') fail(403, 'ADMIN_REQUIRED', '기관 관리자만 구성원의 등록·인사정보 변경을 처리할 수 있습니다.');
+      const input = parse(z.object({ name: text.max(50), departmentId: text, team: text.max(100), role: z.enum(['admin', 'head', 'manager', 'lead', 'member']), title: text.max(100), email: z.string().trim().toLowerCase().max(254).refine(value => !value || z.email().safeParse(value).success, '이메일 형식을 확인해 주세요.').optional(), phone: z.string().trim().max(30).refine(value => !value || /^[+\d][\d\s().-]{3,29}$/.test(value), '전화번호 형식을 확인해 주세요.').optional(), commonTaskPermission: z.boolean().default(false) }), p);
+      if (!state.departments.some(department => department.id === input.departmentId)) fail(422, 'DEPARTMENT_MISSING', '소속 부서를 선택해 주세요.');
+      if (command.type === 'organization.userCreate') {
+        const member: User = { ...input, email: input.email || undefined, phone: input.phone || undefined, id: id('user'), initials: input.name.slice(0, 1), color: 'stone', active: true };
+        const issue = organizationIdentityIssue(state, member); if (issue) fail(issue.status, issue.code, issue.message);
+        state.users.push(member); targetId = member.id; departmentId = member.departmentId; detail = JSON.stringify({ name: member.name, departmentId: member.departmentId, team: member.team, role: member.role, commonTaskPermission: member.commonTaskPermission }); title = '구성원 등록';
+      } else {
+        const member = state.users.find(item => item.id === required(p, 'userId'));
+        if (!member) fail(404, 'USER_NOT_FOUND', '변경할 구성원을 찾을 수 없습니다.');
+        const active = parse(z.boolean(), p.active); const reason = required(p, 'reason');
+        const next: User = { ...member, ...input, email: input.email || undefined, phone: input.phone || undefined, initials: input.name.slice(0, 1), active };
+        if (active && (!member.active || member.endsAt && Date.parse(member.endsAt) <= now.getTime())) delete next.endsAt;
+        const issue = organizationUserChangeIssue(state, user, member, next, now); if (issue) fail(issue.status, issue.code, issue.message);
+        const before = structuredClone(member); Object.assign(member, next); if (!next.endsAt) delete member.endsAt;
+        targetId = member.id; departmentId = before.departmentId; detail = JSON.stringify({ reason, before, after: member }); title = '구성원 인사정보 변경';
+      }
+      break;
+    }
     case 'common.create': {
       if (!canManageCommon(user) && !(p.kind === 'directive' && (p.directiveIssuer === 'minister' || p.directiveIssuer === 'vice_minister') && isDirectiveCoordinator(state, user, now))) fail(403, 'COMMON_PERMISSION_REQUIRED', '공통업무 관리 권한 또는 기획재정담당관실 기획팀의 장·차관 지시사항 관리 권한이 필요합니다.');
       const input = parse(z.object({ title: text.max(150), description: text, dueDate: date, frequency: z.enum(['once', 'monthly', 'quarterly', 'half_yearly', 'yearly']), requiredSteps: z.array(text).min(1).max(20), departmentIds: z.array(text).min(1).max(100), kind: z.enum(['common', 'directive']).default('common'), projectName: z.string().trim().max(150).optional(), distributionMode: z.enum(['all', 'selected']).default('selected'), directiveIssuer: directiveIssuer.optional(), instructedOn: date.optional() }), p);
@@ -365,6 +389,27 @@ export function executeCommand(state: WorkspaceData, userId: string, raw: unknow
       // definitions and each existing run's version, including unpublished drafts.
       targetId = task.id; departmentId = task.departmentId; detail = `${task.title} · ${originalUnitTitle} → ${unit.title}`; title = '개인 세부업무 복원'; break;
     }
+    case 'task.record': {
+      const input = parse(z.object({ taskId: text, expenses: expenseInput.optional(), documents: referenceInput.optional() }).strict(), p);
+      const task = getTask(state, user, input.taskId, now); ensureRegistered(state, task);
+      if (user.role !== 'admin' && (user.role === 'head' || ![task.primaryId, ...task.supportIds].includes(user.id))) fail(403, 'RECORD_DENIED', '현재 담당자와 지원담당자만 수행 기록을 입력할 수 있습니다.');
+      if (task.status === 'archived') fail(409, 'TASK_ARCHIVED', '보관된 업무의 수행 기록은 변경할 수 없습니다.');
+      if (input.expenses === undefined && input.documents === undefined) fail(422, 'RECORD_REQUIRED', '집행내역 또는 생산 문서를 입력해 주세요.');
+      if (input.documents?.some(reference => reference.type !== 'document')) fail(422, 'RECORD_DOCUMENT_ONLY', '수행 기록에서는 생산 문서만 변경할 수 있습니다. 법령·지침은 업무 기준 편집에서 변경해 주세요.');
+      const expensesBefore = structuredClone(task.expenses ?? []);
+      const documentsBefore = structuredClone((task.references ?? []).filter(reference => reference.type === 'document'));
+      const expensesAfter = input.expenses ?? expensesBefore;
+      const documentsAfter = input.documents ?? documentsBefore;
+      const references = [...(task.references ?? []).filter(reference => reference.type !== 'document'), ...documentsAfter];
+      if (references.length > 100) fail(422, 'REFERENCE_LIMIT', '관련 근거와 생산 문서는 합계 100개까지 등록할 수 있습니다.');
+      detailValidation({ ...task, expenses: expensesAfter, references }, state);
+      if (JSON.stringify(expensesBefore) !== JSON.stringify(expensesAfter) || JSON.stringify(documentsBefore) !== JSON.stringify(documentsAfter)) {
+        task.recordHistory ??= [];
+        task.recordHistory.push({ id: id('record'), recordedBy: user.id, recordedAt: now.toISOString(), expensesBefore, expensesAfter: structuredClone(expensesAfter), documentsBefore, documentsAfter: structuredClone(documentsAfter) });
+        task.expenses = expensesAfter; task.references = references; task.updatedAt = now.toISOString();
+      }
+      targetId = task.id; departmentId = task.departmentId; title = '업무 수행 기록 저장'; detail = `${task.title} · 집행 ${expensesAfter.length}건 / 생산 문서 ${documentsAfter.length}건 · 업무 기준 유지`; break;
+    }
     case 'task.configure': {
       const task = getTask(state, user, required(p, 'taskId'), now); ensureRegistered(state, task);
       if (task.primaryId !== user.id && !manageDepartment(user, task.departmentId)) fail(403, 'EDIT_DENIED', '담당자 또는 부서 관리자가 업무 정보를 수정할 수 있습니다.');
@@ -378,7 +423,7 @@ export function executeCommand(state: WorkspaceData, userId: string, raw: unknow
       if (input.workflow) {
         for (const completed of task.workflow.filter(s => s.done)) {
           const next = input.workflow.find(s => s.id === completed.id);
-          if (!next || next.title !== completed.title || next.role !== completed.role || JSON.stringify(next.dependsOn) !== JSON.stringify(completed.dependsOn)) fail(409, 'COMPLETED_STEP_LOCKED', '완료한 절차의 이름·역할·선행 관계는 보존해 주세요.');
+          if (!next || next.title !== completed.title || next.role !== completed.role || next.description !== completed.description || next.output !== completed.output || next.required !== completed.required || JSON.stringify(next.dependsOn) !== JSON.stringify(completed.dependsOn) || JSON.stringify(next.checklist) !== JSON.stringify(completed.checklist)) fail(409, 'COMPLETED_STEP_LOCKED', '완료한 절차의 기준과 체크리스트는 보존됩니다. 미완료 절차를 수정하거나 후속 보완 절차를 추가해 주세요.');
         }
         input.workflow = input.workflow.map(step => ({ ...step, done: task.workflow.find(old => old.id === step.id)?.done ?? false }));
       }
@@ -619,16 +664,16 @@ export function executeCommand(state: WorkspaceData, userId: string, raw: unknow
       if (typeof p.personId === 'string' && p.personId !== user.id) fail(403, 'SCORE_OWNER_REQUIRED', '본인의 단위업무 배점만 설정할 수 있습니다.');
       if (getUnitEvaluation(state, user.id, input.period)) fail(409, 'EVALUATION_CONFIRMED', '평가가 확정된 반기의 배점은 변경할 수 없습니다.');
       if (getUnitScorePlan(state, user.id, input.period)?.submittedAt) fail(409, 'PERFORMANCE_SUBMITTED', '제출한 성과의 업무 비중은 변경할 수 없습니다. 평가 전 제출을 취소한 뒤 수정해 주세요.');
-      const units = eligibleScoreUnits(state, user.id);
+      const units = scoreUnitsForPeriod(state, user.id, input.period);
       const unitIds = new Set(input.allocations.map(allocation => allocation.unitId));
       if (unitIds.size !== input.allocations.length) fail(422, 'DUPLICATE_SCORE_UNIT', '같은 단위업무를 중복해서 배점할 수 없습니다.');
-      if (input.allocations.some(allocation => !units.some(unit => unit.id === allocation.unitId))) fail(403, 'SCORE_OWNER_REQUIRED', '본인 소유의 활성 단위업무만 배점할 수 있습니다.');
+      if (input.allocations.some(allocation => !units.some(unit => unit.id === allocation.unitId))) fail(403, 'SCORE_OWNER_REQUIRED', '현재 담당 업무 또는 본인의 기존 배점·성과에 연결된 단위업무만 배점할 수 있습니다.');
       if (units.length !== unitIds.size) fail(422, 'SCORE_UNITS_REQUIRED', '모든 활성 단위업무의 배점을 설정해 주세요. 평가 대상이 아닌 단위업무는 0점으로 입력할 수 있습니다.');
       if (input.allocations.reduce((sum, allocation) => sum + Math.round(allocation.maxScore * 100), 0) !== UNIT_SCORE_TOTAL * 100) fail(422, 'SCORE_TOTAL_REQUIRED', '단위업무 배점의 합계는 50점이어야 합니다.');
       const existing = getUnitScorePlan(state, user.id, input.period);
-      const plan = { id: existing?.id ?? id('score-plan'), personId: user.id, departmentId: user.departmentId, period: input.period, version: (existing?.version ?? 0) + 1, allocations: units.map(unit => ({ unitId: unit.id, unitTitle: unit.title, maxScore: input.allocations.find(allocation => allocation.unitId === unit.id)!.maxScore })), updatedAt: now.toISOString() };
+      const plan = { id: existing?.id ?? id('score-plan'), personId: user.id, departmentId: existing?.departmentId ?? units[0].departmentId, period: input.period, version: (existing?.version ?? 0) + 1, allocations: units.map(unit => ({ unitId: unit.id, unitTitle: unit.title, maxScore: input.allocations.find(allocation => allocation.unitId === unit.id)!.maxScore })), updatedAt: now.toISOString() };
       if (existing) Object.assign(existing, plan); else { state.unitScorePlans ??= []; state.unitScorePlans.unshift(plan); }
-      targetId = plan.id; detail = `${input.period} · ${units.length}개 단위업무 · 합계 50점`; title = '개인 단위업무 배점 설정'; break;
+      targetId = plan.id; departmentId = plan.departmentId; detail = `${input.period} · ${units.length}개 단위업무 · 합계 50점`; title = '개인 단위업무 배점 설정'; break;
     }
     case 'performance.submitPerson': {
       const input = parse(z.object({ period: halfYear, planVersion: z.number().int().positive() }), p);
@@ -636,21 +681,20 @@ export function executeCommand(state: WorkspaceData, userId: string, raw: unknow
       if (getUnitEvaluation(state, user.id, input.period)) fail(409, 'EVALUATION_CONFIRMED', '이미 평가가 확정된 반기입니다.');
       const plan = getUnitScorePlan(state, user.id, input.period);
       if (!plan) fail(409, 'SCORE_PLAN_REQUIRED', '모든 단위업무의 업무 비중을 합계 50점으로 먼저 설정해 주세요.');
-      if (plan.departmentId !== user.departmentId) fail(409, 'SCORE_PLAN_STALE', '소속이 변경되었습니다. 현재 단위업무의 업무 비중을 다시 저장해 주세요.');
       if (plan.submittedAt) fail(409, 'PERFORMANCE_SUBMITTED', '이미 부서장에게 제출한 반기 성과입니다.');
       if (plan.version !== input.planVersion) fail(409, 'SCORE_PLAN_CHANGED', '업무 비중이 변경되었습니다. 최신 내용을 확인한 뒤 제출해 주세요.');
-      const units = eligibleScoreUnits(state, user.id);
+      const units = scoreUnitsForPeriod(state, user.id, input.period);
       if (units.length !== plan.allocations.length || new Set(plan.allocations.map(allocation => allocation.unitId)).size !== units.length || units.some(unit => !plan.allocations.some(allocation => allocation.unitId === unit.id))) fail(409, 'SCORE_PLAN_STALE', '단위업무 구성이 바뀌었습니다. 업무 비중을 다시 설정해 주세요.');
       if (plan.allocations.some(allocation => !unitScore.safeParse(allocation.maxScore).success) || plan.allocations.reduce((sum, allocation) => sum + Math.round(allocation.maxScore * 100), 0) !== UNIT_SCORE_TOTAL * 100) fail(422, 'SCORE_TOTAL_REQUIRED', '단위업무 업무 비중의 합계는 50점이어야 합니다.');
-      const records = currentPersonPerformances(state, user.id, input.period).filter(performance => performance.departmentId === user.departmentId);
+      const records = currentPersonPerformances(state, user.id, input.period).filter(performance => performance.departmentId === plan.departmentId);
       if (records.some(performance => performance.status === 'changes_requested')) fail(409, 'PERFORMANCE_CHANGES_PENDING', '보완 요청된 성과를 저장한 뒤 제출해 주세요.');
       if (records.some(performance => !hasCompletePerformance(performance))) fail(422, 'PERFORMANCE_INCOMPLETE', '모든 성과의 제목, 내용, 근거를 입력해 주세요.');
       if (!records.some(performance => plan.allocations.some(allocation => allocation.maxScore > 0 && allocation.unitId === performanceUnitId(state, performance)))) fail(409, 'PERFORMANCE_REQUIRED', '업무 비중을 배정한 단위업무에 세부업무 성과를 먼저 입력해 주세요.');
-      if (missingPerformanceUnitIds(state, plan.allocations, records, user.departmentId).length) fail(409, 'UNIT_PERFORMANCE_REQUIRED', '업무 비중이 있는 모든 단위업무에 세부업무 성과를 입력해 주세요. 성과가 없는 단위업무는 비중을 0점으로 설정할 수 있습니다.');
+      if (missingPerformanceUnitIds(state, plan.allocations, records, plan.departmentId).length) fail(409, 'UNIT_PERFORMANCE_REQUIRED', '업무 비중이 있는 모든 단위업무에 세부업무 성과를 입력해 주세요. 성과가 없는 단위업무는 비중을 0점으로 설정할 수 있습니다.');
       plan.submittedAt = now.toISOString(); plan.submittedBy = user.id;
       for (const performance of records) if (performance.status === 'draft') performance.status = 'review';
-      for (const head of state.users.filter(member => member.departmentId === user.departmentId && member.role === 'head' && member.active)) state.notifications.unshift({ id: id('notification'), title: '개인별 반기 성과 평가 요청', description: `${user.name} · ${input.period} · 업무 비중 50점`, type: 'task', targetId: records[0].taskId, read: false, userId: head.id });
-      targetId = plan.id; detail = `${user.name} · ${input.period}`; title = '개인별 반기 성과 제출'; break;
+      for (const head of state.users.filter(member => member.departmentId === plan.departmentId && member.role === 'head' && member.active)) state.notifications.unshift({ id: id('notification'), title: '개인별 반기 성과 평가 요청', description: `${user.name} · ${input.period} · 업무 비중 50점`, type: 'task', targetId: records[0].taskId, read: false, userId: head.id });
+      targetId = plan.id; departmentId = plan.departmentId; detail = `${user.name} · ${input.period}`; title = '개인별 반기 성과 제출'; break;
     }
     case 'performance.withdrawSubmission': {
       const input = parse(z.object({ period: halfYear }), p);
@@ -660,21 +704,21 @@ export function executeCommand(state: WorkspaceData, userId: string, raw: unknow
       if (!plan?.submittedAt) fail(409, 'PERFORMANCE_NOT_SUBMITTED', '제출한 반기 성과가 없습니다.');
       delete plan.submittedAt; delete plan.submittedBy;
       for (const performance of currentPersonPerformances(state, user.id, input.period)) if (performance.status === 'review') performance.status = 'draft';
-      targetId = plan.id; detail = input.period; title = '개인별 반기 성과 제출 취소'; break;
+      targetId = plan.id; departmentId = plan.departmentId; detail = input.period; title = '개인별 반기 성과 제출 취소'; break;
     }
     case 'performance.evaluatePerson': {
       const input = parse(z.object({ personId: text, period: halfYear, planVersion: z.number().int().positive(), scores: z.array(z.object({ unitId: text, score: unitScore, comment: z.string().trim().max(5000).default('') })).min(1).max(100), comment: z.string().trim().max(5000).default('') }), p);
+      if (!['head', 'admin'].includes(user.role)) fail(403, 'HEAD_EVALUATION_REQUIRED', '배점 당시 부서의 부서장 또는 관리자만 평가할 수 있습니다.');
       const person = state.users.find(member => member.id === input.personId);
-      if (!person || !approveDepartment(user, person.departmentId)) fail(403, 'HEAD_EVALUATION_REQUIRED', '해당 부서장 또는 관리자만 개인별 성과를 평가할 수 있습니다.');
+      if (!person) fail(403, 'HEAD_EVALUATION_REQUIRED', '평가할 직원을 확인해 주세요.');
       if (person.id === user.id) fail(403, 'SELF_APPROVAL', '본인의 성과를 직접 평가할 수 없습니다.');
       const plan = getUnitScorePlan(state, person.id, input.period);
       if (!plan) fail(409, 'SCORE_PLAN_REQUIRED', '직원이 먼저 단위업무 배점을 합계 50점으로 설정해야 합니다.');
-      if (!approveDepartment(user, plan.departmentId) || plan.departmentId !== person.departmentId) fail(403, 'HEAD_EVALUATION_REQUIRED', '배점 당시 소속 부서와 현재 소속을 확인해 주세요.');
+      if (!approveDepartment(user, plan.departmentId)) fail(403, 'HEAD_EVALUATION_REQUIRED', '배점 당시 부서의 부서장 또는 관리자만 평가할 수 있습니다.');
       if (getUnitEvaluation(state, person.id, input.period)) fail(409, 'EVALUATION_CONFIRMED', '이미 확정된 개인별 평가입니다. 기존 결과는 보존됩니다.');
       if (input.planVersion !== plan.version) fail(409, 'SCORE_PLAN_CHANGED', '개인의 배점이 변경되었습니다. 최신 배점을 확인한 뒤 평가해 주세요.');
       if (!plan.submittedAt) fail(409, 'PERFORMANCE_NOT_SUBMITTED', '직원이 성과와 업무 비중을 제출한 뒤 평가할 수 있습니다.');
-      const units = eligibleScoreUnits(state, person.id);
-      if (units.length !== plan.allocations.length || units.some(unit => !plan.allocations.some(allocation => allocation.unitId === unit.id))) fail(409, 'SCORE_PLAN_STALE', '단위업무 구성이 바뀌었습니다. 직원이 배점을 다시 저장한 뒤 평가해 주세요.');
+      // Submission freezes the period's allocation; later personnel changes do not invalidate it.
       const unitIds = new Set(input.scores.map(score => score.unitId));
       if (unitIds.size !== input.scores.length || input.scores.length !== plan.allocations.length || input.scores.some(score => !plan.allocations.some(allocation => allocation.unitId === score.unitId))) fail(422, 'EVALUATION_UNITS_REQUIRED', '배점한 모든 단위업무에 각각 한 번씩 점수를 입력해 주세요.');
       for (const score of input.scores) if (score.score > plan.allocations.find(allocation => allocation.unitId === score.unitId)!.maxScore) fail(422, 'SCORE_EXCEEDS_MAX', '평가 점수는 개인이 설정한 단위업무 배점을 초과할 수 없습니다.');
@@ -690,21 +734,26 @@ export function executeCommand(state: WorkspaceData, userId: string, raw: unknow
       targetId = evaluation.id; departmentId = plan.departmentId; detail = `${person.name} · ${input.period} · ${evaluation.totalScore}/50점`; title = '단위업무별 개인 성과 평가 확정'; break;
     }
     case 'performance.saveHalf': case 'performance.submitHalf': {
-      const task = getTask(state, user, required(p, 'taskId'), now); ensureRegistered(state, task);
-      if (task.primaryId !== user.id) fail(403, 'PERFORMANCE_DENIED', '세부업무의 본인 담당자만 반기 성과를 제출할 수 있습니다.');
-      if (task.status === 'archived') fail(409, 'TASK_ARCHIVED', '보관된 업무에는 새 성과를 제출할 수 없습니다.');
+      const taskId = required(p, 'taskId');
       const input = parse(z.object({ period: z.string().regex(/^20\d{2}-H[12]$/, '예: 2026-H1 또는 2026-H2'), title: text.max(150), description: text, evidence: text, metricName: z.string().max(150).optional(), value: z.number().finite().optional(), unit: z.string().max(50).optional() }), p);
       if (getUnitEvaluation(state, user.id, input.period)) fail(409, 'EVALUATION_CONFIRMED', '개인별 평가가 확정된 반기의 성과는 추가하거나 변경할 수 없습니다.');
       if (getUnitScorePlan(state, user.id, input.period)?.submittedAt) fail(409, 'PERFORMANCE_SUBMITTED', '부서장에게 제출한 성과는 수정할 수 없습니다. 평가 전 제출을 취소한 뒤 수정해 주세요.');
-      const existing = currentPersonPerformances(state, user.id, input.period).find(perf => perf.taskId === task.id);
+      const existing = currentPersonPerformances(state, user.id, input.period).find(perf => perf.taskId === taskId);
       if (existing) {
         if (existing.status === 'confirmed') fail(409, 'PERFORMANCE_CONFIRMED', '이미 확정된 기존 성과는 변경할 수 없습니다.');
-        Object.assign(existing, input, { metricName: input.metricName, value: input.value, unit: input.unit, status: 'draft', score: undefined, comment: undefined, approvedBy: undefined, approvedAt: undefined, unitId: task.unitId }); targetId = existing.id;
+        // An author may complete their own historical record without regaining task access.
+        Object.assign(existing, input, { metricName: input.metricName, value: input.value, unit: input.unit, status: 'draft', score: undefined, comment: undefined, approvedBy: undefined, approvedAt: undefined }); targetId = existing.id; departmentId = existing.departmentId;
       } else {
+        const task = getTask(state, user, taskId, now); ensureRegistered(state, task);
+        if (task.primaryId !== user.id) fail(403, 'PERFORMANCE_DENIED', '세부업무의 본인 담당자만 새 반기 성과를 작성할 수 있습니다.');
+        if (task.status === 'archived') fail(409, 'TASK_ARCHIVED', '보관된 업무에는 새 성과를 제출할 수 없습니다.');
+        const plan = getUnitScorePlan(state, user.id, input.period);
+        const recordedDepartment = plan?.departmentId ?? currentPersonPerformances(state, user.id, input.period)[0]?.departmentId;
+        if (recordedDepartment && recordedDepartment !== task.departmentId) fail(409, 'PERFORMANCE_DEPARTMENT_MISMATCH', '이 반기는 이전 부서 성과를 정리하는 기록이 있습니다. 현재는 한 반기에 한 부서의 평가를 지원합니다.');
         const performance = { ...input, id: id('perf'), taskId: task.id, unitId: task.unitId, runId: state.runs.find(r => r.taskId === task.id)?.id ?? '', authorId: user.id, departmentId: task.departmentId, status: 'draft' as const, createdAt: now.toISOString() };
-        state.performances.unshift(performance); targetId = performance.id;
+        state.performances.unshift(performance); targetId = performance.id; departmentId = task.departmentId;
       }
-      departmentId = task.departmentId; detail = `${task.title} · ${input.period}`; title = '세부업무 성과 저장'; break;
+      detail = `${input.title} · ${input.period}`; title = '세부업무 성과 저장'; break;
     }
     case 'performance.evaluate': {
       const perf = state.performances.find(item => item.id === required(p, 'performanceId'));
