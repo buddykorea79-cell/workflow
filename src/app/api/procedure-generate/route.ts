@@ -4,13 +4,13 @@ import { assertSameOrigin, currentUserId } from '@/lib/auth';
 import { activeUser, assertDefinitionWritable, assertTaskWritable, canReadTask, DomainError } from '@/lib/domain';
 import { transaction } from '@/lib/store';
 import { apiError, json } from '@/lib/api';
-import { readProcedureDocuments } from '@/lib/procedure-documents';
+import { readProcedureDocuments, readProcedureOverviewDocuments } from '@/lib/procedure-documents';
 import { generateAiProcedure } from '@/lib/bizrouter';
-import { AI_REFERENCE_LIMIT, procedureReferenceFingerprint } from '@/lib/procedure-ai-input';
+import { AI_REFERENCE_LIMIT, procedureOverviewFingerprint, procedureReferenceFingerprint } from '@/lib/procedure-ai-input';
 
 export const runtime = 'nodejs';
 export const maxDuration = 70;
-const bodySchema = z.object({ taskId: z.string().min(1).max(150), referenceIds: z.array(z.string().min(1).max(150)).min(1).max(AI_REFERENCE_LIMIT), referencesFingerprint: z.string().max(4_100_000), readAttachments: z.boolean().default(true) }).strict();
+const bodySchema = z.object({ taskId: z.string().min(1).max(150), overviewFingerprint: z.string().max(100_000), referenceIds: z.array(z.string().min(1).max(150)).max(AI_REFERENCE_LIMIT), referencesFingerprint: z.string().max(4_100_000), readAttachments: z.boolean().default(true) }).strict();
 const activeRequests = new Set<string>();
 
 async function boundedJson(request: NextRequest) {
@@ -45,6 +45,12 @@ export async function POST(request: NextRequest) {
       if (task.status === 'archived') throw new DomainError(409, 'TASK_ARCHIVED', '보관된 업무의 절차는 변경할 수 없습니다.');
       if (user.id !== task.primaryId && user.role !== 'admin' && !(user.departmentId === task.departmentId && ['manager', 'head'].includes(user.role))) throw new DomainError(403, 'PROCEDURE_EDIT_DENIED', '담당자 또는 부서 관리자만 절차를 분석할 수 있습니다.');
       assertDefinitionWritable(state, user, task.departmentId);
+      if (procedureOverviewFingerprint(task) !== input.overviewFingerprint) throw new DomainError(409, 'AI_OVERVIEW_CHANGED', '업무 개요 또는 붙임 파일이 저장된 내용과 다릅니다. 변경사항을 저장한 뒤 다시 분석해 주세요.');
+      const overviewAttachments = (task.descriptionAttachmentIds ?? []).map(id => {
+        const file = state.attachments.find(file => file.id === id && file.taskId === task.id);
+        if (!file) throw new DomainError(409, 'AI_ATTACHMENT_MISSING', '업무 개요의 붙임 파일 연결을 확인해 주세요.');
+        return file;
+      });
       const references = input.referenceIds.map(id => task.references?.find(reference => reference.id === id));
       if (new Set(input.referenceIds).size !== input.referenceIds.length || references.some(reference => !reference)) throw new DomainError(409, 'AI_REFERENCES_CHANGED', '관련 근거를 먼저 저장한 뒤 AI 분석을 실행해 주세요.');
       const saved = references.filter(reference => reference !== undefined);
@@ -55,13 +61,15 @@ export async function POST(request: NextRequest) {
         if (!file) throw new DomainError(409, 'AI_ATTACHMENT_MISSING', '이 업무의 첨부파일 연결을 확인해 주세요.');
         return [file];
       });
-      return structuredClone({ title: task.title, description: task.description, references: saved, attachments, requiredStepTitles: state.commonTasks.find(common => common.id === task.commonId)?.requiredSteps });
+      return structuredClone({ title: task.title, description: task.description, completionCriteria: task.completionCriteria, overviewAttachments, references: saved, attachments, requiredStepTitles: state.commonTasks.find(common => common.id === task.commonId)?.requiredSteps });
     });
     if (activeRequests.has(userId)) throw new DomainError(429, 'AI_ALREADY_RUNNING', '진행 중인 AI 분석이 끝난 뒤 다시 요청해 주세요.');
     activeRequests.add(userId); requestKey = userId;
+    // Overview files are the primary input and are always read. This switch only controls reference files.
+    const overview = await readProcedureOverviewDocuments(source.overviewAttachments);
     const prepared = input.readAttachments ? await readProcedureDocuments(source.references, source.attachments) : { references: source.references, warnings: [] };
-    const result = await generateAiProcedure({ title: source.title, description: source.description, references: prepared.references, requiredStepTitles: source.requiredStepTitles }, { signal: request.signal });
-    result.draft.warnings.push(...prepared.warnings);
+    const result = await generateAiProcedure({ title: source.title, description: source.description, completionCriteria: source.completionCriteria, documents: overview.documents, references: prepared.references, requiredStepTitles: source.requiredStepTitles }, { signal: request.signal });
+    result.draft.warnings.push(...overview.warnings, ...prepared.warnings);
     return json(result);
   } catch (error) { return apiError(error); }
   finally { if (requestKey) activeRequests.delete(requestKey); }

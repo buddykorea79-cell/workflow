@@ -7,7 +7,7 @@ import { NextRequest } from 'next/server';
 import { POST } from '../src/app/api/procedure-generate/route';
 import { sessionCookie, signSession } from '../src/lib/auth';
 import { createSeed } from '../src/lib/seed';
-import { procedureReferenceFingerprint } from '../src/lib/procedure-ai-input';
+import { procedureOverviewFingerprint, procedureReferenceFingerprint } from '../src/lib/procedure-ai-input';
 
 test('AI route checks identity, source ownership, saved content and department lock before external calls', async () => {
   const directory = await mkdtemp(path.join(os.tmpdir(), 'ieum-ai-route-'));
@@ -27,7 +27,7 @@ test('AI route checks identity, source ownership, saved content and department l
     const file = path.join(directory, 'workspace.json');
     const save = () => writeFile(file, JSON.stringify(state, null, 2));
     await save();
-    const payload = { taskId: task.id, referenceIds: ['saved-source'], referencesFingerprint: procedureReferenceFingerprint(task.references) };
+    const payload = { taskId: task.id, overviewFingerprint: procedureOverviewFingerprint(task), referenceIds: ['saved-source'], referencesFingerprint: procedureReferenceFingerprint(task.references) };
     const request = (userId: string | null = task.primaryId, body: unknown = payload, origin = 'http://127.0.0.1:3000') => new NextRequest('http://127.0.0.1:3000/api/procedure-generate', { method: 'POST', headers: { 'Content-Type': 'application/json', host: '127.0.0.1:3000', origin, ...(userId ? { cookie: `${sessionCookie}=${signSession(userId)}` } : {}) }, body: JSON.stringify(body) });
     let response = await POST(request(null));
     assert.equal(response.status, 401);
@@ -35,6 +35,10 @@ test('AI route checks identity, source ownership, saved content and department l
     assert.equal(response.status, 403);
     response = await POST(request(task.primaryId, payload, 'https://other.example'));
     assert.equal(response.status, 403);
+    response = await POST(request(task.primaryId, { ...payload, overviewFingerprint: procedureOverviewFingerprint({ ...task, description: '저장하지 않은 업무 설명' }) }));
+    assert.equal(response.status, 409); assert.equal((await response.json()).code, 'AI_OVERVIEW_CHANGED');
+    response = await POST(request(task.primaryId, { ...payload, overviewFingerprint: procedureOverviewFingerprint({ ...task, descriptionAttachmentIds: ['unrelated-file'] }) }));
+    assert.equal(response.status, 409); assert.equal((await response.json()).code, 'AI_OVERVIEW_CHANGED');
     response = await POST(request(task.primaryId, { ...payload, referenceIds: ['another-task-reference'] }));
     assert.equal(response.status, 409); assert.equal((await response.json()).code, 'AI_REFERENCES_CHANGED');
     response = await POST(request(task.primaryId, { ...payload, referencesFingerprint: 'unsaved-content' }));
@@ -51,15 +55,19 @@ test('AI route checks identity, source ownership, saved content and department l
       calls++;
       if (calls === 1) return Response.json({ models: [{ id: 'provider/test-model', response_format_modes: ['json_schema'] }] });
       const messages = JSON.parse(String(init?.body)).messages;
-      assert.deepEqual(JSON.parse(messages[1].content).references.map((reference: { id: string }) => reference.id), ['saved-source']);
-      return Response.json({ model: 'provider/test-model', choices: [{ finish_reason: 'stop', message: { content: JSON.stringify({ summary: '작성된 자료를 검토하는 절차입니다.', sourceSummaries: [{ referenceId: 'saved-source', summary: '담당자가 작성한 자료를 검토자가 확인합니다.', locator: '본문', quote: '검토자는 자료를 검토한다.' }], steps: [{ id: 'review', title: '자료 검토', role: 'reviewer', description: '제출된 자료를 검토합니다.', output: '검토 결과', required: true, dependsOn: [], checklist: ['검토 완료'], evidence: { referenceId: 'saved-source', locator: '본문', quote: '검토자는 자료를 검토한다.' } }], warnings: [] }) } }] });
+      const sources = JSON.parse(messages[1].content).sources;
+      assert.deepEqual(sources.map((source: { id: string }) => source.id), ['overview:task', 'reference:saved-source']);
+      assert.equal(sources[0].priority, 'primary'); assert.equal(sources[1].priority, 'supporting');
+      assert.ok(sources[0].content.includes(task.description)); assert.ok(sources[0].content.includes(task.completionCriteria));
+      return Response.json({ model: 'provider/test-model', choices: [{ finish_reason: 'stop', message: { content: JSON.stringify({ summary: '업무 개요를 우선 분석하고 점검 지침을 참고한 절차입니다.', sourceSummaries: sources.map((source: { id: string; content: string }) => ({ referenceId: source.id, summary: '업무 수행 범위와 점검 조건을 확인합니다.', locator: '본문', quote: source.content.slice(0, 40) })), steps: [{ id: 'review', title: '자료 검토', role: 'reviewer', description: '제출된 자료를 검토합니다.', output: '검토 결과', required: true, dependsOn: [], checklist: ['검토 완료'], evidence: { referenceId: 'reference:saved-source', locator: '본문', quote: '검토자는 자료를 검토한다.' } }], warnings: [] }) } }] });
     };
     response = await POST(request());
     const result = await response.json();
     assert.equal(response.status, 200, JSON.stringify({ calls, result }));
     assert.equal(result.draft.steps.length, 1); assert.equal(calls, 2);
-    assert.equal(result.draft.analysis.sources[0].referenceId, 'saved-source');
-    assert.equal(result.draft.analysis.sources[0].sourceTitle, '점검 지침');
+    assert.equal(result.draft.analysis.sources[0].referenceId, 'overview:task');
+    assert.equal(result.draft.analysis.sources[1].referenceId, 'reference:saved-source');
+    assert.equal(result.draft.analysis.sources[1].sourceTitle, '점검 지침');
     assert.equal(JSON.parse(await readFile(file, 'utf8')).revision, state.revision);
     assert.deepEqual(JSON.parse(await readFile(file, 'utf8')).tasks.find((item: { id: string }) => item.id === task.id).workflow, task.workflow);
   } finally {

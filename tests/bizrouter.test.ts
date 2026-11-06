@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { generateAiProcedure, parseAiProcedure } from '../src/lib/bizrouter';
-import { procedureReferenceFingerprint } from '../src/lib/procedure-ai-input';
+import { generateAiProcedure, parseAiProcedure, procedureAiSources, type ProcedureAiInput } from '../src/lib/bizrouter';
+import { procedureOverviewFingerprint, procedureReferenceFingerprint } from '../src/lib/procedure-ai-input';
 import { DomainError } from '../src/lib/domain';
 import type { TaskReference } from '../src/lib/types';
 
@@ -14,7 +14,13 @@ const valid = () => ({ summary: '담당자가 자료를 작성하고 검토자�
 ], warnings: [] });
 const errorCode = (code: string) => (error: unknown) => error instanceof DomainError && error.code === code;
 const catalog = () => Response.json({ models: [{ id: model, response_format_modes: ['json_schema'] }] });
-const completion = (content: unknown = valid(), finish_reason = 'stop') => Response.json({ model, choices: [{ message: { content: JSON.stringify(content) }, finish_reason }] });
+const rawCompletion = (content: unknown, finish_reason = 'stop') => Response.json({ model, choices: [{ message: { content: JSON.stringify(content) }, finish_reason }] });
+const completion = (content = valid(), finish_reason = 'stop') => {
+  const mapped = structuredClone(content);
+  mapped.sourceSummaries = [{ referenceId: 'overview:task', summary: '자료 준비와 검토를 수행하는 업무입니다.', locator: '업무 설명', quote: input.description }, ...mapped.sourceSummaries.map(source => ({ ...source, referenceId: `reference:${source.referenceId}` }))];
+  mapped.steps = mapped.steps.map(step => ({ ...step, evidence: { ...step.evidence, referenceId: `reference:${step.evidence.referenceId}` } }));
+  return rawCompletion(mapped, finish_reason);
+};
 
 test('AI procedure uses validated evidence and fresh dependency IDs, preserving saved references', () => {
   const draft = parseAiProcedure(valid(), references, 'generated');
@@ -84,7 +90,9 @@ test('BizRouter sends selected text to fixed API with server credentials and str
   assert.equal(body.response_format.json_schema.strict, true);
   assert.ok(!JSON.stringify(body).includes('test-secret'));
   assert.ok(!JSON.stringify(body).includes('https://example.com'));
-  assert.equal(JSON.parse(body.messages[1].content).references[0].content, references[0].content);
+  const sent = JSON.parse(body.messages[1].content);
+  assert.deepEqual(sent.sources.map((source: { id: string; priority: string }) => [source.id, source.priority]), [['overview:task', 'primary'], ['reference:ref-law', 'supporting']]);
+  assert.equal(sent.sources[1].content, references[0].content);
 });
 
 test('BizRouter requests exactly the selected source IDs and exact summary count in its schema', async () => {
@@ -96,9 +104,9 @@ test('BizRouter requests exactly the selected source IDs and exact summary count
     if (++calls === 1) return catalog();
     const schema = JSON.parse(String(init?.body)).response_format.json_schema.schema;
     const summaries = schema.properties.sourceSummaries;
-    assert.equal(summaries.minItems, 2);
-    assert.equal(summaries.maxItems, 2);
-    assert.deepEqual(summaries.items.properties.referenceId.enum, ['ref-law', 'ref-extra']);
+    assert.equal(summaries.minItems, 3);
+    assert.equal(summaries.maxItems, 3);
+    assert.deepEqual(summaries.items.properties.referenceId.enum, ['overview:task', 'reference:ref-law', 'reference:ref-extra']);
     return completion(result);
   };
   await generateAiProcedure({ ...input, references: sources }, { apiKey: 'test', model, fetcher });
@@ -119,10 +127,10 @@ test('BizRouter repairs omitted source summaries once without refetching the cat
   assert.equal(requests.length, 3);
   assert.deepEqual(requests.map(request => request.url), ['https://api.bizrouter.ai/v1/models', 'https://api.bizrouter.ai/v1/chat/completions', 'https://api.bizrouter.ai/v1/chat/completions']);
   assert.equal(requests[1].init?.signal, requests[2].init?.signal);
-  assert.deepEqual(result.draft.analysis?.sources.map(source => source.referenceId), ['ref-law', 'ref-extra']);
+  assert.deepEqual(result.draft.analysis?.sources.map(source => source.referenceId), ['overview:task', 'reference:ref-law', 'reference:ref-extra']);
   for (const request of requests.slice(1)) {
     const sent = JSON.parse(String(request.init?.body));
-    assert.deepEqual(JSON.parse(sent.messages[1].content).references.map((source: { id: string }) => source.id), ['ref-law', 'ref-extra']);
+    assert.deepEqual(JSON.parse(sent.messages[1].content).sources.map((source: { id: string }) => source.id), ['overview:task', 'reference:ref-law', 'reference:ref-extra']);
   }
 });
 
@@ -151,7 +159,7 @@ test('BizRouter rejects missing configuration or text before issuing any request
   let calls = 0; const fetcher: typeof fetch = async () => { calls++; return catalog(); };
   await assert.rejects(generateAiProcedure(input, { apiKey: '', model, fetcher }), errorCode('AI_NOT_CONFIGURED'));
   await assert.rejects(generateAiProcedure(input, { apiKey: 'test', model: '', fetcher }), errorCode('AI_NOT_CONFIGURED'));
-  await assert.rejects(generateAiProcedure({ ...input, references: [] }, { apiKey: 'test', model, fetcher }), errorCode('AI_REFERENCE_REQUIRED'));
+  await assert.rejects(generateAiProcedure({ ...input, description: '', references: [] }, { apiKey: 'test', model, fetcher }), errorCode('AI_SOURCE_REQUIRED'));
   await assert.rejects(generateAiProcedure({ ...input, references: [{ ...references[0], content: 'x'.repeat(60_001) }] }, { apiKey: 'test', model, fetcher }), errorCode('AI_REFERENCE_TOO_LONG'));
   assert.equal(calls, 0);
 });
@@ -201,4 +209,100 @@ test('BizRouter gives safe errors for upstream failure, truncation, invalid JSON
 test('source fingerprints include content and attachment identity for save-first protection', () => {
   assert.notEqual(procedureReferenceFingerprint(references), procedureReferenceFingerprint([{ ...references[0], content: 'changed' }]));
   assert.notEqual(procedureReferenceFingerprint(references), procedureReferenceFingerprint([{ ...references[0], attachmentId: 'attachment-changed' }]));
+});
+
+test('overview and task files are primary sources while references are separate supporting evidence', async () => {
+  const procedure: ProcedureAiInput = { ...input, completionCriteria: '검토를 완료한 자료를 제출한다.', documents: [{ attachmentId: 'file-1', name: '업무처리 안내.txt', text: '담당자는 자료를 작성한다. 검토자는 자료를 검토한다.' }], references: [{ ...references[0], id: 'overview:task' }] };
+  const before = structuredClone(procedure);
+  const sources = procedureAiSources(procedure);
+  assert.deepEqual(sources.map(source => [source.id, source.sourceKind, source.priority]), [
+    ['overview:task', 'overview', 'primary'], ['document:file-1', 'attachment', 'primary'], ['reference:overview:task', 'reference', 'supporting'],
+  ]);
+  assert.match(sources[0].content, /완료 기준:\n검토를 완료한 자료를 제출한다\./);
+  assert.equal(sources[1].title, '업무 첨부 · 업무처리 안내.txt');
+  assert.deepEqual(procedure, before);
+  const result = valid();
+  result.sourceSummaries = sources.map(source => ({ referenceId: source.id, summary: '이 자료가 안내하는 업무 범위를 검토했습니다.', locator: '본문', quote: source.content }));
+  result.steps.forEach(step => { step.evidence.referenceId = 'document:file-1'; });
+  let calls = 0;
+  const generated = await generateAiProcedure(procedure, { apiKey: 'test', model, fetcher: async (_url, init) => {
+    if (++calls === 1) return catalog();
+    const body = JSON.parse(String(init?.body));
+    assert.match(body.messages[0].content, /1순위 업무 개요/);
+    assert.match(body.messages[0].content, /법령상 의무보다 업무 설명을 우선하라는 뜻이 아닙니다/);
+    assert.deepEqual(JSON.parse(body.messages[1].content).sources, sources);
+    assert.ok(!JSON.stringify(body).includes('private-source'));
+    return rawCompletion(result);
+  } });
+  assert.equal(calls, 2);
+  assert.equal(generated.draft.analysis?.sources.length, 3);
+  assert.match(generated.draft.steps[0].description, /업무 첨부 · 업무처리 안내.txt/);
+});
+
+test('a saved overview can generate procedures without requiring supporting references', async () => {
+  const procedure: ProcedureAiInput = { title: '자료 점검', description: references[0].content, completionCriteria: '검토 결과 작성', references: [] };
+  const result = valid();
+  result.sourceSummaries = [{ referenceId: 'overview:task', summary: '개요에서 자료 작성과 검토를 확인합니다.', locator: '업무 설명', quote: '담당자는 자료를 작성한다.' }];
+  result.steps.forEach(step => { step.evidence.referenceId = 'overview:task'; });
+  let calls = 0;
+  const generated = await generateAiProcedure(procedure, { apiKey: 'test', model, fetcher: async (_url, init) => {
+    if (++calls === 1) return catalog();
+    const body = JSON.parse(String(init?.body));
+    assert.equal(body.response_format.json_schema.schema.properties.sourceSummaries.minItems, 1);
+    assert.equal(JSON.parse(body.messages[1].content).sources[0].id, 'overview:task');
+    return rawCompletion(result);
+  } });
+  assert.equal(generated.draft.steps.length, 2);
+  assert.equal(generated.draft.analysis?.sources[0].sourceTitle, '업무 개요');
+  assert.deepEqual(generated.draft.references, []);
+});
+
+test('task files can supply the procedure when the overview description and supporting references are absent', async () => {
+  const procedure: ProcedureAiInput = { title: '자료 점검', description: '', references: [], documents: [{ attachmentId: 'file-only', name: '작성검토.txt', text: references[0].content }] };
+  const result = valid();
+  result.sourceSummaries = [{ referenceId: 'overview:task', summary: '자료 점검 업무이며 상세 내용은 첨부파일을 확인합니다.', locator: '업무명', quote: procedure.title }, { referenceId: 'document:file-only', summary: '자료 작성과 검토를 안내합니다.', locator: '본문', quote: '담당자는 자료를 작성한다.' }];
+  result.steps.forEach(step => { step.evidence.referenceId = 'document:file-only'; });
+  let calls = 0;
+  const generated = await generateAiProcedure(procedure, { apiKey: 'test', model, fetcher: async () => ++calls === 1 ? catalog() : rawCompletion(result) });
+  assert.equal(generated.draft.steps.length, 2);
+  assert.equal(generated.draft.analysis?.sources[1].sourceTitle, '업무 첨부 · 작성검토.txt');
+  result.steps[0].evidence.quote = '파일에 없는 법적 의무'; calls = 0;
+  await assert.rejects(generateAiProcedure(procedure, { apiKey: 'test', model, fetcher: async () => ++calls === 1 ? catalog() : rawCompletion(result) }), errorCode('AI_UNVERIFIED_EVIDENCE'));
+  assert.equal(calls, 3);
+});
+
+test('combined overview, task files and references share the input budget and retain every reviewed source', () => {
+  const procedure: ProcedureAiInput = { title: '자료 점검', description: '담당자는 자료를 작성한다.', references: Array.from({ length: 20 }, (_, index) => ({ ...references[0], id: `ref-${index}` })), documents: Array.from({ length: 10 }, (_, index) => ({ attachmentId: `file-${index}`, name: `첨부${index}.txt`, text: references[0].content })) };
+  const sources = procedureAiSources(procedure);
+  assert.equal(sources.length, 31);
+  const result = valid();
+  result.sourceSummaries = sources.map(source => ({ referenceId: source.id, summary: '업무 내용을 검토했습니다.', locator: '본문', quote: source.content }));
+  result.steps.forEach(step => { step.evidence.referenceId = 'document:file-0'; });
+  assert.equal(parseAiProcedure(result, sources).analysis?.sources.length, 31);
+  result.sourceSummaries = result.sourceSummaries.filter(source => source.referenceId !== 'document:file-9');
+  assert.throws(() => parseAiProcedure(result, sources), errorCode('AI_INCOMPLETE_SUMMARY'));
+  assert.throws(() => procedureAiSources({ ...procedure, description: 'x'.repeat(30_000), documents: [{ attachmentId: 'file-large', name: 'large.txt', text: 'y'.repeat(30_000) }] }), errorCode('AI_REFERENCE_TOO_LONG'));
+  assert.throws(() => procedureAiSources({ ...procedure, documents: [...procedure.documents!, procedure.documents![0]] }), errorCode('AI_DOCUMENT_REQUIRED'));
+  assert.throws(() => procedureAiSources({ ...procedure, documents: [{ attachmentId: 'empty', name: 'empty.txt', text: ' ' }] }), errorCode('AI_DOCUMENT_REQUIRED'));
+  assert.throws(() => procedureAiSources({ ...procedure, references: [references[0], references[0]] }), errorCode('AI_REFERENCE_REQUIRED'));
+});
+
+test('overview save-first fingerprint tracks every primary input field and linked document', () => {
+  const overview = { title: '자료 점검', description: '자료 작성 및 검토', completionCriteria: '검토 완료', descriptionAttachmentIds: ['file-a', 'file-b'] };
+  for (const changed of [{ title: '다른 업무' }, { description: '변경된 내용' }, { completionCriteria: '다른 완료 조건' }, { descriptionAttachmentIds: ['file-c'] }]) {
+    assert.notEqual(procedureOverviewFingerprint(overview), procedureOverviewFingerprint({ ...overview, ...changed }));
+  }
+  assert.equal(procedureOverviewFingerprint({ title: overview.title, description: overview.description }), procedureOverviewFingerprint({ title: overview.title, description: overview.description, completionCriteria: '', descriptionAttachmentIds: [] }));
+});
+
+test('maximum-length saved reference and attachment IDs remain valid after source namespacing', () => {
+  const savedId = 'r'.repeat(150); const attachmentId = 'f'.repeat(150);
+  const sources = procedureAiSources({ ...input, references: [{ ...references[0], id: savedId }], documents: [{ attachmentId, name: '첨부.txt', text: references[0].content }] });
+  const result = valid();
+  result.sourceSummaries = sources.map(source => ({ referenceId: source.id, summary: '자료 작성과 검토에 필요한 내용입니다.', locator: '본문', quote: source.content }));
+  result.steps[0].evidence.referenceId = `document:${attachmentId}`;
+  result.steps[1].evidence.referenceId = `reference:${savedId}`;
+  const draft = parseAiProcedure(result, sources);
+  assert.equal(draft.steps.length, 2);
+  assert.deepEqual(draft.analysis?.sources.map(source => source.referenceId.length), [13, 159, 160]);
 });

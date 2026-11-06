@@ -3,9 +3,9 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { Background, Controls, MarkerType, Position, ReactFlow, type Edge, type Node } from '@xyflow/react';
 import { ArrowRight, Check, FileText, GitBranch, LoaderCircle, Maximize2, Minimize2, Plus, RefreshCw, Sparkles, Trash2, Upload, X } from 'lucide-react';
-import type { TaskReference, WorkflowStep } from '@/lib/types';
+import type { Attachment, Task, TaskReference, WorkflowStep } from '@/lib/types';
 import { replaceProcedureDraft, generateProcedureDraft, procedureErrors, PROCEDURE_PDF_LIMIT, PROCEDURE_TEXT_LIMIT, type ProcedureDraft, type ProcedurePage } from '@/lib/procedure-draft';
-import { AI_REFERENCE_LIMIT, AI_REFERENCE_TEXT_LIMIT, procedureReferenceFingerprint } from '@/lib/procedure-ai-input';
+import { AI_REFERENCE_LIMIT, AI_REFERENCE_TEXT_LIMIT, procedureOverviewFingerprint, procedureReferenceFingerprint } from '@/lib/procedure-ai-input';
 import '@xyflow/react/dist/style.css';
 import './procedure-builder.css';
 
@@ -68,6 +68,8 @@ export function ProcedureFlow({ workflow, participants, selectedId, onSelect, re
 
 export interface ProcedureBuilderProps {
   taskId: string;
+  overview: Pick<Task, 'title' | 'description' | 'completionCriteria' | 'descriptionAttachmentIds'>;
+  overviewAttachments: Pick<Attachment, 'id' | 'name'>[];
   workflow: WorkflowStep[];
   references?: TaskReference[];
   participants?: ProcedureParticipants;
@@ -77,7 +79,7 @@ export interface ProcedureBuilderProps {
   onClose?: () => void;
 }
 
-export function ProcedureBuilder({ taskId, workflow, references = [], participants, requiredStepTitles = [], disabled = false, onApply, onClose }: ProcedureBuilderProps) {
+export function ProcedureBuilder({ taskId, overview, overviewAttachments, workflow, references = [], participants, requiredStepTitles = [], disabled = false, onApply, onClose }: ProcedureBuilderProps) {
   const [title, setTitle] = useState(''); const [url, setUrl] = useState('');
   const [type, setType] = useState<TaskReference['type']>('guideline'); const [text, setText] = useState('');
   const [pages, setPages] = useState<ProcedurePage[] | undefined>(); const [draft, setDraft] = useState<ProcedureDraft | null>(null);
@@ -89,10 +91,13 @@ export function ProcedureBuilder({ taskId, workflow, references = [], participan
   const [generatedBy, setGeneratedBy] = useState('');
   const [readAttachments, setReadAttachments] = useState(true);
   const selectedReferences = references.filter(reference => referenceIds.includes(reference.id));
-  const sourceFingerprint = procedureReferenceFingerprint(selectedReferences);
+  const referencesFingerprint = procedureReferenceFingerprint(selectedReferences);
+  const overviewFingerprint = procedureOverviewFingerprint(overview);
+  const sourceFingerprint = JSON.stringify([overviewFingerprint, referencesFingerprint, readAttachments]);
   const latestFingerprint = useRef(sourceFingerprint); latestFingerprint.current = sourceFingerprint;
   const controller = useRef<AbortController | null>(null);
-  const selectedLength = selectedReferences.reduce((sum, reference) => sum + reference.content.length, 0);
+  const selectedLength = overview.title.length + overview.description.length + overview.completionCriteria.length + selectedReferences.reduce((sum, reference) => sum + reference.content.length, 0);
+  const hasSourceContent = Boolean(overview.description.trim() || overview.completionCriteria.trim() || overview.descriptionAttachmentIds?.length || selectedReferences.length);
   useEffect(() => { setDraft(null); setReviewed(false); setGeneratedBy(''); }, [sourceFingerprint]);
   useEffect(() => () => controller.current?.abort(), []);
   const selected = draft?.steps.find(step => step.id === selectedId);
@@ -126,10 +131,10 @@ export function ProcedureBuilder({ taskId, workflow, references = [], participan
     setBusy(true); setError(''); setDraft(null); setReviewed(false); setGeneratedBy('');
     const fingerprint = sourceFingerprint; const requestController = new AbortController(); controller.current = requestController;
     try {
-      const response = await fetch('/api/procedure-generate', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ taskId, referenceIds: selectedReferences.map(reference => reference.id), referencesFingerprint: fingerprint, readAttachments }), signal: requestController.signal });
+      const response = await fetch('/api/procedure-generate', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ taskId, overviewFingerprint, referenceIds: selectedReferences.map(reference => reference.id), referencesFingerprint, readAttachments }), signal: requestController.signal });
       const result = await response.json() as { error?: string; draft?: ProcedureDraft; model?: string };
       if (!response.ok || !result.draft) throw new Error(result.error || 'AI 절차를 생성하지 못했습니다.');
-      if (latestFingerprint.current !== fingerprint) throw new Error('분석 중 관련 근거가 변경되었습니다. 저장한 뒤 다시 분석해 주세요.');
+      if (latestFingerprint.current !== fingerprint) throw new Error('분석 중 업무 개요·붙임 파일 또는 관련 근거가 변경되었습니다. 저장한 뒤 다시 분석해 주세요.');
       setDraft(result.draft); setSelectedId(result.draft.steps[0]?.id || ''); setDiagramChanged(false); setRedrawKey(value => value + 1); setGeneratedBy(`BizRouter AI · ${result.model || '분석 완료'}`);
     } catch (cause) { if (!requestController.signal.aborted) setError(cause instanceof Error ? cause.message : 'AI 분석을 완료하지 못했습니다.'); }
     finally { if (!requestController.signal.aborted) setBusy(false); controller.current = null; }
@@ -146,17 +151,23 @@ export function ProcedureBuilder({ taskId, workflow, references = [], participan
     } catch (cause) { setError(cause instanceof Error ? cause.message : '절차를 적용하지 못했습니다.'); }
     finally { setApplying(false); }
   }
-  return <section className="procedure-builder" aria-label="관련 근거로 AI 절차·절차도 만들기">
-    <header className="procedure-builder-heading"><div><p>관련 근거에서 시작하는 절차</p><h3>근거를 분석하고, 절차도로 연결하세요.</h3></div>{onClose && <button className="procedure-close" type="button" aria-label="절차 초안 닫기" disabled={applying} onClick={onClose}><X size={18}/></button>}</header>
+  return <section className="procedure-builder" aria-label="업무 개요와 붙임 파일로 AI 절차·절차도 만들기">
+    <header className="procedure-builder-heading"><div><p>업무 개요와 붙임 파일에서 시작하는 절차</p><h3>업무를 분석하고, 근거로 보완하세요.</h3></div>{onClose && <button className="procedure-close" type="button" aria-label="절차 초안 닫기" disabled={applying} onClick={onClose}><X size={18}/></button>}</header>
     {requiredStepTitles.length > 0 && <div className="procedure-required-steps"><strong>공통업무 필수 단계</strong><p>아래 이름을 그대로 사용하고 각 단계를 필수 절차로 지정해 주세요.</p><ul>{requiredStepTitles.map((name, index) => <li key={`${index}-${name}`}>{name}</li>)}</ul></div>}
     <div className="procedure-source-modes" aria-label="절차 생성 방식"><button type="button" aria-pressed={sourceMode === 'ai'} disabled={locked} onClick={() => { setSourceMode('ai'); setError(''); }}><Sparkles size={15}/>BizRouter AI 분석</button><button type="button" aria-pressed={sourceMode === 'local'} disabled={locked} onClick={() => { setSourceMode('local'); setError(''); }}>본문으로 직접 초안 만들기</button></div>
     {sourceMode === 'ai' ? <div className="procedure-ai-sources">
-      <p className="procedure-builder-intro">관련 근거에 저장한 법령, 지침, 생산 문서를 선택하세요. AI가 각 근거의 핵심 내용을 요약하고 함께 검토한 뒤, 수행 단계·역할·선행 관계를 정리해 절차와 절차도를 만듭니다.</p>
-      <fieldset><legend>분석할 관련 근거 <span>{selectedReferences.length}/{AI_REFERENCE_LIMIT}</span></legend>{references.length ? references.map(reference => <label key={reference.id} className="procedure-reference-option"><input type="checkbox" disabled={locked || (!reference.content.trim() && !(readAttachments && reference.attachmentId)) || (!referenceIds.includes(reference.id) && selectedReferences.length >= AI_REFERENCE_LIMIT)} checked={referenceIds.includes(reference.id)} onChange={event => { setReferenceIds(current => event.target.checked ? [...current, reference.id] : current.filter(id => id !== reference.id)); setError(''); }}/><span><strong>{reference.title}</strong><small>{reference.content.trim() ? `${reference.content.length.toLocaleString('ko-KR')}자${reference.attachmentId ? ' · 첨부 본문 포함' : ''}` : reference.attachmentId ? 'Kordoc으로 첨부파일 본문을 읽어 분석합니다.' : '관련 근거에서 본문을 입력하거나 문서 파일을 첨부하세요.'}</small></span></label>) : <p className="procedure-no-sources">관련 근거 탭에서 법령·지침 또는 생산 문서를 등록하고 저장해 주세요.</p>}</fieldset>
-      <label className="procedure-file-analysis"><input type="checkbox" checked={readAttachments} disabled={locked} onChange={event => { setReadAttachments(event.target.checked); setDraft(null); }}/><span>첨부파일은 Kordoc으로 다시 읽어 전체 본문 분석</span></label>
-      <p className="procedure-ai-disclosure">선택한 근거 본문과 저장된 업무 설명을 BizRouter로 전송합니다. 파일 본문 분석을 켜면 첨부문서 원문도 함께 검토합니다. 첨부파일 원본과 원문 주소는 전송하지 않습니다. 수정한 근거는 먼저 저장해 주세요.</p>
-      <div className="procedure-ai-action"><button className="btn btn-primary" type="button" disabled={locked || !selectedReferences.length || selectedReferences.some(reference => !reference.content.trim() && !(readAttachments && reference.attachmentId)) || selectedLength > AI_REFERENCE_TEXT_LIMIT} onClick={() => void generateAi()}><Sparkles size={16}/>{busy ? 'AI가 근거를 요약하고 절차를 만드는 중…' : 'AI 근거 요약·절차 만들기'}</button><small>{selectedLength.toLocaleString('ko-KR')} / 60,000자</small></div>
-      {selectedLength > AI_REFERENCE_TEXT_LIMIT && <p className="procedure-error" role="alert">분석할 근거를 줄여 본문 합계를 6만 자 이하로 맞춰 주세요.</p>}
+      <p className="procedure-builder-intro">업무 개요와 붙임 파일을 가장 먼저 분석해 수행 단계·역할·선행 관계를 구성합니다. 관련 근거는 필요한 조건과 의무를 보완하고, 누락되거나 충돌하는 내용을 확인할 때 참고합니다.</p>
+      <section className="procedure-primary-sources" aria-label="우선 분석할 업무 개요와 붙임 파일">
+        <header><strong>1순위 · 업무 개요와 붙임 파일</strong><span>자동 포함</span></header>
+        <h4>{overview.title}</h4><p>{overview.description.trim() || '업무 개요에서 업무 설명을 입력해 주세요.'}</p>
+        {overview.completionCriteria.trim() && <p className="procedure-overview-criteria">완료 기준 · {overview.completionCriteria}</p>}
+        <div><strong>업무 개요의 붙임 파일 · {overview.descriptionAttachmentIds?.length || 0}개</strong>{overview.descriptionAttachmentIds?.length ? <ul>{overview.descriptionAttachmentIds.map(id => <li key={id}><FileText size={15}/>{overviewAttachments.find(file => file.id === id)?.name || '연결된 파일 확인 필요'}</li>)}</ul> : <p>등록된 붙임 파일이 없습니다. 업무 개요에서 파일을 추가할 수 있습니다.</p>}<small>업무 개요의 파일은 Kordoc으로 본문을 읽어 항상 우선 분석합니다.</small></div>
+      </section>
+      <fieldset><legend>2순위 · 함께 참고할 관련 근거 · 선택 <span>{selectedReferences.length}/{AI_REFERENCE_LIMIT}</span></legend>{references.length ? references.map(reference => <label key={reference.id} className="procedure-reference-option"><input type="checkbox" disabled={locked || (!referenceIds.includes(reference.id) && ((!reference.content.trim() && !(readAttachments && reference.attachmentId)) || selectedReferences.length >= AI_REFERENCE_LIMIT))} checked={referenceIds.includes(reference.id)} onChange={event => { setReferenceIds(current => event.target.checked ? [...current, reference.id] : current.filter(id => id !== reference.id)); setError(''); }}/><span><strong>{reference.title}</strong><small>{reference.content.trim() ? `${reference.content.length.toLocaleString('ko-KR')}자${reference.attachmentId ? ' · 첨부 본문 포함' : ''}` : reference.attachmentId ? 'Kordoc으로 첨부파일 본문을 읽어 분석합니다.' : '관련 근거에서 본문을 입력하거나 문서 파일을 첨부하세요.'}</small></span></label>) : <p className="procedure-no-sources">등록된 관련 근거가 없습니다. 업무 개요와 붙임 파일로 절차를 만들 수 있습니다.</p>}</fieldset>
+      <label className="procedure-file-analysis"><input type="checkbox" checked={readAttachments} disabled={locked} onChange={event => { setReadAttachments(event.target.checked); setDraft(null); }}/><span>관련 근거의 첨부파일도 Kordoc으로 읽기</span></label>
+      <p className="procedure-ai-disclosure">저장된 업무 개요, 업무 개요 파일의 본문, 선택한 관련 근거를 BizRouter로 전송합니다. 파일 원본과 원문 주소는 전송하지 않습니다. 변경한 업무 개요와 붙임 파일·근거는 먼저 저장해 주세요.</p>
+      <div className="procedure-ai-action"><button className="btn btn-primary" type="button" disabled={locked || !hasSourceContent || selectedReferences.some(reference => !reference.content.trim() && !(readAttachments && reference.attachmentId)) || selectedLength > AI_REFERENCE_TEXT_LIMIT} onClick={() => void generateAi()}><Sparkles size={16}/>{busy ? 'AI가 업무 개요·파일을 분석하는 중…' : 'AI 업무 분석·절차 만들기'}</button><small>입력 본문 {selectedLength.toLocaleString('ko-KR')}자 · 파일 본문 포함 최대 60,000자</small></div>
+      {selectedLength > AI_REFERENCE_TEXT_LIMIT && <p className="procedure-error" role="alert">업무 설명과 선택한 근거의 본문 합계를 6만 자 이하로 맞춰 주세요.</p>}
     </div> : <>
     <p className="procedure-builder-intro">문서 파일 또는 붙여 넣은 본문을 번호·문단 단위로 정리합니다. 외부 AI 전송 없이 규칙 기반 초안을 작성합니다.</p>
     <div className="procedure-source-grid"><label><span>자료 제목</span><input value={title} maxLength={300} disabled={locked} onChange={event => { setTitle(event.target.value); setDraft(null); }} placeholder="예: 예산 집행 업무 지침"/></label><label><span>자료 구분</span><select value={type} disabled={locked} onChange={event => { setType(event.target.value as TaskReference['type']); setDraft(null); }}><option value="guideline">지침·매뉴얼</option><option value="law">법령 본문</option><option value="directive">지시사항</option><option value="other">기타 자료</option></select></label><label className="procedure-url"><span>원문 주소 · 선택</span><input type="url" value={url} maxLength={2000} disabled={locked} onChange={event => { setUrl(event.target.value); setDraft(null); }} placeholder="https://… (주소를 자동으로 가져오지는 않습니다)"/></label></div>
@@ -166,11 +177,11 @@ export function ProcedureBuilder({ taskId, workflow, references = [], participan
     <button className="btn btn-secondary procedure-generate" type="button" disabled={locked || !title.trim() || !text.trim()} onClick={generate}><GitBranch size={16}/>규칙 기반 절차 초안 만들기<ArrowRight size={15}/></button>
     </>}
     {error && !draft && <p className="procedure-error" role="alert">{error}</p>}
-    {generatedBy && <p className="procedure-generated-by" role="status"><Check size={15}/>{generatedBy} · {draft?.analysis ? '근거 요약·절차도 생성 완료' : '절차도 생성 완료'}</p>}
-    {draft?.analysis && <section className="procedure-analysis" aria-label="관련 근거 AI 검토 요약">
-      <header><span><Sparkles size={17}/></span><div><h4>관련 근거 종합 요약</h4><p>선택한 근거 {draft.analysis.sources.length}건을 함께 검토한 내용입니다. 근거별 요약과 원문 인용을 확인해 주세요.</p></div></header>
+    {generatedBy && <p className="procedure-generated-by" role="status"><Check size={15}/>{generatedBy} · {draft?.analysis ? '업무 요약·절차도 생성 완료' : '절차도 생성 완료'}</p>}
+    {draft?.analysis && <section className="procedure-analysis" aria-label="업무 개요·파일·관련 근거 AI 검토 요약">
+      <header><span><Sparkles size={17}/></span><div><h4>업무 분석 종합 요약</h4><p>업무 개요와 파일을 우선 분석하고 관련 근거를 참고했습니다. 분석 자료 {draft.analysis.sources.length}건의 요약과 원문 인용을 확인해 주세요.</p></div></header>
       <p className="procedure-analysis-summary">{draft.analysis.summary}</p>
-      <details className="procedure-analysis-sources" open><summary>근거별 검토 <span>{draft.analysis.sources.length}건</span></summary><ol>{draft.analysis.sources.map(source => <li key={source.referenceId}>
+      <details className="procedure-analysis-sources" open><summary>자료별 검토 <span>{draft.analysis.sources.length}건</span></summary><ol>{draft.analysis.sources.map(source => <li key={source.referenceId}>
         <h5>{source.sourceTitle}</h5><p>{source.summary}</p>
         <details className="procedure-analysis-evidence"><summary><FileText size={14}/>원문 인용 확인</summary><span>{source.locator}</span><blockquote>{source.excerpt}</blockquote></details>
       </li>)}</ol></details>
