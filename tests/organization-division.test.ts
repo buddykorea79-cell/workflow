@@ -7,7 +7,7 @@ import type { Delegation } from '../src/lib/types';
 
 const now = new Date('2026-11-06T03:00:00Z');
 
-test('every organizational role receives the same cross-department titles without task contents or codes', () => {
+test('department members share their department titles while administrators retain organization access', () => {
   const state = createSeed(now);
   const privateTask = state.tasks.find(task => task.id === 'task-data')!;
   privateTask.description = 'PRIVATE-BODY-ORGANIZATION'; privateTask.code = 'PRIVATE-CODE-ORGANIZATION'; privateTask.references = [{ id: 'private-file', type: 'document', title: 'PRIVATE-DOCUMENT-NAME', content: 'PRIVATE-DOCUMENT-CONTENT', attachmentId: 'PRIVATE-FILE-ID' }];
@@ -15,7 +15,8 @@ test('every organizational role receives the same cross-department titles withou
   for (const role of ['member', 'lead', 'manager', 'head', 'admin']) {
     const user = state.users.find(item => item.departmentId === 'dept-plan' && item.role === role)!;
     const workspace = getWorkspace(state, user.id, now);
-    assert.deepEqual(workspace.organizationDivision, expected);
+    assert.deepEqual(workspace.organizationDivision, role === 'admin' ? expected : { ...expected, departments: expected.departments.filter(department => department.id === user.departmentId) });
+    if (role !== 'admin') assert.deepEqual(workspace.organizationDivision?.departments.map(item => item.id), [user.departmentId]);
     if (role !== 'admin') assert.equal(workspace.tasks.some(task => task.id === privateTask.id), false);
   }
   assert.equal(expected.departments.length, state.departments.length);

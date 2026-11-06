@@ -18,13 +18,13 @@ import { OrganizationDivision } from './organization-division';
 import './workspace-directory.css';
 
 type View = 'dashboard' | 'personal' | 'department' | 'allocation' | 'division' | 'delegation' | 'common' | 'schedule' | 'performance' | 'handover' | 'organization' | 'admin';
-const titles: Record<View, string> = { dashboard: '업무 홈', personal: '개인업무', department: '부서 업무 관리', division: '전 부서 업무분장표', delegation: '업무대행', allocation: '배부·승인 관리', common: '공통업무 · 지시사항', schedule: '업무 일정', performance: '성과 · 평가', handover: '인수인계', organization: '조직 · 구성원', admin: '관리자' };
-const navItems = [{ id: 'dashboard', icon: LayoutDashboard }, { id: 'personal', icon: FolderOpen }, { id: 'department', icon: Users }, { id: 'common', icon: GitBranch }, { id: 'schedule', icon: CalendarDays }, { id: 'performance', icon: CheckCheck }, { id: 'handover', icon: ArrowLeftRight }, { id: 'delegation', icon: UserRound }] as const;
-const demoRoles = [{ id: 'member', label: '업무 담당자', icon: UserRound }, { id: 'lead', label: '팀장', icon: Users }, { id: 'manager', label: '부서 담당자', icon: Building2 }, { id: 'head', label: '부서장', icon: ShieldCheck }, { id: 'admin', label: '관리자', icon: Settings2 }];
+const titles: Record<View, string> = { dashboard: '업무 홈', personal: '개인업무', department: '부서 업무 관리', division: '업무분장표', delegation: '업무대행', allocation: '배부·승인 관리', common: '공통업무 · 지시사항', schedule: '업무 일정', performance: '성과 · 평가', handover: '인수인계', organization: '조직 · 구성원', admin: '관리자' };
+const navItems = [{ id: 'dashboard', icon: LayoutDashboard }, { id: 'personal', icon: FolderOpen }, { id: 'department', icon: Users }, { id: 'common', icon: GitBranch }, { id: 'schedule', icon: CalendarDays }, { id: 'delegation', icon: UserRound }, { id: 'handover', icon: ArrowLeftRight }, { id: 'performance', icon: CheckCheck }] as const;
+const demoRoles = [{ id: 'member1', label: '업무 담당자 1', icon: UserRound }, { id: 'member2', label: '업무 담당자 2', icon: UserRound }, { id: 'lead', label: '팀장', icon: Users }, { id: 'manager', label: '부서 담당자', icon: Building2 }, { id: 'head', label: '부서장', icon: ShieldCheck }, { id: 'admin', label: '관리자', icon: Settings2 }];
 
 function DemoLogin({ users, departments, busy, error, onLogin }: { users: User[]; departments: Department[]; busy: boolean; error: string; onLogin: (id: string) => void }) {
-  const [role, setRole] = useState<DemoRole>('member');
-  const [departmentId, setDepartmentId] = useState(demoDefaultDepartment('member'));
+  const [role, setRole] = useState<DemoRole>('member1');
+  const [departmentId, setDepartmentId] = useState(demoDefaultDepartment('member1'));
   const [selectedId, setSelectedId] = useState('');
   const availableDepartmentId = departments.some(department => department.id === departmentId) ? departmentId : departments[0]?.id || departmentId;
   const available = demoCandidates(users, role, availableDepartmentId);
@@ -32,7 +32,7 @@ function DemoLogin({ users, departments, busy, error, onLogin }: { users: User[]
   const selectedDepartmentId = selected?.departmentId || availableDepartmentId;
   return <div className="login-card" id="login">
     <div className="login-card-intro"><span className="login-icon"><ArrowUpRight size={23}/></span><Badge>시연용 워크스페이스</Badge></div>
-    <h2>온이음 시작하기.</h2><p className="login-description">{departments.length === 1 ? '현재 부서의 계정으로 역할을 바꾸며 업무 흐름을 확인하세요.' : '데이터정보화담당관실 직원 중심의 시연입니다. 다른 부서도 선택할 수 있습니다.'}</p>
+    <h2>온이음 시작하기.</h2><p className="login-description">{departments.length === 1 ? '현재 부서의 계정으로 역할을 바꾸며 업무 흐름을 확인하세요.' : '담당자 1은 데이터정보화담당관실에서 공통업무를 작성하고, 담당자 2는 혁신행정담당관실에서 배정받습니다.'}</p>
     <fieldset className="role-picker"><legend>어떤 역할로 시작할까요?</legend><div>{demoRoles.map(({ id, label, icon: Icon }) => <button key={id} type="button" className={role === id ? 'role-option selected' : 'role-option'} aria-pressed={role === id} onClick={() => { const nextRole = id as DemoRole; const defaultDepartment = demoDefaultDepartment(nextRole); setRole(nextRole); setDepartmentId(departments.some(department => department.id === defaultDepartment) ? defaultDepartment : departments[0]?.id || defaultDepartment); setSelectedId(''); }}><Icon size={18} strokeWidth={1.65}/><span>{label}</span>{role === id && <Check size={13} className="role-check"/>}</button>)}</div></fieldset>
     <div className="login-selects"><label className="field"><span>부서</span><select aria-label="로그인 부서" value={selectedDepartmentId} onChange={e => { setDepartmentId(e.target.value); setSelectedId(''); }}>{departments.map(d => <option key={d.id} value={d.id}>{d.name}</option>)}</select></label><label className="field"><span>시연 계정</span><select aria-label="시연 계정" value={selected?.id || ''} onChange={e => setSelectedId(e.target.value)}>{!available.length && <option value="">해당 역할의 계정이 없습니다</option>}{available.map(u => <option key={u.id} value={u.id}>{u.name} · {u.team} · {u.title}</option>)}</select></label></div>
     {selected && <div className="login-person"><span className="avatar">{selected.name.slice(0, 1)}</span><div><strong>{selected.name}</strong><span>{departments.find(d => d.id === selected.departmentId)?.name} · {selected.team}</span></div><span className="person-id">{selected.id}</span></div>}
@@ -79,7 +79,7 @@ export default function Workspace() {
   const searchRef = useRef<HTMLInputElement>(null);
 
   const loadSession = useCallback(async () => {
-    const response = await fetch('/api/session', { cache: 'no-store' });
+    const response = await fetch('/api/session?scope=demo', { cache: 'no-store' });
     const result = await response.json();
     if (!response.ok) throw new Error(result.error || '계정을 불러올 수 없습니다.');
     setUsers(result.users || []); setDepartments(result.departments || []);
@@ -194,7 +194,7 @@ export default function Workspace() {
     {busy && <div className="saving-indicator"><LoaderCircle size={15} className="spin"/>저장 중</div>}
     {notice && <div className={'toast ' + (notice.error ? 'toast-error' : '')} role={notice.error ? 'alert' : 'status'}><span>{notice.error ? '요청을 확인해 주세요' : <Check size={17}/>}</span><p>{notice.text}</p><button className="icon-btn" aria-label="메시지 닫기" onClick={() => setNotice(null)}><X size={16}/></button></div>}
     {selectedTask && <TaskPanel key={selectedTask + user.id} workspace={workspace} taskId={selectedTask} initialMode="view" command={command} onWorkspace={setWorkspace} onClose={() => setSelectedTask(null)}/>}
-    {switching && <Modal title="다른 역할로 둘러보기" description="다른 부서 시연은 로그아웃 후 첫 화면에서 선택하세요." onClose={() => setSwitching(false)}><DemoLogin users={users} departments={departments} busy={busy} error={loginError} onLogin={login}/></Modal>}
+    {switching && <Modal title="다른 역할로 둘러보기" description="업무 담당자 1·2 또는 부서별 승인·배부 역할로 바로 전환하세요." onClose={() => setSwitching(false)}><DemoLogin users={users} departments={departments} busy={busy} error={loginError} onLogin={login}/></Modal>}
     {help && <UsageGuide initialRole={user.role} initialSection="roles" onClose={() => setHelp(false)}/> }
   </div>;
 }

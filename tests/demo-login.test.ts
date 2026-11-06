@@ -44,3 +44,14 @@ test('manual department selection stays scoped and stale account choices cannot 
   assert.equal(selectDemoUser(demoCandidates(users, 'member', 'dept-support'), 'member', 'u-extra-member')?.id, 'u-extra-member');
   assert.equal(demoDefaultDepartment('member'), 'dept-support');
 });
+
+test('presentation officers 1 and 2 select sender and recipient without creating new roles', () => {
+  const senderDepartment = demoDefaultDepartment('member1');
+  const recipientDepartment = demoDefaultDepartment('member2');
+  const sender = selectDemoUser(demoCandidates(users, 'member1', senderDepartment), 'member1', '');
+  const recipient = selectDemoUser(demoCandidates(users, 'member2', recipientDepartment), 'member2', '');
+  assert.equal(sender?.id, 'u-support-member'); assert.equal(sender?.departmentId, 'dept-support');
+  assert.equal(recipient?.id, 'u-innovation-member'); assert.equal(recipient?.departmentId, 'dept-innovation');
+  assert.equal(sender?.role, 'member'); assert.equal(recipient?.role, 'member');
+  assert.deepEqual(demoCandidates(users, 'member1', 'dept-plan'), demoCandidates(users, 'member', 'dept-plan'));
+});

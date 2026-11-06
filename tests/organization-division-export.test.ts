@@ -42,7 +42,7 @@ test('PDF embeds Korean text and paginates long task names without losing the fi
     assert.ok(pdf.numPages > 1);
     let extracted = '';
     for (let page = 1; page <= pdf.numPages; page++) { const content = await (await pdf.getPage(page)).getTextContent(); extracted += content.items.map(item => 'str' in item ? item.str : '').join(''); }
-    for (const text of ['전체 업무분장표', '한글 부서', '홍길동', '김대행', '마지막한글검증문구']) assert.ok(extracted.includes(text), `Missing Korean text: ${text}`);
+    for (const text of ['업무분장표', '한글 부서', '홍길동', '김대행', '마지막한글검증문구']) assert.ok(extracted.includes(text), `Missing Korean text: ${text}`);
   } finally { await loading.destroy(); }
 });
 
@@ -62,8 +62,13 @@ test('the download route requires authentication and returns filtered Korean Exc
     const foreignDepartment = state.departments.find(item => item.id !== user.departmentId)!;
     for (const format of ['xlsx', 'pdf']) {
       const response = await GET(new NextRequest(`${endpoint}?format=${format}&departmentId=${foreignDepartment.id}`, { headers }));
-      assert.equal(response.status, 200); assert.match(response.headers.get('content-disposition')!, /attachment;.*filename\*=UTF-8''/); assert.equal(response.headers.get('cache-control'), 'no-store, private');
-      const bytes = Buffer.from(await response.arrayBuffer()); assert.ok(bytes.length > 1000);
+      assert.equal(response.status, 403);
+      const ownResponse = await GET(new NextRequest(`${endpoint}?format=${format}`, { headers }));
+      assert.equal(ownResponse.status, 200); assert.match(ownResponse.headers.get('content-disposition')!, /attachment;.*filename\*=UTF-8''/); assert.equal(ownResponse.headers.get('cache-control'), 'no-store, private');
+      const bytes = Buffer.from(await ownResponse.arrayBuffer()); assert.ok(bytes.length > 1000);
+      if (format === 'xlsx') { const book = new ExcelJS.Workbook(); await book.xlsx.load(bytes as never); const cells = JSON.stringify(book.getWorksheet(1)!.getSheetValues()); assert.ok(cells.includes(state.departments.find(item => item.id === user.departmentId)!.name)); assert.equal(cells.includes(foreignDepartment.name), false); }
+      const admin = state.users.find(item => item.role === 'admin')!;
+      assert.equal((await GET(new NextRequest(`${endpoint}?format=${format}&departmentId=${foreignDepartment.id}`, { headers: { Cookie: `ieum_demo_session=${signSession(admin.id)}` } }))).status, 200);
       assert.equal(bytes.subarray(0, format === 'pdf' ? 5 : 2).toString(), format === 'pdf' ? '%PDF-' : 'PK');
     }
   } finally {

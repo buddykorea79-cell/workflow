@@ -65,22 +65,29 @@ test('prototype PDF extraction checks task access and stored bytes before parsin
     const missing = await POST(request(task.primaryId, { ...payload, attachmentId: 'other-task-attachment' }));
     assert.equal(missing.status, 404);
     assert.equal((await missing.json()).code, 'ATTACHMENT_NOT_FOUND');
-    state.departmentWorkPlans = [{ departmentId: task.departmentId, status: 'confirmed', version: 1 }]; await save();
-    assert.equal((await POST(request())).status, 409);
     assert.equal(storageReads, 0);
+    state.departmentWorkPlans = [{ departmentId: task.departmentId, status: 'confirmed', version: 1 }]; await save();
+    const form = new FormData(); form.append('taskId', task.id); form.append('file', new File([new Uint8Array(storedBytes)], 'source.pdf', { type: 'application/pdf' }));
+    const imported = await POST(new NextRequest('https://prototype.example/api/procedure-extract', { method: 'POST', headers: { origin: 'https://prototype.example', cookie: `${sessionCookie}=${signSession(task.primaryId)}` }, body: form }));
+    assert.equal(imported.status, 409); assert.equal((await imported.json()).code, 'DEPARTMENT_CONFIRMED');
+    assert.equal(storageReads, 0);
+    const confirmedRead = await POST(request()); const confirmedResult = await confirmedRead.json();
+    assert.equal(confirmedRead.status, 200, JSON.stringify(confirmedResult));
+    assert.match(confirmedResult.text, /Prototype attachment content\./);
+    assert.equal(storageReads, 1);
 
     state.departmentWorkPlans = []; attachment.sha256 = '0'.repeat(64); await save();
     const changed = await POST(request());
     const changedBody = await changed.json(); assert.equal(changed.status, 409, JSON.stringify({ changedBody, storageReads })); assert.equal(changedBody.code, 'ATTACHMENT_CHANGED');
     storedBytes = Buffer.from('Not PDF bytes'); attachment.size = storedBytes.length; attachment.sha256 = createHash('sha256').update(storedBytes).digest('hex'); await save();
     const invalid = await POST(request());
-    assert.equal(invalid.status, 415); assert.equal((await invalid.json()).code, 'PDF_REQUIRED');
+    assert.equal(invalid.status, 422); assert.equal((await invalid.json()).code, 'DOCUMENT_EXTRACTION_FAILED');
 
     storedBytes = smallPdf(); attachment.size = storedBytes.length; attachment.sha256 = createHash('sha256').update(storedBytes).digest('hex'); await save();
     const extracted = await POST(request()); const result = await extracted.json();
     assert.equal(extracted.status, 200, JSON.stringify(result));
     assert.equal(result.pageCount, 1); assert.match(result.text, /Prototype attachment content\./);
-    assert.equal(storageReads, 3);
+    assert.equal(storageReads, 4);
   } finally {
     S3Client.prototype.send = originalSend;
     globalThis.fetch = originalFetch;

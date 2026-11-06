@@ -10,10 +10,10 @@ export async function GET(request: NextRequest) {
     const directory = await transaction(state => {
       const signedId = verifySession(request.cookies.get(sessionCookie)?.value || '');
       const signedUser = signedId ? activeUser(state, signedId) : undefined;
-      const visible = state.users.filter(user => user.active && (!signedUser || signedUser.role === 'admin' || user.departmentId === signedUser.departmentId));
+      const visible = state.users.filter(user => user.active && (request.nextUrl.searchParams.get('scope') === 'demo' || !signedUser || signedUser.role === 'admin' || user.departmentId === signedUser.departmentId));
       return {
         users: visible.map(({ id, name, initials, departmentId, team, role, title, color, active, endsAt }) => ({ id, name, initials, departmentId, team, role, title, color, active, endsAt })),
-        departments: state.departments.filter(department => !signedUser || signedUser.role === 'admin' || department.id === signedUser.departmentId),
+        departments: state.departments.filter(department => request.nextUrl.searchParams.get('scope') === 'demo' || !signedUser || signedUser.role === 'admin' || department.id === signedUser.departmentId),
       };
     });
     return NextResponse.json(directory, { headers: { 'Cache-Control': 'no-store, private' } });

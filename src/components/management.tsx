@@ -1,5 +1,7 @@
 'use client';
 
+import { AdminIntegrations } from './admin-integrations';
+
 import { useState } from 'react';
 import { ArrowRight, ArrowUpRight, Building2, CalendarDays, Check, CheckCircle2, ChevronDown, ChevronRight, ClipboardCheck, FileText, GitBranch, Layers3, ListChecks, Plus, Search, Send, ShieldCheck, Users } from 'lucide-react';
 import type { CommonTask, CommonDistribution, Performance, User, Workspace } from '@/lib/types';
@@ -88,14 +90,15 @@ const planned = [
 ];
 
 export function AdminView({ workspace: w, command }: Props) {
-  const [tab, setTab] = useState('status');
+  const [tab, setTab] = useState('connections');
   const [releaseOpen, setReleaseOpen] = useState(false);
   if (w.currentUser.role !== 'admin') return <EmptyState title="관리자 전용 화면입니다." description="시스템 관리자 계정으로 로그인하면 구현 현황과 버전 이력을 관리할 수 있습니다." />;
   const releases = w.releases || [];
   const latest = releases[0];
-  return <div className="management-view"><div className="page-heading"><div><p className="eyebrow">Administration</p><h1>조금씩, 더 나은 온이음.</h1><p className="muted">현재 구현 범위와 다음 과제, 버전별 변경 내용을 한곳에 남깁니다.</p></div><Button onClick={() => setReleaseOpen(true)}><Plus size={17} />버전 기록 추가</Button></div>
+  return <div className="management-view"><div className="page-heading"><div><p className="eyebrow">Administration</p><h1>조금씩, 더 나은 온이음.</h1><p className="muted">AI·DB·파일 연결을 시험하고 구현 현황과 변경 이력을 확인합니다.</p></div><Button onClick={() => setReleaseOpen(true)}><Plus size={17} />버전 기록 추가</Button></div>
     <div className="management-release-banner"><div className="management-release-icon"><GitBranch size={28} /></div><div><span>최근 기록 버전</span><h2>v{latest?.version || '0.2.0'}</h2><p>{latest?.title || '업무 연결 구조와 디자인 전면 개편'}</p></div><div className="management-release-environment"><Badge tone="outline">{w.mode === 'local' ? '로컬 시연 환경' : '연결 환경'}</Badge><span>{latest ? day(latest.date) : day(w.serverTime)}</span></div></div>
-    <div className="management-admin-tabs tabs">{[['status', '구현 현황'], ['releases', '버전 이력'], ['audit', '변경 기록']].map(([key, label]) => <button key={key} className={tab === key ? 'active' : ''} onClick={() => setTab(key)}>{label}{key === 'releases' && <span className="management-tab-count">{releases.length}</span>}</button>)}</div>
+    <div className="management-admin-tabs tabs">{[['connections', '연결·테스트'], ['status', '구현 현황'], ['releases', '버전 이력'], ['audit', '변경 기록']].map(([key, label]) => <button key={key} className={tab === key ? 'active' : ''} onClick={() => setTab(key)}>{label}{key === 'releases' && <span className="management-tab-count">{releases.length}</span>}</button>)}</div>
+    {tab === 'connections' && <AdminIntegrations/>}
     {tab === 'status' && <><div className="management-roadmap-heading"><h2>지금 사용할 수 있는 기능</h2><Badge>{implemented.length}개 영역</Badge></div><div className="management-feature-grid">{implemented.map(([title, description], index) => <article key={title}><span className="management-feature-number">{String(index + 1).padStart(2, '0')}</span><div><h3>{title}</h3><p>{description}</p></div><CheckCircle2 size={18} /></article>)}</div><div className="management-roadmap-heading"><h2>다음으로 구현할 기능</h2><span className="muted">프로토타입 기능 확장</span></div><div className="management-planned-list">{planned.map(([title, description, label]) => <article key={title}><span className="management-planned-icon"><ArrowRight size={18} /></span><div><h3>{title}</h3><p>{description}</p></div><Badge tone="outline">{label}</Badge></article>)}</div><div className="management-info"><ShieldCheck size={18} /><p>가상 조직과 역할 선택으로 업무 흐름을 확인하는 프로토타입입니다. 아래에서 DB·첨부파일·AI 연결 설정을 확인할 수 있습니다.</p></div><div className="management-integration-grid">{[['데이터 저장', w.integrations.database], ['인증', w.integrations.auth], ['첨부파일', w.integrations.storage], ['AI 분석', w.integrations.bizrouter], ['법령 연계', w.integrations.law]].map(([label, value]) => <div key={label}><span>{label}</span><strong>{value}</strong></div>)}</div></>}
     {tab === 'releases' && <div className="management-release-list">{releases.map((release, i) => <article key={release.id}><div className="management-release-rail"><span /><i /></div><div className="management-release-entry"><div><h2>v{release.version}</h2>{i === 0 && <Badge tone="dark">최신 기록</Badge>}<span>{day(release.date)}</span></div><h3>{release.title}</h3><p>{release.notes}</p></div></article>)}{!releases.length && <EmptyState title="아직 기록된 버전이 없습니다." description="버전과 변경 내용을 기록해 개발 이력을 남겨 주세요." />}</div>}
     {tab === 'audit' && <div className="panel management-audit"><div className="panel-header"><h2>최근 변경 기록</h2><span className="muted">{w.audit.length}건</span></div>{w.audit.slice(0, 100).map(a => <article key={a.id}><span className="management-audit-icon"><ListChecks size={17} /></span><div><strong>{a.title}</strong><p>{a.detail}</p><small>{userName(w, a.actorId)} · {deptName(w, a.departmentId)}</small></div><time>{new Date(a.createdAt).toLocaleString('ko-KR', { timeZone: 'Asia/Seoul', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' })}</time></article>)}{!w.audit.length && <EmptyState title="변경 기록이 없습니다." description="업무를 만들고 수정하면 관련 기록이 쌓입니다." />}</div>}

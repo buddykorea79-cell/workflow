@@ -9,10 +9,10 @@ const origin = new URL(base);
 assert.equal(origin.hostname, '127.0.0.1'); assert.equal(origin.port, '3001', 'Only use the isolated local QA server.');
 const qa = path.resolve('.qa'); await mkdir(qa, { recursive: true });
 const cookies = new Map(), log = [];
-const owner = 'u-seoyeon', deputy = 'u-jiho', head = 'u-head', foreign = 'u-support-member';
+const owner = 'u-seoyeon', deputy = 'u-jiho', head = 'u-head', foreign = 'u-support-member', admin = 'u-admin';
 const summaryPath = path.join(qa, 'http-description-delegation-result.json');
 const aiPath = path.join(qa, 'http-description-delegation-ai.json');
-const output = { base, accounts: { owner, deputy, head, foreign }, files: {}, checks: log, aiRequests: 0 };
+const output = { base, accounts: { owner, deputy, head, foreign, admin }, files: {}, checks: log, aiRequests: 0 };
 async function save() { await writeFile(summaryPath, JSON.stringify(output, null, 2)); }
 async function check(name, fn) { await fn(); log.push(name); console.log(`PASS ${name}`); await save(); }
 async function request(route, { user, method = 'GET', body, expected = 200, binary = false } = {}) {
@@ -32,7 +32,7 @@ async function upload(user, taskId, bytes, name, mime = 'text/plain') {
 }
 
 try {
-  let state = await login(owner); await login(deputy); await login(head); await login(foreign);
+  let state = await login(owner); await login(deputy); await login(head); await login(foreign); await login(admin);
   await check('Only the isolated local store is used', () => assert.equal(state.mode, 'local'));
   if (state.departmentWorkPlans?.find(plan => plan.departmentId === state.currentUser.departmentId)?.status === 'confirmed') await command(head, 'department.reopen', { reason: '격리 통합 검증용 업무 등록' });
   const title = `문서 기반 업무대행 검증 ${randomUUID().slice(0, 6)}`; output.taskTitle = title;
@@ -108,15 +108,23 @@ try {
     const audited = await workspace(head);
     for (const action of ['delegation.request', 'delegation.approve', 'run.note', 'task.record']) assert.ok(audited.audit.some(item => item.action === action && [delegation.id, task.id, run.id].includes(item.targetId)), action);
   });
-  await check('All departments receive identical organization division titles without original task bodies', async () => {
-    const own = await workspace(owner), other = await workspace(foreign);
-    assert.deepEqual(own.organizationDivision.departments, other.organizationDivision.departments);
+  await check('Department colleagues share one division table while administrators can view every department', async () => {
+    const own = await workspace(owner), colleague = await workspace(deputy), departmentHead = await workspace(head), other = await workspace(foreign), administrator = await workspace(admin);
+    assert.deepEqual(own.organizationDivision.departments.map(department => department.id), [own.currentUser.departmentId]);
+    assert.deepEqual(own.organizationDivision.departments, colleague.organizationDivision.departments);
+    assert.deepEqual(own.organizationDivision.departments, departmentHead.organizationDivision.departments);
+    assert.deepEqual(other.organizationDivision.departments.map(department => department.id), [other.currentUser.departmentId]);
+    assert.notEqual(own.currentUser.departmentId, other.currentUser.departmentId);
+    assert.deepEqual(new Set(administrator.organizationDivision.departments.map(department => department.id)), new Set(administrator.departments.map(department => department.id)));
+    assert.deepEqual(administrator.organizationDivision.departments.find(department => department.id === own.currentUser.departmentId), own.organizationDivision.departments[0]);
     assert.equal(other.tasks.some(item => item.id === task.id), false);
+    assert.equal(other.organizationDivision.departments.flatMap(department => department.people).flatMap(person => person.units).flatMap(unit => unit.tasks).some(item => item.id === task.id), false);
     const row = own.organizationDivision.departments.flatMap(department => department.people).flatMap(person => person.units).flatMap(unit => unit.tasks).find(item => item.id === task.id);
     assert.ok(row); assert.ok(row.delegates.some(person => person.id === deputy));
     assert.equal('description' in row, false); assert.equal('code' in row, false);
   });
   for (const format of ['xlsx', 'pdf']) await check(`${format.toUpperCase()} export returns a private downloadable file with the expected signature`, async () => {
+    await request(`/api/organization-division/export?format=${format}&departmentId=${task.departmentId}`, { user: foreign, expected: 403 });
     const { response, bytes } = await request(`/api/organization-division/export?format=${format}`, { user: foreign, binary: true });
     assert.match(response.headers.get('content-type'), format === 'pdf' ? /application\/pdf/ : /spreadsheetml/);
     assert.match(response.headers.get('content-disposition'), /attachment;.*filename/); assert.match(response.headers.get('cache-control'), /no-store/);

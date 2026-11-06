@@ -28,6 +28,14 @@ export function canRequestTaskDelegation(_state: DelegationState, user: User, ta
     && (user.role === 'admin' || user.departmentId === task.departmentId && (user.id === task.primaryId || user.role === 'manager'));
 }
 
+export function requestableDelegationTasks(state: DelegationState & Pick<WorkspaceData, 'tasks'>, user: User, now = new Date()) {
+  return state.tasks.filter(task => canRequestTaskDelegation(state, user, task, now)
+    && state.units.some(unit => unit.id === task.unitId && !unit.deletedAt)
+    && isRegisteredWork(state, task)
+    && (!task.commonId || state.commonTasks.some(common => common.id === task.commonId && commonPublished(common)))
+    && state.users.some(owner => owner.id === task.primaryId && active(owner, now) && owner.departmentId === task.departmentId));
+}
+
 export function canReviewTaskDelegation(state: Pick<WorkspaceData, 'tasks'>, user: User, delegation: Delegation, now = new Date()) {
   const departmentId = delegation.departmentId ?? state.tasks.find(task => task.id === delegation.taskId)?.departmentId;
   return active(user, now) && delegationStatus(delegation) === 'pending' && user.role === 'head' && user.departmentId === departmentId

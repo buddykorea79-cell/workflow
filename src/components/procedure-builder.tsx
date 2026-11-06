@@ -71,8 +71,9 @@ export function ProcedureBuilder({ taskId, workflow, references = [], disabled =
   const [selectedId, setSelectedId] = useState(''); const [busy, setBusy] = useState(false); const [error, setError] = useState('');
   const [fileNotice, setFileNotice] = useState(''); const [reviewed, setReviewed] = useState(false); const [mode, setMode] = useState<'append' | 'replace'>(canReplace && !workflow.some(step => step.done) ? 'replace' : 'append');
   const [sourceMode, setSourceMode] = useState<'ai' | 'local'>('ai');
-  const [referenceIds, setReferenceIds] = useState<string[]>(() => references.filter(reference => reference.content.trim()).slice(0, AI_REFERENCE_LIMIT).map(reference => reference.id));
+  const [referenceIds, setReferenceIds] = useState<string[]>(() => references.filter(reference => reference.content.trim() || reference.attachmentId).slice(0, AI_REFERENCE_LIMIT).map(reference => reference.id));
   const [generatedBy, setGeneratedBy] = useState('');
+  const [readAttachments, setReadAttachments] = useState(true);
   const selectedReferences = references.filter(reference => referenceIds.includes(reference.id));
   const sourceFingerprint = procedureReferenceFingerprint(selectedReferences);
   const latestFingerprint = useRef(sourceFingerprint); latestFingerprint.current = sourceFingerprint;
@@ -89,15 +90,15 @@ export function ProcedureBuilder({ taskId, workflow, references = [], disabled =
     setDraft(current => current ? { ...current, steps: current.steps.map(step => step.id === id ? { ...step, ...patch } : step) } : current); setReviewed(false); setError('');
   }
   async function importPdf(file: File) {
-    if (file.size > PROCEDURE_PDF_LIMIT) { setError('PDF는 10MB 이하로 선택해 주세요.'); return; }
+    if (file.size > PROCEDURE_PDF_LIMIT) { setError('문서는 10MB 이하로 선택해 주세요.'); return; }
     setBusy(true); setError(''); setFileNotice('');
     try {
       const form = new FormData(); form.append('taskId', taskId); form.append('file', file);
       const response = await fetch('/api/procedure-extract', { method: 'POST', body: form });
       const result = await response.json() as { error?: string; pages?: ProcedurePage[]; text?: string; pageCount?: number; warnings?: string[] };
-      if (!response.ok) throw new Error(result.error || 'PDF 본문을 읽지 못했습니다.');
-      setText(result.text || ''); setPages(result.pages); if (!title.trim()) setTitle(file.name.replace(/\.pdf$/i, ''));
-      setDraft(null); setReviewed(false); setFileNotice(`${file.name} · ${result.pageCount}쪽 본문 추출 완료${result.warnings?.length ? ` · ${result.warnings.join(' ')}` : ''}`);
+      if (!response.ok) throw new Error(result.error || '문서 본문을 읽지 못했습니다.');
+      setText(result.text || ''); setPages(result.pages); if (!title.trim()) setTitle(file.name.replace(/\.[^.]+$/, ''));
+      setDraft(null); setReviewed(false); setFileNotice(`${file.name} · ${result.pageCount ? `${result.pageCount}쪽·섹션 · ` : ''}본문 추출 완료${result.warnings?.length ? ` · ${result.warnings.join(' ')}` : ''}`);
     } catch (cause) { setError(cause instanceof Error ? cause.message : '본문을 추출하지 못했습니다.'); }
     finally { setBusy(false); }
   }
@@ -110,7 +111,7 @@ export function ProcedureBuilder({ taskId, workflow, references = [], disabled =
     setBusy(true); setError(''); setDraft(null); setReviewed(false); setGeneratedBy('');
     const fingerprint = sourceFingerprint; const requestController = new AbortController(); controller.current = requestController;
     try {
-      const response = await fetch('/api/procedure-generate', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ taskId, referenceIds: selectedReferences.map(reference => reference.id), referencesFingerprint: fingerprint }), signal: requestController.signal });
+      const response = await fetch('/api/procedure-generate', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ taskId, referenceIds: selectedReferences.map(reference => reference.id), referencesFingerprint: fingerprint, readAttachments }), signal: requestController.signal });
       const result = await response.json() as { error?: string; draft?: ProcedureDraft; model?: string };
       if (!response.ok || !result.draft) throw new Error(result.error || 'AI 절차를 생성하지 못했습니다.');
       if (latestFingerprint.current !== fingerprint) throw new Error('분석 중 관련 근거가 변경되었습니다. 저장한 뒤 다시 분석해 주세요.');
@@ -131,14 +132,15 @@ export function ProcedureBuilder({ taskId, workflow, references = [], disabled =
     <div className="procedure-source-modes" aria-label="절차 생성 방식"><button type="button" aria-pressed={sourceMode === 'ai'} disabled={locked} onClick={() => { setSourceMode('ai'); setError(''); }}><Sparkles size={15}/>BizRouter AI 분석</button><button type="button" aria-pressed={sourceMode === 'local'} disabled={locked} onClick={() => { setSourceMode('local'); setError(''); }}>본문으로 직접 초안 만들기</button></div>
     {sourceMode === 'ai' ? <div className="procedure-ai-sources">
       <p className="procedure-builder-intro">관련 근거에 저장한 법령, 지침, 생산 문서를 선택하세요. AI가 각 근거의 핵심 내용을 요약하고 함께 검토한 뒤, 수행 단계·역할·선행 관계를 정리해 절차와 절차도를 만듭니다.</p>
-      <fieldset><legend>분석할 관련 근거 <span>{selectedReferences.length}/{AI_REFERENCE_LIMIT}</span></legend>{references.length ? references.map(reference => <label key={reference.id} className="procedure-reference-option"><input type="checkbox" disabled={locked || !reference.content.trim() || (!referenceIds.includes(reference.id) && selectedReferences.length >= AI_REFERENCE_LIMIT)} checked={referenceIds.includes(reference.id)} onChange={event => { setReferenceIds(current => event.target.checked ? [...current, reference.id] : current.filter(id => id !== reference.id)); setError(''); }}/><span><strong>{reference.title}</strong><small>{reference.content.trim() ? `${reference.content.length.toLocaleString('ko-KR')}자${reference.attachmentId ? ' · 첨부 본문 포함' : ''}` : '분석할 본문이 없습니다. 관련 근거에서 본문을 입력하거나 PDF·TXT 본문을 가져오세요.'}</small></span></label>) : <p className="procedure-no-sources">관련 근거 탭에서 법령·지침 또는 생산 문서를 등록하고 저장해 주세요.</p>}</fieldset>
-      <p className="procedure-ai-disclosure">선택한 근거 본문과 저장된 업무 설명을 BizRouter로 전송합니다. 첨부파일 원본과 원문 주소는 전송하지 않습니다. 수정한 근거는 먼저 저장해 주세요.</p>
-      <div className="procedure-ai-action"><button className="btn btn-primary" type="button" disabled={locked || !selectedReferences.length || selectedReferences.some(reference => !reference.content.trim()) || selectedLength > AI_REFERENCE_TEXT_LIMIT} onClick={() => void generateAi()}><Sparkles size={16}/>{busy ? 'AI가 근거를 요약하고 절차를 만드는 중…' : 'AI 근거 요약·절차 만들기'}</button><small>{selectedLength.toLocaleString('ko-KR')} / 60,000자</small></div>
+      <fieldset><legend>분석할 관련 근거 <span>{selectedReferences.length}/{AI_REFERENCE_LIMIT}</span></legend>{references.length ? references.map(reference => <label key={reference.id} className="procedure-reference-option"><input type="checkbox" disabled={locked || (!reference.content.trim() && !(readAttachments && reference.attachmentId)) || (!referenceIds.includes(reference.id) && selectedReferences.length >= AI_REFERENCE_LIMIT)} checked={referenceIds.includes(reference.id)} onChange={event => { setReferenceIds(current => event.target.checked ? [...current, reference.id] : current.filter(id => id !== reference.id)); setError(''); }}/><span><strong>{reference.title}</strong><small>{reference.content.trim() ? `${reference.content.length.toLocaleString('ko-KR')}자${reference.attachmentId ? ' · 첨부 본문 포함' : ''}` : reference.attachmentId ? 'Kordoc으로 첨부파일 본문을 읽어 분석합니다.' : '관련 근거에서 본문을 입력하거나 문서 파일을 첨부하세요.'}</small></span></label>) : <p className="procedure-no-sources">관련 근거 탭에서 법령·지침 또는 생산 문서를 등록하고 저장해 주세요.</p>}</fieldset>
+      <label className="procedure-file-analysis"><input type="checkbox" checked={readAttachments} disabled={locked} onChange={event => { setReadAttachments(event.target.checked); setDraft(null); }}/><span>첨부파일은 Kordoc으로 다시 읽어 전체 본문 분석</span></label>
+      <p className="procedure-ai-disclosure">선택한 근거 본문과 저장된 업무 설명을 BizRouter로 전송합니다. 파일 본문 분석을 켜면 첨부문서 원문도 함께 검토합니다. 첨부파일 원본과 원문 주소는 전송하지 않습니다. 수정한 근거는 먼저 저장해 주세요.</p>
+      <div className="procedure-ai-action"><button className="btn btn-primary" type="button" disabled={locked || !selectedReferences.length || selectedReferences.some(reference => !reference.content.trim() && !(readAttachments && reference.attachmentId)) || selectedLength > AI_REFERENCE_TEXT_LIMIT} onClick={() => void generateAi()}><Sparkles size={16}/>{busy ? 'AI가 근거를 요약하고 절차를 만드는 중…' : 'AI 근거 요약·절차 만들기'}</button><small>{selectedLength.toLocaleString('ko-KR')} / 60,000자</small></div>
       {selectedLength > AI_REFERENCE_TEXT_LIMIT && <p className="procedure-error" role="alert">분석할 근거를 줄여 본문 합계를 6만 자 이하로 맞춰 주세요.</p>}
     </div> : <>
-    <p className="procedure-builder-intro">PDF 또는 붙여 넣은 본문을 번호·문단 단위로 정리합니다. 외부 AI 전송 없이 규칙 기반 초안을 작성합니다.</p>
+    <p className="procedure-builder-intro">문서 파일 또는 붙여 넣은 본문을 번호·문단 단위로 정리합니다. 외부 AI 전송 없이 규칙 기반 초안을 작성합니다.</p>
     <div className="procedure-source-grid"><label><span>자료 제목</span><input value={title} maxLength={300} disabled={locked} onChange={event => { setTitle(event.target.value); setDraft(null); }} placeholder="예: 예산 집행 업무 지침"/></label><label><span>자료 구분</span><select value={type} disabled={locked} onChange={event => { setType(event.target.value as TaskReference['type']); setDraft(null); }}><option value="guideline">지침·매뉴얼</option><option value="law">법령 본문</option><option value="directive">지시사항</option><option value="other">기타 자료</option></select></label><label className="procedure-url"><span>원문 주소 · 선택</span><input type="url" value={url} maxLength={2000} disabled={locked} onChange={event => { setUrl(event.target.value); setDraft(null); }} placeholder="https://… (주소를 자동으로 가져오지는 않습니다)"/></label></div>
-    <div className="procedure-import-row"><label className={`procedure-upload${locked ? ' is-disabled' : ''}`}><Upload size={16}/>{busy ? 'PDF 본문 추출 중…' : 'PDF에서 본문 가져오기'}<input type="file" accept="application/pdf,.pdf" disabled={locked} onChange={event => { const file = event.target.files?.[0]; event.target.value = ''; if (file) void importPdf(file); }}/></label><small>10MB · 150쪽 이내 · 이 기기에서 추출 · 외부 전송 없음</small></div>
+    <div className="procedure-import-row"><label className={`procedure-upload${locked ? ' is-disabled' : ''}`}><Upload size={16}/>{busy ? 'Kordoc 본문 추출 중…' : '문서에서 본문 가져오기'}<input type="file" accept=".pdf,.hwp,.hwpx,.docx,.xlsx,.xls,.pptx,.txt,.csv" disabled={locked} onChange={event => { const file = event.target.files?.[0]; event.target.value = ''; if (file) void importPdf(file); }}/></label><small>10MB · 150쪽 이내 · 서버에서 Kordoc으로 추출 · 외부 AI 전송 없음</small></div>
     {fileNotice && <p className="procedure-file-notice"><FileText size={15}/>{fileNotice}</p>}
     <label className="procedure-text"><span>자료 본문</span><textarea rows={7} value={text} maxLength={PROCEDURE_TEXT_LIMIT} disabled={locked} onChange={event => { setText(event.target.value); setPages(undefined); setDraft(null); setFileNotice('본문을 직접 수정했습니다. 근거 위치는 문단 기준으로 다시 표시됩니다.'); }} placeholder={'1. 담당자는 요구자료를 작성한다.\n2. 부서장은 자료를 검토한다.\n3. 담당자는 결과를 제출한다.'}/><small>스캔 PDF의 OCR은 지원하지 않습니다. 원문 본문을 붙여 넣거나 추출한 내용을 보완하세요.</small></label>
     <button className="btn btn-secondary procedure-generate" type="button" disabled={locked || !title.trim() || !text.trim()} onClick={generate}><GitBranch size={16}/>규칙 기반 절차 초안 만들기<ArrowRight size={15}/></button>

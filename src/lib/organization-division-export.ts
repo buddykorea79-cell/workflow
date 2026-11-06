@@ -16,7 +16,7 @@ export async function exportOrganizationDivisionXlsx(model: OrganizationDivision
   const workbook = new ExcelJS.Workbook(); workbook.creator = '온이음'; workbook.created = new Date(model.generatedAt); workbook.modified = new Date(model.generatedAt);
   const sheet = workbook.addWorksheet('업무분장표', { views: [{ state: 'frozen', ySplit: 4 }], pageSetup: { paperSize: 9, orientation: 'landscape', fitToPage: true, fitToWidth: 1, fitToHeight: 0, printTitlesRow: '4:4' } });
   sheet.columns = [{ width: 22 }, { width: 38 }, { width: 67 }, { width: 28 }];
-  sheet.mergeCells('A1:D1'); sheet.getCell('A1').value = '온이음 · 전체 업무분장표'; sheet.getRow(1).height = 38; sheet.getCell('A1').font = { name: '맑은 고딕', size: 20, bold: true, color: { argb: colors.ink } };
+  sheet.mergeCells('A1:D1'); sheet.getCell('A1').value = '온이음 · 업무분장표'; sheet.getRow(1).height = 38; sheet.getCell('A1').font = { name: '맑은 고딕', size: 20, bold: true, color: { argb: colors.ink } };
   sheet.mergeCells('A2:D2'); sheet.getCell('A2').value = filterLabel(model, filters); sheet.getRow(2).height = 27;
   sheet.mergeCells('A3:D3'); sheet.getCell('A3').value = `조회 ${exportDate(model)} · 현재 승인·기간이 유효한 업무대행자만 표시`; sheet.getRow(3).height = 27;
   for (const number of [2, 3]) sheet.getRow(number).font = { name: '맑은 고딕', size: 11, color: { argb: colors.muted } };
@@ -46,7 +46,7 @@ export async function exportOrganizationDivisionXlsx(model: OrganizationDivision
 /** Embed a static OFL Korean font; requires no system fonts or browser. */
 export async function exportOrganizationDivisionPdf(model: OrganizationDivisionReadModel, filters: OrganizationDivisionFilters = {}): Promise<Buffer> {
   const font = await readFile(path.join(process.cwd(), 'public', 'fonts', 'Pretendard-Regular.otf'));
-  const doc = new PDFDocument({ size: 'A4', layout: 'landscape', margin: 36, autoFirstPage: false, bufferPages: true, info: { Title: '온이음 전체 업무분장표', Author: '온이음', CreationDate: new Date(model.generatedAt) } });
+  const doc = new PDFDocument({ size: 'A4', layout: 'landscape', margin: 36, autoFirstPage: false, bufferPages: true, info: { Title: '온이음 업무분장표', Author: '온이음', CreationDate: new Date(model.generatedAt) } });
   const chunks: Buffer[] = [];
   const result = new Promise<Buffer>((resolve, reject) => { doc.on('data', chunk => chunks.push(Buffer.from(chunk))); doc.on('end', () => resolve(Buffer.concat(chunks))); doc.on('error', reject); });
   doc.registerFont('Korean', font); doc.font('Korean');
@@ -56,7 +56,7 @@ export async function exportOrganizationDivisionPdf(model: OrganizationDivisionR
   const text = (value: string, x: number, top: number, size = 10.5, color = colors.ink) => { doc.fontSize(size).fillColor(`#${color}`).text(value, x, top, { lineBreak: false }); };
   const newPage = (department: string, continued = false) => {
     doc.addPage(); pageNumber++;
-    text('온이음 · 전체 업무분장표', left, 27, 19);
+    text('온이음 · 업무분장표', left, 27, 19);
     doc.fontSize(9).fillColor(`#${colors.muted}`).text(filterLabel(model, filters), left, 55, { width: right - left, height: 25, ellipsis: true });
     text(`조회 ${exportDate(model)}`, left, 82, 9, colors.muted);
     text(`${pageNumber}`, right - 18, doc.page.height - 25, 9, colors.muted);

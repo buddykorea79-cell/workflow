@@ -1,4 +1,4 @@
-import type { WorkspaceData } from './types';
+import type { User, WorkspaceData } from './types';
 import { activeTaskDelegations } from './delegations';
 import { commonPublished } from './common-approval';
 
@@ -58,6 +58,12 @@ export function buildOrganizationDivision(state: WorkspaceData, now = new Date()
       return { id: department.id, name: department.name, shortName: department.shortName, people };
     }),
   };
+}
+
+/** Scope at the server boundary; hiding a department in the browser is not access control. */
+export function organizationDivisionForUser(state: WorkspaceData, user: User, now = new Date()): OrganizationDivisionReadModel {
+  const model = buildOrganizationDivision(state, now);
+  return user.role === 'admin' ? model : { ...model, departments: model.departments.filter(department => department.id === user.departmentId) };
 }
 
 /** Shared by browser and downloads so filters cannot change export semantics. */

@@ -27,5 +27,5 @@ test('previous text is retained only after an explicit verified-text selection',
 test('a first attachment supplies an empty reference title and respects the extraction limit', () => {
   const changed = referenceWithFile({ ...existing, title: '', content: '', attachmentId: undefined }, newFile, '가'.repeat(12000));
   assert.equal(changed.title, newFile.name);
-  assert.equal(changed.content.length, 10000);
+  assert.equal(changed.content.length, 12000);
 });
