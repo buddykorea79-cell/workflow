@@ -5,6 +5,8 @@ import type { LawArticle, LawDetail, LawKind, LawSearchItem, LawSearchResult, La
 // lsEfYdListGuide / lsEfYdInfoGuide / admrulListGuide / admrulInfoGuide.
 const origin = 'https://www.law.go.kr';
 const numericId = /^\d{1,30}$/;
+// Official registration form (open.law.go.kr/LSO/usrJoin.do): validateOc + maxlength="50".
+const validOc = /^[0-9a-zA-Z]([-_.]?[0-9a-zA-Z])*$/;
 const pageSize = 20;
 type RecordValue = Record<string, unknown>;
 export interface LawApiOptions { oc?: string; fetcher?: typeof fetch; signal?: AbortSignal }
@@ -75,6 +77,7 @@ function safeProviderDiagnostic(message: string, oc: string): string {
 async function fetchJson(path: 'lawSearch.do' | 'lawService.do', params: Record<string, string>, options: LawApiOptions): Promise<unknown> {
   const oc = options.oc ?? process.env.LAW_API_OC;
   if (!oc?.trim()) throw new DomainError(503, 'LAW_NOT_CONFIGURED', '국가법령정보센터 연결값 LAW_API_OC가 설정되지 않았습니다. 관리자에게 설정을 요청해 주세요.');
+  if (oc.trim().length > 50 || !validOc.test(oc.trim())) throw new DomainError(503, 'LAW_INVALID_CONFIGURATION', 'LAW_API_OC 형식이 올바르지 않습니다. 환경변수 Value에는 승인된 키값만 넣어 주세요. LAW_API_OC=, 따옴표, 공백, 이메일 주소 또는 URL을 포함하지 마세요.');
   const url = new URL(`/DRF/${path}`, origin);
   url.search = new URLSearchParams({ OC: oc.trim(), type: 'JSON', ...params }).toString();
   const signal = options.signal ? AbortSignal.any([options.signal, AbortSignal.timeout(20_000)]) : AbortSignal.timeout(20_000);

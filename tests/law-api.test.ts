@@ -68,6 +68,18 @@ test('missing configuration and invalid inputs never contact upstream', async ()
   assert.equal(calls, 0);
 });
 
+test('OC configuration follows the official form and rejects copied assignments, quotes and URLs before requesting', async () => {
+  let calls = 0; const fetcher = async () => { calls++; return Response.json({ LawSearch: { totalCnt: 0 } }); };
+  for (const oc of ['LAW_API_OC=approved-key', '"approved-key"', "'approved-key'", 'https://example.test/key', 'member@example.test', 'key with space', 'key\nline', '-key', 'key.', 'two__marks', 'x'.repeat(51)]) {
+    await assert.rejects(searchLaw({ kind: 'law', query: '자료' }, { oc, fetcher }), error => {
+      assert.ok(error instanceof DomainError); assert.equal(error.code, 'LAW_INVALID_CONFIGURATION'); assert.equal(error.status, 503); assert.match(error.message, /Value에는 승인된 키값만/); assert.equal(error.message.includes(oc), false); return true;
+    });
+  }
+  assert.equal(calls, 0);
+  await searchLaw({ kind: 'law', query: '자료' }, { oc: '  Approved-2026.key_1  ', fetcher: async input => { calls++; assert.equal(new URL(String(input)).searchParams.get('OC'), 'Approved-2026.key_1'); return Response.json({ LawSearch: { totalCnt: 0 } }); } });
+  assert.equal(calls, 1);
+});
+
 test('HTTP-200 authentication failures and rejected HTTP responses expose safe actionable errors', async () => {
   await assert.rejects(searchLaw({ kind: 'law', query: '자료' }, options({ result: '사용자 정보 검증에 실패하였습니다.', msg: 'OC=private-test-oc 정확한 서버장비의 IP주소 및 도메인주소를 등록해 주세요.' })), error => errorCode('LAW_AUTH_FAILED')(error) && !(error as Error).message.includes('private-test-oc'));
   for (const [status, code] of [[403, 'LAW_AUTH_FAILED'], [429, 'LAW_RATE_LIMITED'], [503, 'LAW_UPSTREAM_FAILED']] as const) await assert.rejects(searchLaw({ kind: 'law', query: '자료' }, { oc: 'test', fetcher: async () => new Response('secret upstream error', { status }) }), errorCode(code));
@@ -75,7 +87,7 @@ test('HTTP-200 authentication failures and rejected HTTP responses expose safe a
 });
 
 test('failed provider status diagnostics retain Korean guidance while redacting OC, encoded OC, URLs and key patterns', async () => {
-  const oc = 'secret+value@example';
+  const oc = 'private-test.oc_2026';
   const message = `요청 처리 실패: 현재 검색 서비스 점검 중입니다. ${oc} ${encodeURIComponent(oc)} https://www.law.go.kr/DRF/lawSearch.do?OC=${encodeURIComponent(oc)} API_KEY=unexpected-secret <p>잠시 후 다시 호출해 주세요.</p>`;
   await assert.rejects(searchLaw({ kind: 'law', query: '자료' }, { oc, fetcher: async () => Response.json({ result: 'error', msg: message, debug: 'RAW_BODY_MUST_NOT_APPEAR' }) }), error => {
     assert.ok(error instanceof DomainError); assert.equal(error.code, 'LAW_UPSTREAM_FAILED');
