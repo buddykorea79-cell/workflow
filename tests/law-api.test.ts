@@ -74,6 +74,23 @@ test('HTTP-200 authentication failures and rejected HTTP responses expose safe a
   await assert.rejects(searchLaw({ kind: 'law', query: '자료' }, { oc: 'test', fetcher: async () => new Response('<html>유관기관 등록된 사용자만 사용 가능합니다. OC=secret</html>') }), errorCode('LAW_AUTH_FAILED'));
 });
 
+test('failed provider status diagnostics retain Korean guidance while redacting OC, encoded OC, URLs and key patterns', async () => {
+  const oc = 'secret+value@example';
+  const message = `요청 처리 실패: 현재 검색 서비스 점검 중입니다. ${oc} ${encodeURIComponent(oc)} https://www.law.go.kr/DRF/lawSearch.do?OC=${encodeURIComponent(oc)} API_KEY=unexpected-secret <p>잠시 후 다시 호출해 주세요.</p>`;
+  await assert.rejects(searchLaw({ kind: 'law', query: '자료' }, { oc, fetcher: async () => Response.json({ result: 'error', msg: message, debug: 'RAW_BODY_MUST_NOT_APPEAR' }) }), error => {
+    assert.ok(error instanceof DomainError); assert.equal(error.code, 'LAW_UPSTREAM_FAILED');
+    assert.match(error.message, /제공기관 안내:.*현재 검색 서비스 점검 중입니다/);
+    assert.match(error.message, /잠시 후 다시 호출해 주세요/);
+    for (const secret of [oc, encodeURIComponent(oc), 'unexpected-secret', 'https://', 'lawSearch.do', 'RAW_BODY_MUST_NOT_APPEAR']) assert.equal(error.message.includes(secret), false);
+    return true;
+  });
+  await assert.rejects(searchLaw({ kind: 'law', query: '자료' }, options({ result: '오류', msg: '필수 요청변수 형식이 맞지 않습니다. ' + '안내 '.repeat(300) })), error => {
+    assert.ok(error instanceof DomainError); assert.match(error.message, /검색 조건과 신청한 API 종류/);
+    assert.ok(error.message.split('제공기관 안내: ')[1].length <= 240); return true;
+  });
+  await assert.rejects(searchLaw({ kind: 'law', query: '자료' }, options({ result: '실패', msg: '등록한 계정의 조회 횟수 초과입니다.' })), errorCode('LAW_RATE_LIMITED'));
+});
+
 test('malformed, inconsistent and missing-body responses are rejected without silently substituting content', async () => {
   await assert.rejects(searchLaw({ kind: 'law', query: '자료' }, options({ unexpected: [] })), errorCode('LAW_INVALID_RESPONSE'));
   await assert.rejects(searchLaw({ kind: 'law', query: '자료' }, options({ LawSearch: { totalCnt: 1 } })), errorCode('LAW_INVALID_RESPONSE'));

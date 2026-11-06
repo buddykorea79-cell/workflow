@@ -60,6 +60,18 @@ function findObject(value: unknown, predicate: (item: RecordValue) => boolean, d
   return undefined;
 }
 
+/** Only a failed provider's explicit status fields may become a diagnostic, never a response body or URL. */
+function safeProviderDiagnostic(message: string, oc: string): string {
+  let plain = lawPlainText(message);
+  for (const secret of new Set([oc.trim(), encodeURIComponent(oc.trim()), encodeURI(oc.trim())])) {
+    if (secret) plain = plain.replace(new RegExp(secret.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'gi'), '[가림]');
+  }
+  plain = plain.replace(/(?:[a-z][a-z0-9+.-]*:\/\/|www\.)[^\s<>"']+/gi, '[주소 생략]')
+    .replace(/\b(?:OC|api[_ -]?key|service[_ -]?key|access[_ -]?token|token|authorization|password|secret)["']?\s*[:=]\s*(?:"[^"]*"|'[^']*'|[^\s,;&]+)/gi, '[인증값 가림]')
+    .replace(/[\u0000-\u001f\u007f]/g, ' ').replace(/\s+/g, ' ').trim();
+  return plain.length > 240 ? `${plain.slice(0, 239)}…` : plain;
+}
+
 async function fetchJson(path: 'lawSearch.do' | 'lawService.do', params: Record<string, string>, options: LawApiOptions): Promise<unknown> {
   const oc = options.oc ?? process.env.LAW_API_OC;
   if (!oc?.trim()) throw new DomainError(503, 'LAW_NOT_CONFIGURED', '국가법령정보센터 연결값 LAW_API_OC가 설정되지 않았습니다. 관리자에게 설정을 요청해 주세요.');
@@ -84,8 +96,15 @@ async function fetchJson(path: 'lawSearch.do' | 'lawService.do', params: Record<
     const root = record(result);
     if (root && (root.result !== undefined || root.msg !== undefined || root.error !== undefined)) {
       const message = ['result', 'msg', 'error'].map(key => scalar(root[key])).join(' ');
+      if (/rate.?limit|too many|(?:요청|호출|조회).*(?:한도|횟수.*초과|제한)/i.test(message)) throw new DomainError(429, 'LAW_RATE_LIMITED', '국가법령정보센터의 요청 한도에 도달했습니다. 잠시 후 다시 검색해 주세요.');
       if (/사용자|인증|권한|등록|IP주소|도메인/.test(message)) throw new DomainError(503, 'LAW_AUTH_FAILED', '법령 API 인증에 실패했습니다. LAW_API_OC와 법제처에 등록한 서버 IP·도메인 및 이용 권한을 확인해 주세요.');
-      if (/오류|실패|error/i.test(message)) throw new DomainError(502, 'LAW_UPSTREAM_FAILED', '국가법령정보센터가 요청을 처리하지 못했습니다. 잠시 후 다시 검색해 주세요.');
+      if (/오류|실패|error|fail/i.test(message)) {
+        const diagnostic = safeProviderDiagnostic(message, oc);
+        const guidance = /필수|파라미터|요청\s*변수|매개변수|잘못된\s*요청|지원하지\s*않/i.test(message)
+          ? '국가법령정보센터가 검색 조건을 처리하지 못했습니다. 검색 조건과 신청한 API 종류를 확인해 주세요.'
+          : '국가법령정보센터가 요청을 처리하지 못했습니다. 잠시 후 다시 검색해 주세요.';
+        throw new DomainError(502, 'LAW_UPSTREAM_FAILED', `${guidance}${diagnostic ? ` 제공기관 안내: ${diagnostic}` : ''}`);
+      }
     }
     return result;
   } catch (error) {
