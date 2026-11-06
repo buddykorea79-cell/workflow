@@ -7,8 +7,9 @@ import { hasReferenceContent, referenceWithFile } from '@/lib/task-references';
 import { canActAsDeputy } from '@/lib/delegations';
 import { uploadAttachment } from '@/lib/upload-attachment';
 import { Badge, Button, Field } from './ui';
+import { LawReferencePicker } from './law-reference-picker';
 
-const referenceNames: Record<TaskReference['type'], string> = { law: '법령', guideline: '지침', national_agenda: '국정과제', directive: '지시사항', document: '생산 문서', other: '기타 근거' };
+const referenceNames: Record<TaskReference['type'], string> = { law: '법령', guideline: '지침·행정규칙', national_agenda: '국정과제', directive: '지시사항', document: '생산 문서', other: '기타 근거' };
 const contentLimit = 200000;
 const newId = () => `ref-${crypto.randomUUID().slice(0, 12)}`;
 
@@ -93,6 +94,7 @@ export function TaskReferences({ workspace, taskId, references, editable, docume
 
   return <div className="form-stack">
     <div className="pw-section-intro"><div><h3>관련 근거와 생산 문서</h3><p>{documentsOnly ? '생산 문서를 추가하거나 정정할 수 있습니다. 법령·지침 등 업무 기준은 그대로 보존됩니다.' : '근거를 한 개씩 입력하고 필요한 만큼 추가하세요. 각 근거에 관련 파일을 첨부할 수 있습니다.'}</p></div>{editable && <Button type="button" variant="secondary" disabled={blocked || displayedReferences.length >= 100} onClick={() => onChange([...displayedReferences, { id: newId(), type: documentsOnly ? 'document' : 'law', title: '', content: '' }])}><Plus size={15}/>{documentsOnly ? '생산 문서 추가' : '근거 추가'}</Button>}</div>
+    {editable && !documentsOnly && <LawReferencePicker taskId={taskId} references={references} disabled={blocked} onChange={onChange}/>}
     {canUpload && <input ref={fileInput} hidden type="file" accept=".pdf,.docx,.xlsx,.xls,.pptx,.png,.jpg,.jpeg,.webp,.txt,.csv,.hwp,.hwpx" aria-label="관련 근거 파일 선택" onChange={event => { const file = event.target.files?.[0]; if (file) void upload(file, uploadTargetId.current); }}/>}
     {error && <p className="pw-form-error" role="alert">{error}</p>}{notice && <p className="pw-form-note" role="status">{notice}</p>}
     {extractionWarnings.length > 0 && <div className="pw-reference-warning" role="status"><strong>본문 추출 시 확인할 내용</strong><ul>{extractionWarnings.map((warning, index) => <li key={index}>{warning}</li>)}</ul></div>}
