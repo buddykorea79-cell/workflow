@@ -49,6 +49,35 @@ test('administrative rules support article-less HTML content and singleton artic
   assert.equal(structured.articles[0].number, '제2조'); assert.match(structured.articles[0].content, /① 내용을 확인한다/);
 });
 
+test('administrative rule service retains body siblings of its separate basic-information object', async () => {
+  // The live AdmRulService response nests metadata, while article text and attachments are siblings.
+  const detail = await getLawDetail({ kind: 'admrul', id: rule.행정규칙일련번호 }, options({ AdmRulService: {
+    행정규칙기본정보: rule,
+    조문내용: ['<p>제1조(목적) 이 지침은 시연 자료를 관리한다.</p>', '<p>제2조(검토) ① 담당자는 자료를 확인한다. <개정 2026. 1. 1.></p>'],
+    첨부파일: { 첨부파일명: ['별도 서식.pdf'], 첨부파일링크: ['/attachment/demo.pdf'] },
+    부칙: { 부칙내용: ['이 부칙은 본문에 자동으로 합쳐지면 안 된다.'] },
+  } }));
+  assert.equal(detail.title, rule.행정규칙명); assert.equal(detail.ministry, rule.소관부처명);
+  assert.equal(detail.id, rule.행정규칙일련번호); assert.equal(detail.category, '지침');
+  assert.equal(detail.promulgationDate, '2026-01-02'); assert.equal(detail.effectiveDate, '2026-01-03');
+  assert.deepEqual(detail.articles.map(article => article.content), ['제1조(목적) 이 지침은 시연 자료를 관리한다.', '제2조(검토) ① 담당자는 자료를 확인한다. <개정 2026. 1. 1.>']);
+  assert.ok(detail.warnings.some(warning => warning.includes('별도 첨부파일')));
+  assert.equal(JSON.stringify(detail).includes('자동으로 합쳐지면'), false);
+});
+
+test('administrative rule service also preserves structured articles beside nested metadata', async () => {
+  const detail = await getLawDetail({ kind: 'admrul', id: rule.행정규칙일련번호 }, options({ AdmRulService: {
+    행정규칙기본정보: rule,
+    조문: { 조문단위: { 조문번호: '3', 조문제목: '확인', 조문내용: '제3조(확인)', 항: { 항내용: '① 담당자는 확인한다.', 호: { 호내용: '1. 출처를 기록한다.' } } } },
+  } }));
+  assert.equal(detail.title, rule.행정규칙명); assert.equal(detail.articles.length, 1);
+  assert.equal(detail.articles[0].number, '제3조'); assert.equal(detail.articles[0].title, '확인');
+  assert.equal(detail.articles[0].content, '제3조(확인)\n① 담당자는 확인한다.\n1. 출처를 기록한다.');
+  await assert.rejects(getLawDetail({ kind: 'admrul', id: rule.행정규칙일련번호 }, options({ AdmRulService: {
+    행정규칙기본정보: { ...rule, 행정규칙일련번호: '2100000000999' }, 조문내용: '다른 지침의 본문',
+  } })), errorCode('LAW_INVALID_RESPONSE'));
+});
+
 test('upstream HTML and entities remain safe plain text without dropping encoded comparison characters', () => {
   assert.equal(lawPlainText('<script>alert(1)</script><p>조건 &lt; 5<br/>A&nbsp;&amp;&nbsp;B &#x2460; &#9313;</p>'), '조건 < 5\nA & B ① ②');
   assert.equal(lawPlainText('&lt;img src=x onerror=alert(1)&gt;'), '<img src=x onerror=alert(1)>'); // text only; never interpreted as HTML

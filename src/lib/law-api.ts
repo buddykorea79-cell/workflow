@@ -164,9 +164,9 @@ function articlesFrom(value: unknown, kind: LawKind): LawArticle[] {
 export async function getLawDetail(input: { kind: LawKind; id: string }, options: LawApiOptions = {}): Promise<LawDetail> {
   assertKind(input.kind); if (!numericId.test(input.id)) throw new DomainError(422, 'LAW_INVALID_INPUT', '검색 결과에서 법령 또는 행정규칙을 다시 선택해 주세요.');
   const raw = await fetchJson('lawService.do', { target: input.kind === 'law' ? 'eflaw' : 'admrul', ID: input.id }, options);
-  const root = findObject(raw, item => item.기본정보 !== undefined || item.행정규칙명 !== undefined || item.법령명_한글 !== undefined);
+  const root = findObject(raw, item => item.기본정보 !== undefined || item.행정규칙기본정보 !== undefined || item.행정규칙명 !== undefined || item.법령명_한글 !== undefined);
   if (!root) badResponse();
-  const basic = record(root.기본정보) ?? root;
+  const basic = record(root.기본정보) ?? record(root.행정규칙기본정보) ?? root;
   const meta = metadata(basic, input.kind, input.id);
   // Numeric JSON values can drop leading zeroes from statutory IDs.
   if (meta.id.replace(/^0+/, '') !== input.id.replace(/^0+/, '')) badResponse();
