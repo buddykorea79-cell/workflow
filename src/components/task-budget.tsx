@@ -30,10 +30,9 @@ export function taskExpenseIssue(expenses: Expense[], previous: Expense[] = []) 
   for (const item of expenses) {
     if (!item.date || !item.description.trim() || !Number.isSafeInteger(item.amount) || item.amount < 0 || item.amount > maximumAmount) return '집행일, 집행 내용과 0 이상 1,000조 원 이하의 정수 금액을 입력해 주세요.';
     const original = previousById.get(item.id);
-    for (const field of ['time', 'projectName', 'vendor'] as const) {
-      if ((!original || original[field]?.trim()) && !item[field]?.trim()) return '집행 시각, 사업명과 사업자를 입력해 주세요. 기존 자료에 없던 항목은 보완할 수 있습니다.';
+    for (const field of ['projectName', 'vendor'] as const) {
+      if ((!original || original[field]?.trim()) && !item[field]?.trim()) return '사업명과 사업자를 입력해 주세요. 기존 자료에 없던 항목은 보완할 수 있습니다.';
     }
-    if (item.time && !/^([01]\d|2[0-3]):[0-5]\d$/.test(item.time)) return '집행 시각을 시:분 형식으로 확인해 주세요.';
     sum += item.amount;
     if (!Number.isSafeInteger(sum)) return '집행 합계가 계산 가능한 범위를 초과했습니다. 입력 금액을 확인해 주세요.';
   }
@@ -87,7 +86,7 @@ export function TaskBudgetFields({ value, onChange, disabled = false, hasExpense
   </section>;
 }
 
-export function TaskBudgetSection({ value, onChange, expenses, onExpensesChange, previousExpenses, definitionEditable, expensesEditable, today, defaultProjectName, serverTime }: { value: TaskBudgetDraft; onChange: (value: TaskBudgetDraft) => void; expenses: Expense[]; onExpensesChange: (items: Expense[]) => void; previousExpenses: Expense[]; definitionEditable: boolean; expensesEditable: boolean; today: string; defaultProjectName: string; serverTime: string }) {
+export function TaskBudgetSection({ value, onChange, expenses, onExpensesChange, previousExpenses, definitionEditable, expensesEditable, today, defaultProjectName }: { value: TaskBudgetDraft; onChange: (value: TaskBudgetDraft) => void; expenses: Expense[]; onExpensesChange: (items: Expense[]) => void; previousExpenses: Expense[]; definitionEditable: boolean; expensesEditable: boolean; today: string; defaultProjectName: string }) {
   const catalogYear = value.mode === 'catalog' ? value.allocation?.year : undefined;
   const yearExpenses = catalogYear ? expenses.filter(item => item.date.slice(0, 4) === String(catalogYear)) : expenses;
   const otherYearCount = expenses.length - yearExpenses.length;
@@ -95,22 +94,21 @@ export function TaskBudgetSection({ value, onChange, expenses, onExpensesChange,
   const amount = Number(value.amount) || 0; const balance = amount - total;
   const nonBudget = value.mode === 'none'; const canEditExpenses = expensesEditable && !nonBudget;
   const editExpense = (id: string, patch: Partial<Expense>) => onExpensesChange(expenses.map(item => item.id === id ? { ...item, ...patch } : item));
-  const requiredFor = (expense: Expense, field: 'time' | 'projectName' | 'vendor') => !previousExpenses.some(item => item.id === expense.id && !item[field]);
+  const requiredFor = (expense: Expense, field: 'projectName' | 'vendor') => !previousExpenses.some(item => item.id === expense.id && !item[field]);
   return <div className="form-stack tb-task-budget">
     <div className="tb-summary"><div><span>{nonBudget ? '예산 구분' : catalogYear ? `${catalogYear}년 확정 예산` : '사업 예산'}</span><strong>{nonBudget ? '비예산' : money(amount)}{!nonBudget && <small>원</small>}</strong></div><div><span>{catalogYear ? `${catalogYear}년 집행 합계` : '집행 합계'}</span><strong>{Number.isSafeInteger(total) ? money(total) : '금액 확인'}<small>원</small></strong></div><div className={!nonBudget && balance < 0 ? 'is-over-budget' : ''}><span>{catalogYear ? `${catalogYear}년 집행잔액` : '집행잔액'}</span><strong>{nonBudget ? '해당 없음' : Number.isSafeInteger(balance) ? money(balance) : '금액 확인'}{!nonBudget && <small>원</small>}</strong></div></div>
     {!nonBudget && balance < 0 && <p className="tb-error" role="status"><AlertCircle size={18}/>예산보다 {money(Math.abs(balance))}원을 초과 집행했습니다.</p>}
     <TaskBudgetFields value={value} onChange={onChange} disabled={!definitionEditable} hasExpenses={expenses.some(item => item.amount > 0)}/>
-    <div className="tb-expenses-heading"><div><h3>집행 내역</h3><p>일시는 한국 시간 기준입니다. {catalogYear ? `이 세부업무의 ${catalogYear}년 집행 금액으로 잔액을 계산합니다.` : '이 세부업무에 등록한 전체 집행 금액으로 잔액을 계산합니다.'}</p></div>{canEditExpenses && <Button variant="secondary" disabled={expenses.length >= 500} onClick={() => onExpensesChange([...expenses, { id: `expense-${crypto.randomUUID().slice(0, 12)}`, date: today, time: new Intl.DateTimeFormat('en-GB', { timeZone: 'Asia/Seoul', hour: '2-digit', minute: '2-digit', hourCycle: 'h23' }).format(new Date(serverTime)), projectName: defaultProjectName, vendor: '', description: '', amount: 0 }])}><Plus size={17}/>집행 추가</Button>}</div>
+    <div className="tb-expenses-heading"><div><h3>집행 내역</h3><p>{catalogYear ? `이 세부업무의 ${catalogYear}년 집행 금액으로 잔액을 계산합니다.` : '이 세부업무에 등록한 전체 집행 금액으로 잔액을 계산합니다.'}</p></div>{canEditExpenses && <Button variant="secondary" disabled={expenses.length >= 500} onClick={() => onExpensesChange([...expenses, { id: `expense-${crypto.randomUUID().slice(0, 12)}`, date: today, projectName: defaultProjectName, vendor: '', description: '', amount: 0 }])}><Plus size={17}/>집행 추가</Button>}</div>
     {!nonBudget && <p className="tb-note">같은 예산을 연결한 다른 세부업무의 집행액은 여기에 합산되지 않습니다.</p>}
     {otherYearCount > 0 && <p className="tb-other-year-note" role="status">다른 회계연도의 집행 기록 {otherYearCount}건은 보관되며, {catalogYear}년 집행 합계와 잔액 계산에서 제외됩니다.</p>}
     <div className="tb-expense-list">{expenses.map((expense, index) => <article className="tb-expense-card" key={expense.id}><header><strong>집행 {index + 1}</strong>{catalogYear && expense.date.slice(0, 4) !== String(catalogYear) && <Badge tone="outline">다른 회계연도 · 잔액 계산 제외</Badge>}<span>{money(expense.amount)}원</span>{canEditExpenses && <Button variant="ghost" aria-label={`${index + 1}번 집행 내역 삭제`} onClick={() => onExpensesChange(expenses.filter(item => item.id !== expense.id))}><Trash2 size={16}/>삭제</Button>}</header><div className="tb-expense-fields">
       <Field label="집행일"><input aria-label={`${index + 1}번 집행일`} type="date" required disabled={!canEditExpenses} value={expense.date} onChange={event => editExpense(expense.id, { date: event.target.value })}/></Field>
-      <Field label="집행 시각"><input aria-label={`${index + 1}번 집행 시각`} type="time" required={requiredFor(expense, 'time')} disabled={!canEditExpenses} value={expense.time ?? ''} onChange={event => editExpense(expense.id, { time: event.target.value || undefined })}/></Field>
       <Field label="사업명"><input aria-label={`${index + 1}번 사업명`} required={requiredFor(expense, 'projectName')} maxLength={200} disabled={!canEditExpenses} placeholder="집행한 사업명" value={expense.projectName ?? ''} onChange={event => editExpense(expense.id, { projectName: event.target.value || undefined })}/></Field>
       <Field label="사업자"><input aria-label={`${index + 1}번 사업자`} required={requiredFor(expense, 'vendor')} maxLength={200} disabled={!canEditExpenses} placeholder="업체·기관명" value={expense.vendor ?? ''} onChange={event => editExpense(expense.id, { vendor: event.target.value || undefined })}/></Field>
       <Field label="집행 금액 (원)"><input aria-label={`${index + 1}번 집행 금액`} type="number" min="0" max={maximumAmount} step="1" required disabled={!canEditExpenses} value={expense.amount} onChange={event => editExpense(expense.id, { amount: Number(event.target.value) })}/></Field>
       <Field label="집행 내용·비고"><input aria-label={`${index + 1}번 집행 내용`} required maxLength={500} disabled={!canEditExpenses} placeholder="예: 통계연보 인쇄비 지급" value={expense.description} onChange={event => editExpense(expense.id, { description: event.target.value })}/></Field>
-    </div>{!expense.time || !expense.projectName || !expense.vendor ? previousExpenses.some(item => item.id === expense.id) && <p className="tb-note">기존 기록에 없는 시각·사업명·사업자는 필요할 때 보완할 수 있습니다.</p> : null}</article>)}</div>
+    </div>{!expense.projectName || !expense.vendor ? previousExpenses.some(item => item.id === expense.id) && <p className="tb-note">기존 기록에 없는 사업명·사업자는 필요할 때 보완할 수 있습니다.</p> : null}</article>)}</div>
     {!expenses.length && <div className="tb-empty"><Wallet size={25}/><p>{nonBudget ? '비예산 사업은 집행 내역을 등록하지 않습니다.' : '아직 등록된 집행 내역이 없습니다.'}</p></div>}
   </div>;
 }

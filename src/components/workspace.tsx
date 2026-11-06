@@ -1,7 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { ArrowDown, ArrowLeftRight, ArrowRight, ArrowUpRight, Bell, Building2, CalendarDays, Check, CheckCheck, ChevronDown, ChevronRight, CircleHelp, Clock3, FileText, FolderOpen, GitBranch, LayoutDashboard, LoaderCircle, LogOut, Menu, Search, Settings2, ShieldCheck, Sparkles, UserRound, Users, X } from 'lucide-react';
+import { ArrowDown, ArrowLeftRight, ArrowRight, ArrowUpRight, Bell, Building2, CalendarDays, Check, CheckCheck, ChevronDown, ChevronRight, CircleHelp, Clock3, FileText, FolderOpen, GitBranch, LayoutDashboard, LoaderCircle, LogOut, Menu, Search, Settings2, ShieldCheck, Sparkles, UserRound, Users, Wallet, X } from 'lucide-react';
 import type { Department, Task, User, Workspace as WorkspaceData } from '@/lib/types';
 import { Badge, Brand, Button, EmptyState, Modal, Progress, TextLink, formatDate, roleLabels, type CommandFn } from './ui';
 import { PersonalWork, ScheduleView, TaskPanel, taskProgress } from './personal-work';
@@ -15,11 +15,12 @@ import type { GuideRole } from '@/lib/usage-guide';
 import { PersonnelHandover } from './personnel-handover';
 import { DelegationWork } from './delegation-work';
 import { OrganizationDivision } from './organization-division';
+import { DepartmentBudget } from './department-budget';
 import './workspace-directory.css';
 
-type View = 'dashboard' | 'personal' | 'department' | 'allocation' | 'division' | 'delegation' | 'common' | 'schedule' | 'performance' | 'handover' | 'organization' | 'admin';
-const titles: Record<View, string> = { dashboard: '업무 홈', personal: '개인업무', department: '부서 업무 관리', division: '업무분장표', delegation: '업무대행', allocation: '배부·승인 관리', common: '공통업무 · 지시사항', schedule: '업무 일정', performance: '성과 · 평가', handover: '인수인계', organization: '조직 · 구성원', admin: '관리자' };
-const navItems = [{ id: 'dashboard', icon: LayoutDashboard }, { id: 'personal', icon: FolderOpen }, { id: 'department', icon: Users }, { id: 'common', icon: GitBranch }, { id: 'schedule', icon: CalendarDays }, { id: 'delegation', icon: UserRound }, { id: 'handover', icon: ArrowLeftRight }, { id: 'performance', icon: CheckCheck }] as const;
+type View = 'dashboard' | 'personal' | 'department' | 'budgets' | 'allocation' | 'division' | 'delegation' | 'common' | 'schedule' | 'performance' | 'handover' | 'organization' | 'admin';
+const titles: Record<View, string> = { dashboard: '업무 홈', personal: '개인업무', department: '부서 업무 관리', budgets: '부서 예산 집계', division: '업무분장표', delegation: '업무대행', allocation: '배부·승인 관리', common: '공통업무 · 지시사항', schedule: '업무 일정', performance: '성과 · 평가', handover: '인수인계', organization: '조직 · 구성원', admin: '관리자' };
+const navItems = [{ id: 'dashboard', icon: LayoutDashboard }, { id: 'personal', icon: FolderOpen }, { id: 'department', icon: Users }, { id: 'budgets', icon: Wallet }, { id: 'common', icon: GitBranch }, { id: 'schedule', icon: CalendarDays }, { id: 'delegation', icon: UserRound }, { id: 'handover', icon: ArrowLeftRight }, { id: 'performance', icon: CheckCheck }] as const;
 const demoRoles = [{ id: 'member1', label: '업무 담당자 1', icon: UserRound }, { id: 'member2', label: '업무 담당자 2', icon: UserRound }, { id: 'lead', label: '팀장', icon: Users }, { id: 'manager', label: '부서 담당자', icon: Building2 }, { id: 'head', label: '부서장', icon: ShieldCheck }, { id: 'admin', label: '관리자', icon: Settings2 }];
 
 function DemoLogin({ users, departments, busy, error, onLogin }: { users: User[]; departments: Department[]; busy: boolean; error: string; onLogin: (id: string) => void }) {
@@ -154,8 +155,9 @@ export default function Workspace() {
   const isAdmin = user.role === 'admin';
   const isHead = user.role === 'head';
   const canAllocate = user.role === 'manager' || isAdmin;
-  const safeView = view === 'admin' && !isAdmin || view === 'allocation' && !canAllocate ? 'dashboard' : isHead && view === 'personal' ? 'department' : view === 'department' && !isHead && !isAdmin ? 'division' : view;
-  const visibleNav = navItems.filter(item => (!isHead || item.id !== 'personal') && (item.id !== 'department' || isHead || isAdmin)).flatMap<{ id: View; icon: typeof FolderOpen }>(item => item.id === 'common' && canAllocate ? [item, { id: 'allocation', icon: ShieldCheck }] : [item]);
+  const canViewBudgets = canAllocate || isHead;
+  const safeView = view === 'admin' && !isAdmin || view === 'allocation' && !canAllocate || view === 'budgets' && !canViewBudgets ? 'dashboard' : isHead && view === 'personal' ? 'department' : view === 'department' && !isHead && !isAdmin ? 'division' : view;
+  const visibleNav = navItems.filter(item => (!isHead || item.id !== 'personal') && (item.id !== 'department' || isHead || isAdmin) && (item.id !== 'budgets' || canViewBudgets)).flatMap<{ id: View; icon: typeof FolderOpen }>(item => item.id === 'common' && canAllocate ? [item, { id: 'allocation', icon: ShieldCheck }] : [item]);
   const pending = isHead ? workspace.commonTasks.flatMap(common => (common.approvalRequests || []).filter(request => canReviewCommon(workspace, user, common, request, new Date(workspace.serverTime)))).length : workspace.commonTasks.flatMap(c => c.distributions).filter(d => d.status !== 'submitted' && (canAllocate ? d.departmentId === user.departmentId && d.status === 'pending' : user.role === 'lead' ? d.leadId === user.id && d.status === 'team_assigned' : d.assigneeId === user.id && d.status === 'person_assigned')).length;
   const results = workspace.tasks.filter(t => !t.deletedAt && (t.title + ' ' + t.description + ' ' + t.code).toLowerCase().includes(search.toLowerCase())).slice(0, 7);
   return <div className="app-shell">
@@ -179,6 +181,7 @@ export default function Workspace() {
         {safeView === 'dashboard' && (isHead ? <DepartmentDashboard key={user.id} workspace={workspace} command={command} onOpenTask={openTask} onRefresh={loadWorkspace} onManage={() => navigate('department')} onEvaluate={() => navigate('performance')}/> : <Dashboard workspace={workspace} navigate={navigate} onOpenTask={openTask}/>)}
         {safeView === 'personal' && <PersonalWork key={user.id} workspace={workspace} command={command} onOpenTask={openTask} onWorkspace={setWorkspace}/>}
         {safeView === 'department' && <DepartmentWork key={user.id} workspace={workspace} command={command} onOpenTask={openTask} onRefresh={loadWorkspace}/>}
+        {safeView === 'budgets' && <DepartmentBudget key={user.id} workspace={workspace}/>}
         {safeView === 'division' && <OrganizationDivision key={user.id} workspace={workspace} onRefresh={loadWorkspace}/>}
         {safeView === 'delegation' && <DelegationWork key={user.id} workspace={workspace} command={command} onOpenTask={openTask}/>}
         {safeView === 'allocation' && <AllocationReview key={user.id} workspace={workspace} command={command} onOpenCommon={() => navigate('common')} onOpenHandover={() => navigate('handover')} onOpenDivision={() => navigate('division')}/>}
