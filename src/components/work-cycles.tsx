@@ -1,5 +1,6 @@
 'use client';
 
+import { canActAsDeputy } from '@/lib/delegations';
 import { commonDeadline } from '@/lib/common-deadline';
 import { currentPeriod } from '@/lib/schedule';
 
@@ -37,7 +38,7 @@ export function WorkCycles({ workspace: w, task, command, dirty, children, onHis
   const count = latest?.cycleNumber || state.runs.length || 1;
   const distribution = w.commonTasks.find(common => common.id === task.commonId)?.distributions.find(item => item.taskId === task.id);
   const registered = !task.commonId || !!distribution && ['registered', 'assigned', 'submitted'].includes(distribution.status);
-  const authorized = (task.primaryId === w.currentUser.id || w.currentUser.role === 'admin') && w.currentUser.role !== 'head';
+  const authorized = (task.primaryId === w.currentUser.id || w.currentUser.role === 'admin' || canActAsDeputy(w, w.currentUser, task, 'run.schedule', new Date(w.serverTime))) && w.currentUser.role !== 'head';
   const definitionPending = task.status === 'review' || task.status === 'revision';
   const activeTask = registered && !task.deletedAt && task.status !== 'archived';
   const needsCompletion = state.completed && !latest?.cycleManaged;
@@ -138,8 +139,8 @@ function CurrentCycleSteps({ workspace: w, task, run, command, disabled }: { wor
   const [outputs, setOutputs] = useState<Record<string, string>>({});
   const reviewer = w.currentUser.id === (run?.reviewerId || task.reviewerId) || w.currentUser.role === 'admin' || w.currentUser.role === 'head' && w.currentUser.departmentId === task.departmentId;
   const assigned = [run?.primaryId || task.primaryId, ...(run?.supportIds || task.supportIds)].includes(w.currentUser.id);
-  const delegated = (action: string) => w.delegations.some(item => item.taskId === task.id && item.toId === w.currentUser.id && item.actions.includes(action) && !item.revokedAt && new Date(item.startsAt) <= new Date(w.serverTime) && new Date(w.serverTime) < new Date(item.endsAt));
-  const permitted = (step: WorkflowStep, action: string) => step.role === 'reviewer' ? reviewer : assigned || (run ? delegated(action) : w.currentUser.role === 'admin');
+  const delegated = (action: string) => canActAsDeputy(w, w.currentUser, task, action, new Date(w.serverTime));
+  const permitted = (step: WorkflowStep, action: string) => step.role === 'reviewer' ? reviewer : assigned || (run ? delegated(action) : delegated('task.setProgress') || w.currentUser.role === 'admin');
   const locked = disabled || !!busy || run?.status === 'paused' || run?.status === 'completed';
   const done = (id: string) => run ? run.steps.find(step => step.stepId === id)?.status === 'completed' : !!workflow.find(step => step.id === id)?.done;
   async function perform(type: string, payload: Record<string, unknown>, stepId: string) {

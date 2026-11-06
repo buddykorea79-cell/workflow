@@ -19,7 +19,7 @@ const departmentHead = (user: User, departmentId: string) => user.role === 'head
  * expenses/produced documents. Draft edits may not increment task.version. */
 function definitionFingerprint(task: Task): string {
   const definition = {
-    title: task.title, description: task.description, departmentId: task.departmentId,
+    title: task.title, description: task.description, descriptionAttachmentIds: task.descriptionAttachmentIds, departmentId: task.departmentId,
     unitId: task.unitId, primaryId: task.primaryId, supportIds: [...task.supportIds].sort(),
     reviewerId: task.reviewerId, status: task.status, priority: task.priority,
     frequency: task.frequency, dueDate: task.dueDate, tags: [...task.tags].sort(),

@@ -1,4 +1,5 @@
 import type { User, WorkTransferRole, WorkspaceData } from './types';
+import { delegationStatus } from './delegations';
 
 export type TransferRoleState = Pick<WorkspaceData, 'users' | 'units' | 'tasks' | 'runs' | 'commonTasks' | 'delegations'>;
 export const transferRoleLabels: Record<WorkTransferRole['kind'], string> = {
@@ -35,7 +36,7 @@ export function residualTransferRoles(state: TransferRoleState, fromId: string, 
       if (distribution.status === 'person_assigned' && distribution.assigneeId === fromId) add('distribution_assignee', distribution.id, common.title, basis, { commonId: common.id });
     }
   }
-  for (const delegation of state.delegations.filter(item => !item.revokedAt && new Date(item.endsAt) > now && [item.fromId, item.toId].includes(fromId))) {
+  for (const delegation of state.delegations.filter(item => ['pending', 'approved'].includes(delegationStatus(item)) && new Date(item.endsAt) > now && [item.fromId, item.toId].includes(fromId))) {
     const task = state.tasks.find(task => task.id === delegation.taskId && task.departmentId === departmentId);
     if (task) add('delegation_revoke', delegation.id, task.title, { fromId: delegation.fromId, toId: delegation.toId, startsAt: delegation.startsAt, endsAt: delegation.endsAt, actions: [...delegation.actions].sort() }, { taskId: task.id });
   }

@@ -2,8 +2,12 @@ import { createHmac, randomUUID, timingSafeEqual } from 'node:crypto';
 import { z } from 'zod';
 import { activeUser, assertTaskWritable, canReadTask, DomainError } from './domain';
 import type { WorkspaceData } from './types';
+import { canActAsDeputy } from './delegations';
 
-export const attachmentExtensions = new Set(['pdf', 'docx', 'xlsx', 'png', 'jpg', 'jpeg', 'webp', 'txt', 'csv', 'hwp', 'hwpx']);
+export const attachmentExtensions = new Set(['pdf', 'docx', 'xlsx', 'xls', 'pptx', 'png', 'jpg', 'jpeg', 'webp', 'txt', 'csv', 'hwp', 'hwpx']);
+export function isOwnDraftAttachment(taskId: string, userId: string) {
+  return taskId.startsWith(`draft:${userId}:`) && /^[a-f0-9-]{36}$/i.test(taskId.slice(`draft:${userId}:`.length));
+}
 const descriptor = z.object({ taskId: z.string().min(1).max(150), name: z.string().min(1).max(255), size: z.number().int().positive().max(10 * 1024 * 1024), mime: z.string().max(200), sha256: z.string().regex(/^[a-f0-9]{64}$/) }).strict();
 const manifestSchema = descriptor.extend({ id: z.string().min(1).max(150), userId: z.string().min(1).max(150), bucket: z.string().min(1).max(63), uploadKey: z.string().min(1).max(1000), storageKey: z.string().min(1).max(1000), expiresAt: z.number().int().positive() }).strict();
 export type UploadManifest = z.infer<typeof manifestSchema>;
@@ -18,12 +22,13 @@ export function parseUploadDescriptor(value: unknown) {
 
 export function assertAttachmentUploadAllowed(state: WorkspaceData, userId: string, taskId: string) {
   const user = activeUser(state, userId); const task = state.tasks.find(item => item.id === taskId);
+  if (isOwnDraftAttachment(taskId, userId) && user.role !== 'head') return { user, task: undefined, departmentId: user.departmentId };
   if (!task || !canReadTask(state, user, task)) throw new DomainError(403, 'ATTACHMENT_DENIED', '해당 업무에 파일을 첨부할 수 없습니다.');
   assertTaskWritable(state, task); const now = new Date();
-  const assigned = [task.primaryId, ...task.supportIds].includes(user.id) || state.runs.some(run => run.taskId === taskId && run.status !== 'completed' && [run.primaryId, ...run.supportIds].includes(user.id));
-  const delegated = state.delegations.some(item => item.taskId === taskId && item.toId === user.id && item.actions.includes('attachment.upload') && !item.revokedAt && new Date(item.startsAt) <= now && now < new Date(item.endsAt));
+  const assigned = user.role === 'admin' || [task.primaryId, ...task.supportIds].includes(user.id) || state.runs.some(run => run.taskId === taskId && run.status !== 'completed' && [run.primaryId, ...run.supportIds].includes(user.id));
+  const delegated = canActAsDeputy(state, user, task, 'attachment.upload', now);
   if (!assigned && !delegated) throw new DomainError(403, 'ATTACHMENT_DENIED', '현재 담당자 또는 첨부 권한이 있는 대행자만 등록할 수 있습니다.');
-  return { user, task };
+  return { user, task, departmentId: task.departmentId };
 }
 
 function uploadSecret() {
@@ -53,7 +58,7 @@ export function verifyUploadManifest(token: unknown, userId: string, now = Date.
 }
 
 export function recordNeonAttachment(state: WorkspaceData, manifest: UploadManifest) {
-  const { task } = assertAttachmentUploadAllowed(state, manifest.userId, manifest.taskId);
+  const { departmentId } = assertAttachmentUploadAllowed(state, manifest.userId, manifest.taskId);
   const existing = state.attachments.find(item => item.id === manifest.id);
   if (existing) {
     if (existing.taskId !== manifest.taskId || existing.uploadedBy !== manifest.userId || existing.sha256 !== manifest.sha256 || existing.size !== manifest.size || existing.storageKey !== manifest.storageKey || existing.storageBucket !== manifest.bucket || existing.storageProvider !== 'neon') throw new DomainError(409, 'UPLOAD_CONFLICT', '다른 첨부파일 기록과 충돌합니다. 첨부 목록을 새로 확인해 주세요.');
@@ -61,7 +66,7 @@ export function recordNeonAttachment(state: WorkspaceData, manifest: UploadManif
   }
   const now = new Date().toISOString();
   state.attachments.push({ id: manifest.id, taskId: manifest.taskId, name: manifest.name, size: manifest.size, mime: manifest.mime, sha256: manifest.sha256, storageKey: manifest.storageKey, storageProvider: 'neon', storageBucket: manifest.bucket, status: 'quarantined', uploadedBy: manifest.userId, createdAt: now });
-  state.audit.unshift({ id: randomUUID(), actorId: manifest.userId, action: 'attachment.upload', targetType: 'attachment', targetId: manifest.id, title: '첨부파일 격리 저장', detail: `${manifest.name} · Neon 저장소 · 개발용 출처 확인 대기`, departmentId: task.departmentId, createdAt: now });
+  state.audit.unshift({ id: randomUUID(), actorId: manifest.userId, action: 'attachment.upload', targetType: 'attachment', targetId: manifest.id, title: '첨부파일 격리 저장', detail: `${manifest.name} · Neon 저장소 · 개발용 출처 확인 대기`, departmentId, createdAt: now });
   state.revision++;
   return true;
 }

@@ -90,7 +90,7 @@ test('phase 1 transfer: a new confirmed definition still invalidates the request
 });
 
 test('phase 1 transfer: draft edits without a version increment still invalidate the request', () => {
-  for (const changes of [{ title: '인수 범위가 달라진 세부업무' }, { dueDate: '2026-11-25' }, { reviewerId: 'u-doyun' }]) {
+  for (const changes of [{ title: '인수 범위가 달라진 세부업무' }, { dueDate: '2026-11-25' }, { description: '인수 범위가 달라진 업무 설명' }]) {
     const state = fixture();
     task(state).status = 'revision';
     const transferId = request(state);

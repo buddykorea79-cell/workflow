@@ -32,7 +32,7 @@ export function workDivisionSnapshot(state: WorkspaceData, departmentId: string)
     units: state.units.filter(unit => unit.departmentId === departmentId && !unit.deletedAt),
     tasks: state.tasks.filter(task => task.departmentId === departmentId && !task.deletedAt && task.status !== 'archived' && isRegisteredWork(state, task)).map(task => ({
       id: task.id, code: task.code, status: task.status, commonId: task.commonId,
-      version: task.version, title: task.title, description: task.description, completionCriteria: task.completionCriteria,
+      version: task.version, title: task.title, description: task.description, ...(task.descriptionAttachmentIds ? { descriptionAttachmentIds: [...task.descriptionAttachmentIds] } : {}), completionCriteria: task.completionCriteria,
       unitId: task.unitId, departmentId: task.departmentId, primaryId: task.primaryId, supportIds: task.supportIds, reviewerId: task.reviewerId,
       frequency: task.frequency, dueDate: task.dueDate, card: task.card, workflow: task.workflow.map(({ done: _done, ...step }) => step),
       sourceIds: task.sourceIds, budget: task.budget, expenses: task.expenses, references: task.references,

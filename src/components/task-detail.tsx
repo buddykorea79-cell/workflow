@@ -7,6 +7,7 @@ import '@xyflow/react/dist/style.css';
 import type { Card, Task, WorkflowStep, Workspace } from '@/lib/types';
 import { uploadAttachment } from '@/lib/upload-attachment';
 import { currentPeriod, dueDateForPeriod, normalizePeriod } from '@/lib/schedule';
+import { activeTaskDelegations, canActAsDeputy } from '@/lib/delegations';
 import './task-detail.css';
 
 type Props = { task: Task; workspace: Workspace; command: (type: string, payload: Record<string, unknown>) => Promise<boolean>; onClose: () => void };
@@ -78,7 +79,8 @@ export default function TaskDetail({ task, workspace, command, onClose }: Props)
   const canRevise = canConfirm;
   const canEdit = canManage || task.primaryId === user.id;
   const isDraft = task.status === 'draft' || task.status === 'revision';
-  const canRunAction = (action: string) => !!run && (run.primaryId === user.id || run.supportIds.includes(user.id) || workspace.delegations.some(d => d.taskId === task.id && d.toId === user.id && d.actions.includes(action) && !d.revokedAt && new Date(d.startsAt) <= new Date(workspace.serverTime) && new Date(d.endsAt) > new Date(workspace.serverTime)));
+  const deputies = activeTaskDelegations(workspace, task, undefined, new Date(workspace.serverTime));
+  const canRunAction = (action: string) => !!run && (run.primaryId === user.id || run.supportIds.includes(user.id) || canActAsDeputy(workspace, user, task, action, new Date(workspace.serverTime)));
   const canExecute = canRunAction('run.note') || !!run && (run.reviewerId === user.id || canConfirm);
   const taskSources = workspace.sources.filter(source => task.sourceIds.includes(source.id));
   const attachments = workspace.attachments.filter(item => item.taskId === task.id);
@@ -166,7 +168,7 @@ export default function TaskDetail({ task, workspace, command, onClose }: Props)
       <header className="td-header">
         <div className="td-title-row"><div><div className="td-eyebrow">WORK MANAGEMENT CARD <span>VERSION {task.version.toString().padStart(2, '0')}</span></div><h2 id="td-title">{task.title}</h2></div><span className={`td-badge td-status-${task.status}`}>{task.status === 'confirmed' && <LockKeyhole size={12}/>} {statusLabels[task.status]}</span></div>
         <p className="td-description">{task.description}</p>
-        <div className="td-meta-row"><div className="td-people"><span className="td-avatar" style={{ background: avatarColor(person(task.primaryId)?.color) }}>{person(task.primaryId)?.initials}</span><span><small>정담당</small><strong>{person(task.primaryId)?.name ?? '미배정'}</strong></span>{task.supportIds.length > 0 && <><i/><span><small>부담당</small><strong>{task.supportIds.map(id => person(id)?.name).filter(Boolean).join(', ')}</strong></span></>}<i/><span><small>총괄</small><strong>{person(task.reviewerId)?.name ?? '미지정'}</strong></span></div><div className="td-meta-tags"><span><Clock3 size={14}/>{formatDate(task.dueDate)}</span><span>{frequencyLabels[task.frequency]}</span></div></div>
+        <div className="td-meta-row"><div className="td-people"><span className="td-avatar" style={{ background: avatarColor(person(task.primaryId)?.color) }}>{person(task.primaryId)?.initials}</span><span><small>정담당</small><strong>{person(task.primaryId)?.name ?? '미배정'}</strong></span>{task.supportIds.length > 0 && <><i/><span><small>부담당</small><strong>{task.supportIds.map(id => person(id)?.name).filter(Boolean).join(', ')}</strong></span></>}<i/><span><small>업무대행</small><strong>{deputies.map(item => person(item.toId)?.name).filter(Boolean).join(', ') || '현재 대행자 없음'}</strong></span></div><div className="td-meta-tags"><span><Clock3 size={14}/>{formatDate(task.dueDate)}</span><span>{frequencyLabels[task.frequency]}</span></div></div>
         <div className="td-actionline"><div className="td-tags">{task.tags.map(tag => <span key={tag}>{tag}</span>)}</div><div className="td-actions">{isDraft && canEdit && <button className={`td-btn ${tab === 'workflow' || editing || performanceForm ? '' : 'td-btn-primary'}`} disabled={busy} onClick={() => act('task.submit')}><Send size={14}/>검토 요청</button>}{task.status === 'review' && canConfirm && <button className="td-btn td-btn-primary" disabled={busy} onClick={() => act('task.confirm')}><ShieldCheck size={15}/>업무 확정</button>}{task.status === 'confirmed' && canRevise && <button className="td-btn" onClick={() => setShowRevision(value => !value)}><Pencil size={14}/>변경본 작성</button>}</div></div>
         {showRevision && <form className="td-revision-form" onSubmit={async event => { event.preventDefault(); if (await act('task.revise', { reason })) { setShowRevision(false); setReason(''); setEditing(true); } }}><label htmlFor="td-revision-reason">변경 사유</label><input id="td-revision-reason" value={reason} onChange={event => setReason(event.target.value)} required placeholder="변경할 내용과 이유를 적어 주세요"/><button className="td-btn td-btn-primary" disabled={busy || !reason.trim()}>변경본 만들기</button></form>}
       </header>

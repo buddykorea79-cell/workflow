@@ -68,7 +68,7 @@ test('work division: all personal definition routes, trash restore, admin overri
     ['unit.create', { title: '새 업무', description: '잠금 우회' }], ['unit.update', { unitId: dataUnitId, title: '수정', description: '수정' }],
     ['unit.delete', { unitId: dataUnitId }], ['unit.restore', { unitId: dataUnitId }],
     ['task.create', { unitId: dataUnitId }], ...['configure', 'update', 'delete', 'restore', 'submit', 'confirm', 'revise', 'archive'].map(command => [`task.${command}`, { taskId: dataTaskId, unitId: dataUnitId }] as [string, Record<string, unknown>]),
-    ['delegation.create', { taskId: dataTaskId }], ['handover.create', { taskIds: [dataTaskId], toId: 'u-doyun' }],
+    ['handover.create', { taskIds: [dataTaskId], toId: 'u-doyun' }],
   ];
   for (const [type, payload] of commands) { const before = JSON.stringify(state); rejects('DEPARTMENT_CONFIRMED', () => dispatch(state, 'u-support-member', type, payload)); assert.equal(JSON.stringify(state), before); }
   rejects('DEPARTMENT_CONFIRMED', () => dispatch(state, 'u-admin', 'task.configure', { taskId: dataTaskId, description: '관리자 우회' }));
