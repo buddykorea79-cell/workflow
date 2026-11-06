@@ -115,7 +115,7 @@ export default function Workspace() {
     if (!currentRef.current || locked.current) return false;
     locked.current = true; setBusy(true);
     try {
-      const response = await fetch('/api/commands', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ type, payload, expectedRevision: currentRef.current.revision, requestId: crypto.randomUUID() }) });
+      const response = await fetch(type.startsWith('budget.') ? '/api/budgets' : '/api/commands', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ type, payload, expectedRevision: currentRef.current.revision, requestId: crypto.randomUUID() }) });
       const result = await response.json();
       if (!response.ok) { if (response.status === 409) await loadWorkspace(); if (response.status === 401) setWorkspace(null); throw new Error(result.error || '요청을 처리하지 못했습니다.'); }
       currentRef.current = result; setWorkspace(result); setNotice({ text: '변경 내용을 저장했습니다.' });

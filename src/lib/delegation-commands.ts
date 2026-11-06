@@ -11,8 +11,8 @@ const timestamp = z.string().refine(value => Number.isFinite(Date.parse(value)),
 const inputSchema = z.object({ toId: z.string().trim().min(1), startsAt: timestamp, endsAt: timestamp, reason: z.string().trim().min(1).max(2000), actions: z.array(z.enum(delegationActions)).min(1).max(delegationActions.length).optional() });
 const stable = (value: unknown): unknown => Array.isArray(value) ? value.map(stable) : value && typeof value === 'object' ? Object.fromEntries(Object.entries(value).filter(([, item]) => item !== undefined).sort(([a], [b]) => a.localeCompare(b)).map(([key, item]) => [key, stable(item)])) : value;
 export function delegationTaskFingerprint(task: Task) {
-  const { id, title, description, descriptionAttachmentIds, unitId, departmentId, primaryId, supportIds, reviewerId, frequency, dueDate, completionCriteria, card, sourceIds, budget } = task;
-  return createHash('sha256').update(JSON.stringify(stable({ id, title, description, descriptionAttachmentIds, unitId, departmentId, primaryId, supportIds, reviewerId, frequency, dueDate, completionCriteria, card, sourceIds, budget,
+  const { id, title, description, descriptionAttachmentIds, unitId, departmentId, primaryId, supportIds, reviewerId, frequency, dueDate, completionCriteria, card, sourceIds, budget, budgetMode, budgetAllocation } = task;
+  return createHash('sha256').update(JSON.stringify(stable({ id, title, description, descriptionAttachmentIds, unitId, departmentId, primaryId, supportIds, reviewerId, frequency, dueDate, completionCriteria, card, sourceIds, budget, budgetMode, budgetAllocation,
     workflow: task.workflow.map(({ done: _done, ...step }) => step), references: task.references?.filter(reference => reference.type !== 'document'),
   }))).digest('hex');
 }

@@ -35,7 +35,7 @@ export function workDivisionSnapshot(state: WorkspaceData, departmentId: string)
       version: task.version, title: task.title, description: task.description, ...(task.descriptionAttachmentIds ? { descriptionAttachmentIds: [...task.descriptionAttachmentIds] } : {}), completionCriteria: task.completionCriteria,
       unitId: task.unitId, departmentId: task.departmentId, primaryId: task.primaryId, supportIds: task.supportIds, reviewerId: task.reviewerId,
       frequency: task.frequency, dueDate: task.dueDate, card: task.card, workflow: task.workflow.map(({ done: _done, ...step }) => step),
-      sourceIds: task.sourceIds, budget: task.budget, expenses: task.expenses, references: task.references,
+      sourceIds: task.sourceIds, budget: task.budget, budgetMode: task.budgetMode, budgetAllocation: task.budgetAllocation, expenses: task.expenses, references: task.references,
     })),
     members: state.users.filter(user => user.departmentId === departmentId && user.active).map(userIdentity),
   });

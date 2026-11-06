@@ -24,7 +24,7 @@ function definitionFingerprint(task: Task): string {
     reviewerId: task.reviewerId, status: task.status, priority: task.priority,
     frequency: task.frequency, dueDate: task.dueDate, tags: [...task.tags].sort(),
     completionCriteria: task.completionCriteria, card: task.card, sourceIds: [...task.sourceIds].sort(),
-    commonId: task.commonId, budget: task.budget,
+    commonId: task.commonId, budget: task.budget, budgetMode: task.budgetMode, budgetAllocation: task.budgetAllocation,
     workflow: task.workflow.map(step => ({
       id: step.id, title: step.title, role: step.role, description: step.description,
       output: step.output, required: step.required, dependsOn: step.dependsOn,

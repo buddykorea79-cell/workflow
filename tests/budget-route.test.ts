@@ -1,0 +1,70 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import { randomUUID } from 'node:crypto';
+import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import path from 'node:path';
+import os from 'node:os';
+import { NextRequest } from 'next/server';
+import { GET, POST } from '../src/app/api/budgets/route';
+import { sessionCookie, signSession } from '../src/lib/auth';
+import { createSeed } from '../src/lib/seed';
+import type { WorkspaceData } from '../src/lib/types';
+import type { BudgetCatalogItem } from '../src/lib/budget-types';
+
+test('budget endpoints authorize session/admin access, persist catalog edits, bound imports, and preserve task records', async () => {
+  const directory = await mkdtemp(path.join(os.tmpdir(), 'ieum-budget-route-'));
+  const keys = ['IEUM_DATA_DIR', 'DATABASE_URL', 'VERCEL', 'NEON_AUTH_BASE_URL', 'IEUM_APP_ORIGIN', 'IEUM_PROTOTYPE_MODE'] as const;
+  const previous = Object.fromEntries(keys.map(key => [key, process.env[key]]));
+  try {
+    for (const key of keys) delete process.env[key]; process.env.IEUM_DATA_DIR = directory;
+    const state = createSeed(new Date('2026-11-06T03:00:00Z')); const file = path.join(directory, 'workspace.json'); await writeFile(file, JSON.stringify(state, null, 2));
+    const headers = (userId: string | null, origin = 'http://127.0.0.1:3000') => ({ host: '127.0.0.1:3000', origin, ...(userId ? { cookie: `${sessionCookie}=${signSession(userId)}` } : {}) });
+    const query = (userId: string | null, params: Record<string, string> = {}, origin?: string) => new NextRequest(`http://127.0.0.1:3000/api/budgets?${new URLSearchParams(params)}`, { headers: headers(userId, origin) });
+    const post = (userId: string | null, body: unknown, extraHeaders: Record<string, string> = {}, origin?: string) => new NextRequest('http://127.0.0.1:3000/api/budgets', { method: 'POST', headers: { ...headers(userId, origin), 'Content-Type': 'application/json', ...extraHeaders }, body: typeof body === 'string' ? body : JSON.stringify(body) });
+    assert.equal((await GET(query(null))).status, 401);
+    assert.equal((await GET(query('u-support-member', {}, 'https://other.example'))).status, 403);
+    assert.equal((await GET(query('u-support-member', { includeInactive: 'true' }))).status, 403);
+    assert.equal((await GET(query('u-support-member', { export: 'true' }))).status, 403);
+    assert.equal((await GET(query('u-support-member', { page: '0' }))).status, 422);
+    assert.equal((await GET(query('u-support-member', { url: 'https://other.example' }))).status, 422);
+    const search = await GET(query('u-support-member', { query: '디지털', year: '2026' }));
+    assert.equal(search.status, 200); assert.match(search.headers.get('cache-control')!, /no-store/);
+    const result = await search.json(); assert.ok(result.total > 0); assert.ok(result.items.every((item: BudgetCatalogItem) => item.year === 2026));
+    assert.equal(await readFile(file, 'utf8'), JSON.stringify(state, null, 2));
+    const exported = await GET(query('u-admin', { export: 'true' })); assert.equal(exported.status, 200); assert.match(exported.headers.get('content-disposition')!, /attachment/);
+    const catalog = await exported.json(); assert.equal(catalog.items.length, 308); assert.equal(catalog.schemaVersion, 1);
+    const item: BudgetCatalogItem = { id: 'route-demo-budget', year: 2026, account: '시연 회계', field: '시연 분야', sector: '시연 부문', program: '시연 프로그램', projectName: '시연 예산 사업', confirmedAmountWon: 10000, active: true };
+    const command = { type: 'budget.upsert', payload: { item }, expectedRevision: state.revision, requestId: randomUUID() };
+    assert.equal((await POST(post('u-support-member', command))).status, 403);
+    assert.equal((await POST(post('u-admin', command, {}, 'https://other.example'))).status, 403);
+    assert.equal((await POST(post('u-admin', { ...command, type: 'task.configure' }))).status, 422);
+    assert.equal((await POST(post('u-admin', '{invalid'))).status, 400);
+    assert.equal((await POST(post('u-admin', command, { 'Content-Length': '3000001' }))).status, 413);
+    assert.equal((await POST(post('u-admin', ' '.repeat(3_000_001)))).status, 413);
+    const stored = await POST(post('u-admin', command)); assert.equal(stored.status, 200);
+    const workspace = await stored.json(); assert.equal(workspace.revision, state.revision + 1); assert.equal('budgetCatalog' in workspace, false);
+    let saved = JSON.parse(await readFile(file, 'utf8')) as WorkspaceData;
+    assert.equal(saved.budgetCatalog!.items.length, 309); assert.equal(saved.budgetCatalog!.items.find(row => row.id === item.id)?.updatedBy, 'u-admin');
+    assert.equal(JSON.stringify(saved.tasks), JSON.stringify(state.tasks)); assert.equal(JSON.stringify(saved.runs), JSON.stringify(state.runs));
+    const duplicate = await POST(post('u-admin', command)); assert.equal(duplicate.status, 200); assert.equal((await duplicate.json()).revision, workspace.revision);
+    assert.equal((await POST(post('u-admin', { ...command, requestId: randomUUID(), payload: { item: { ...item, confirmedAmountWon: 12 } } }))).status, 409);
+    const snapshot = JSON.stringify(saved.budgetCatalog);
+    const invalidImport = await POST(post('u-admin', { type: 'budget.import', payload: { catalog: { ...catalog, items: [item, item] } }, expectedRevision: workspace.revision, requestId: randomUUID() }));
+    assert.equal(invalidImport.status, 422);
+    saved = JSON.parse(await readFile(file, 'utf8')) as WorkspaceData; assert.equal(JSON.stringify(saved.budgetCatalog), snapshot);
+    const disabled = await POST(post('u-admin', { type: 'budget.setActive', payload: { id: item.id, active: false }, expectedRevision: saved.revision, requestId: randomUUID() }));
+    assert.equal(disabled.status, 200);
+    assert.equal((await (await GET(query('u-support-member', { query: '시연 예산 사업' }))).json()).total, 0);
+    assert.equal((await (await GET(query('u-admin', { query: '시연 예산 사업', includeInactive: 'true' }))).json()).total, 1);
+    const afterDisable = await disabled.json();
+    const imported = await POST(post('u-admin', { type: 'budget.import', payload: { catalog }, expectedRevision: afterDisable.revision, requestId: randomUUID() }));
+    assert.equal(imported.status, 200);
+    saved = JSON.parse(await readFile(file, 'utf8')) as WorkspaceData;
+    assert.equal(saved.budgetCatalog!.items.length, 309);
+    assert.equal(saved.budgetCatalog!.items.find(row => row.id === item.id)?.active, false);
+    assert.equal(JSON.stringify(saved.tasks), JSON.stringify(state.tasks));
+  } finally {
+    for (const key of keys) { if (previous[key] === undefined) delete process.env[key]; else process.env[key] = previous[key]; }
+    await rm(directory, { recursive: true, force: true });
+  }
+});

@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState } from 'react';
 import { ArrowDownLeft, ArrowRight, CalendarDays, Check, CheckCircle2, ChevronDown, ChevronLeft, ChevronRight, Circle, Clock3, FileText, Folder, FolderPlus, Inbox, Pencil, RotateCcw, Landmark, Layers3, Link2, ListChecks, Plus, Search, Trash2, Trophy, UserRound, Wallet } from 'lucide-react';
-import type { Frequency, Task, TaskReference, Unit, WorkflowStep, Workspace } from '@/lib/types';
+import type { Expense, Frequency, Task, TaskReference, Unit, WorkflowStep, Workspace } from '@/lib/types';
 import { Badge, Button, EmptyState, Field, Modal, Progress } from './ui';
 import './personal-work.css';
 import { canEditDepartmentDefinitions, isDepartmentConfirmed } from '@/lib/work-division';
@@ -20,10 +20,10 @@ import { DeputyRequestFields, TaskDelegationSection, deputyPayload, initialDeput
 import { TaskDescriptionFiles } from './task-description-files';
 import { procedureErrors } from '@/lib/procedure-draft';
 import { taskProcedureParticipants } from '@/lib/procedure-participants';
+import { TaskBudgetFields, TaskBudgetSection, taskBudgetDraft, taskBudgetPayload, taskBudgetIssue, taskExpenseIssue } from './task-budget';
 
 type CommandFn = (type: string, payload: Record<string, unknown>) => Promise<boolean>;
 type ViewProps = { workspace: Workspace; command: CommandFn; onOpenTask?: (id: string) => void; onWorkspace?: (workspace: Workspace) => void };
-type Expense = { id: string; date: string; description: string; amount: number };
 type Reference = TaskReference;
 type PlannedStep = WorkflowStep & { startDate?: string; dueDate?: string; done?: boolean };
 type DetailedTask = Task & { budget?: number; expenses?: Expense[]; references?: Reference[]; workflow: PlannedStep[] };
@@ -225,19 +225,23 @@ function CreateTask({ workspace: w, units, selectedUnitId, command, onClose, onW
   const [unitId, setUnitId] = useState(selectedUnitId || units[0]?.id || '');
   const [dueDate, setDueDate] = useState(todayFor(w));
   const [frequency, setFrequency] = useState<Frequency>('once');
-  const [budget, setBudget] = useState('0');
+  const [budgetDraft, setBudgetDraft] = useState(() => taskBudgetDraft());
+  const [budgetMessage, setBudgetMessage] = useState('');
   const [busy, setBusy] = useState(false);
   const [uploadBusy, setUploadBusy] = useState(false);
   const [includeDeputy, setIncludeDeputy] = useState(false);
   const [deputy, setDeputy] = useState(() => initialDeputyDraft(w));
   return <Modal title="세부업무 등록" description="단위업무 아래에 실행할 일을 구체적으로 기록합니다." onClose={() => { if (!busy && !uploadBusy) onClose(); }} wide>
     <form className="form-stack" onSubmit={async event => {
-      event.preventDefault(); if (busy || uploadBusy || includeDeputy && !validDeputyDraft(deputy)) return; setBusy(true);
-      try { if (await command('task.create', { title, description, descriptionAttachmentIds, unitId, primaryId: w.currentUser.id, supportIds: [], dueDate, frequency, priority: 'medium', budget: Number(budget), expenses: [], references: [], ...(includeDeputy ? { deputy: deputyPayload(deputy) } : {}) })) onClose(); } finally { setBusy(false); }
+      event.preventDefault(); if (busy || uploadBusy || includeDeputy && !validDeputyDraft(deputy)) return;
+      const issue = taskBudgetIssue(budgetDraft); setBudgetMessage(issue); if (issue) return; setBusy(true);
+      try { if (await command('task.create', { title, description, descriptionAttachmentIds, unitId, primaryId: w.currentUser.id, supportIds: [], dueDate, frequency, priority: 'medium', ...taskBudgetPayload(budgetDraft), expenses: [], references: [], ...(includeDeputy ? { deputy: deputyPayload(deputy) } : {}) })) onClose(); } finally { setBusy(false); }
     }}>
       <div className="form-grid"><Field label="단위업무"><select required value={unitId} onChange={event => setUnitId(event.target.value)}><option value="">단위업무 선택</option>{units.map(unit => <option key={unit.id} value={unit.id}>{unit.title}</option>)}</select></Field><Field label="업무 구분"><input value="개인이 등록하는 세부업무" disabled/></Field><Field label="세부업무 이름" span><input required maxLength={150} value={title} onChange={event => setTitle(event.target.value)} placeholder="예: 2027년 예산 요구자료 작성" autoFocus/></Field><Field label="업무 설명" span><textarea required maxLength={20000} rows={4} value={description} onChange={event => setDescription(event.target.value)} placeholder="업무의 목적, 수행 범위, 기대하는 결과를 적어 주세요."/></Field></div>
       <TaskDescriptionFiles workspace={w} title={title} description={description} attachmentIds={descriptionAttachmentIds} onAttachmentsChange={setDescriptionAttachmentIds} onDescriptionChange={setDescription} onWorkspace={onWorkspace} onBusyChange={setUploadBusy} disabled={busy}/>
-      <div className="form-grid"><Field label="업무 마감일"><input required type="date" value={dueDate} onChange={event => setDueDate(event.target.value)}/></Field><Field label="반복 주기"><select value={frequency} onChange={event => setFrequency(event.target.value as Frequency)}>{Object.entries(frequencyNames).map(([key, label]) => <option key={key} value={key}>{label}</option>)}</select></Field><Field label="사업 예산 (원)"><input type="number" required min="0" step="1" value={budget} onChange={event => setBudget(event.target.value)}/></Field></div>
+      <div className="form-grid"><Field label="업무 마감일"><input required type="date" value={dueDate} onChange={event => setDueDate(event.target.value)}/></Field><Field label="반복 주기"><select value={frequency} onChange={event => setFrequency(event.target.value as Frequency)}>{Object.entries(frequencyNames).map(([key, label]) => <option key={key} value={key}>{label}</option>)}</select></Field></div>
+      <TaskBudgetFields value={budgetDraft} onChange={value => { setBudgetDraft(value); setBudgetMessage(''); }} disabled={busy || uploadBusy}/>
+      {budgetMessage && <p className="pw-form-error" role="alert">{budgetMessage}</p>}
       <section className="task-delegation-section"><label className="delegation-opt-in"><input type="checkbox" checked={includeDeputy} disabled={busy} onChange={event => setIncludeDeputy(event.target.checked)}/>업무대행자를 지정하고 부서장 승인을 요청합니다</label>{includeDeputy ? <DeputyRequestFields workspace={w} departmentId={w.currentUser.departmentId} fromId={w.currentUser.id} value={deputy} onChange={setDeputy} disabled={busy}/> : <p className="delegation-empty">업무 등록 후에도 업무대행자를 지정할 수 있습니다.</p>}</section>
       <p className="pw-form-note"><ListChecks size={16}/>등록 후 업무 절차와 일정, 집행 내역, 법령·지침 등 근거를 추가할 수 있습니다.</p>
       <div className="form-actions"><Button variant="secondary" disabled={busy || uploadBusy} onClick={onClose}>취소</Button><Button type="submit" disabled={busy || uploadBusy || includeDeputy && !validDeputyDraft(deputy)}>{busy ? '등록 중…' : includeDeputy ? '세부업무 등록·대행 승인 요청' : '세부업무 등록'}</Button></div>
@@ -267,7 +271,7 @@ function TaskEditor({ task, workspace: w, command, onClose, onWorkspace, initial
   const [frequency, setFrequency] = useState<Frequency>(task.frequency);
   const [description, setDescription] = useState(task.description);
   const [descriptionAttachmentIds, setDescriptionAttachmentIds] = useState<string[]>(task.descriptionAttachmentIds ?? []);
-  const [budget, setBudget] = useState(String(task.budget ?? 0));
+  const [budgetDraft, setBudgetDraft] = useState(() => taskBudgetDraft(task));
   const [expenses, setExpenses] = useState<Expense[]>(structuredClone(task.expenses || []));
   const [references, setReferences] = useState<Reference[]>(structuredClone(task.references || []));
   const [workflow, setWorkflow] = useState<PlannedStep[]>(structuredClone(task.workflow));
@@ -289,15 +293,14 @@ function TaskEditor({ task, workspace: w, command, onClose, onWorkspace, initial
   const canReview = w.currentUser.id === task.reviewerId || w.currentUser.role === 'admin' || (w.currentUser.role === 'head' && w.currentUser.departmentId === task.departmentId);
   const common = task.commonId ? w.commonTasks.find(item => item.id === task.commonId) : undefined;
   const directiveDistribution = common?.kind === 'directive' ? common.distributions.find(item => item.taskId === task.id) : undefined;
-  const total = expenses.reduce((sum, item) => sum + (Number(item.amount) || 0), 0);
   const progress = taskProgress(task, w);
   const withoutDone = (steps: PlannedStep[]) => JSON.stringify(cleanWorkflow(steps).map(({ done: _done, ...rest }) => rest));
   const workflowDirty = withoutDone(workflow) !== withoutDone(task.workflow);
   const participants = taskProcedureParticipants(w, task);
   const diagramChanged = JSON.stringify(workflow) !== drawnWorkflow;
   const savedReferences = referencesForSave(references);
-  const formDirty = workflowDirty || unitId !== task.unitId || title !== task.title || description !== task.description || JSON.stringify(descriptionAttachmentIds) !== JSON.stringify(task.descriptionAttachmentIds ?? []) || dueDate !== task.dueDate || frequency !== task.frequency || budget !== String(task.budget ?? 0) || JSON.stringify(expenses) !== JSON.stringify(task.expenses || []) || JSON.stringify(savedReferences) !== JSON.stringify(task.references || []);
-  const draftValues = { unitId, title, description, descriptionAttachmentIds, dueDate, frequency, budget, expenses, references, workflow };
+  const formDirty = workflowDirty || unitId !== task.unitId || title !== task.title || description !== task.description || JSON.stringify(descriptionAttachmentIds) !== JSON.stringify(task.descriptionAttachmentIds ?? []) || dueDate !== task.dueDate || frequency !== task.frequency || JSON.stringify(budgetDraft) !== JSON.stringify(taskBudgetDraft(task)) || JSON.stringify(expenses) !== JSON.stringify(task.expenses || []) || JSON.stringify(savedReferences) !== JSON.stringify(task.references || []);
+  const draftValues = { unitId, title, description, descriptionAttachmentIds, dueDate, frequency, budgetDraft, expenses, references, workflow };
   const [saveAcknowledgement, setSaveAcknowledgement] = useState<{ revision: number; draft: typeof draftValues } | null>(null);
   useEffect(() => {
     if (!saveAcknowledgement || w.revision <= saveAcknowledgement.revision) return;
@@ -309,7 +312,7 @@ function TaskEditor({ task, workspace: w, command, onClose, onWorkspace, initial
     setDescriptionAttachmentIds(current => JSON.stringify(current) === JSON.stringify(submitted.descriptionAttachmentIds) ? task.descriptionAttachmentIds ?? [] : current);
     setDueDate(current => current === submitted.dueDate ? task.dueDate : current);
     setFrequency(current => current === submitted.frequency ? task.frequency : current);
-    setBudget(current => current === submitted.budget ? String(task.budget ?? 0) : current);
+    setBudgetDraft(current => JSON.stringify(current) === JSON.stringify(submitted.budgetDraft) ? taskBudgetDraft(task) : current);
     setExpenses(current => JSON.stringify(current) === JSON.stringify(submitted.expenses) ? structuredClone(task.expenses || []) : current);
     setReferences(current => JSON.stringify(current) === JSON.stringify(submitted.references) ? structuredClone(task.references || []) : current);
     setWorkflow(current => withoutDone(current) === withoutDone(submitted.workflow) ? structuredClone(task.workflow) : current);
@@ -325,13 +328,14 @@ function TaskEditor({ task, workspace: w, command, onClose, onWorkspace, initial
     setDueDate(current => current === previous.dueDate ? task.dueDate : current);
     setReferences(current => JSON.stringify(current) === JSON.stringify(previous.references || []) ? structuredClone(task.references || []) : current);
     setExpenses(current => JSON.stringify(current) === JSON.stringify(previous.expenses || []) ? structuredClone(task.expenses || []) : current);
+    setBudgetDraft(current => JSON.stringify(current) === JSON.stringify(taskBudgetDraft(previous)) ? taskBudgetDraft(task) : current);
     setDescriptionAttachmentIds(current => JSON.stringify(current) === JSON.stringify(previous.descriptionAttachmentIds ?? []) ? task.descriptionAttachmentIds ?? [] : current);
   }, [task]);
   useEffect(() => {
     if (previousRunId.current === currentRunId) return;
     previousRunId.current = currentRunId;
     setWorkflow(structuredClone(task.workflow)); setDueDate(task.dueDate); setTitle(task.title); setDescription(task.description); setUnitId(task.unitId); setFrequency(task.frequency); setDescriptionAttachmentIds(task.descriptionAttachmentIds ?? []);
-    setBudget(String(task.budget ?? 0)); setExpenses(structuredClone(task.expenses || [])); setReferences(structuredClone(task.references || []));
+    setBudgetDraft(taskBudgetDraft(task)); setExpenses(structuredClone(task.expenses || [])); setReferences(structuredClone(task.references || []));
     setShowBuilder(false); setHistoryViewing(false); setMessage(''); setSaved(false); setProcedureNotice(''); setDrawnWorkflow(JSON.stringify(task.workflow)); setFlowRevision(value => value + 1);
   }, [currentRunId]);
   const changeStep = (id: string, changes: Partial<PlannedStep>) => { setSaved(false); setProcedureNotice(''); setWorkflow(items => items.map(item => item.id === id ? { ...item, ...changes } : item)); };
@@ -364,14 +368,14 @@ function TaskEditor({ task, workspace: w, command, onClose, onWorkspace, initial
     setMessage(''); setSaved(false);
     if (!task.commonId && (!title.trim() || !dueDate)) { setTab('details'); setMessage('세부업무 이름과 마감일을 입력해 주세요.'); return; }
     if (!description.trim()) { setTab('details'); setMessage('업무 설명을 입력해 주세요.'); return; }
-    if (!Number.isFinite(Number(budget)) || Number(budget) < 0) { setTab('budget'); setMessage('사업 예산은 0 이상의 숫자로 입력해 주세요.'); return; }
-    if (expenses.some(item => !item.date || !item.description.trim() || !Number.isFinite(item.amount) || item.amount < 0)) { setTab('budget'); setMessage('집행일, 집행 내용, 0 이상의 금액을 모두 입력해 주세요.'); return; }
+    const budgetError = taskBudgetIssue(budgetDraft, expenses) || taskExpenseIssue(expenses, task.expenses);
+    if (budgetError) { setTab('budget'); setMessage(budgetError); return; }
     if (savedReferences.some(item => !item.title.trim() || (!item.content.trim() && !item.attachmentId) || (item.url && !/^https?:\/\//i.test(item.url)))) { setTab('references'); setMessage('근거의 제목과 내용 또는 첨부파일을 입력하고, 링크는 http:// 또는 https://로 시작해 주세요.'); return; }
     if (!workflow.length || workflow.some(step => !step.title.trim() || (step.startDate && step.dueDate && step.startDate > step.dueDate))) { setTab('workflow'); setMessage('각 절차의 이름을 입력하고 종료일을 시작일 이후로 설정해 주세요.'); return; }
     const workflowErrors = procedureErrors(cleanWorkflow(workflow));
     if (workflowErrors.length) { setTab('workflow'); setMessage(workflowErrors[0]); return; }
     setBusy(true);
-    try { if (await command('task.configure', { taskId: task.id, ...(unitId !== task.unitId ? { unitId } : {}), ...(!task.commonId ? { title, ...(dueDate !== task.dueDate ? { dueDate } : {}), frequency } : {}), description, descriptionAttachmentIds, budget: Number(budget), expenses, references: savedReferences, ...(workflowDirty ? { workflow: cleanWorkflow(workflow) } : {}) })) { setSaved(true); setSaveAcknowledgement({ revision: w.revision, draft: draftValues }); } }
+    try { if (await command('task.configure', { taskId: task.id, ...(unitId !== task.unitId ? { unitId } : {}), ...(!task.commonId ? { title, ...(dueDate !== task.dueDate ? { dueDate } : {}), frequency } : {}), description, descriptionAttachmentIds, ...taskBudgetPayload(budgetDraft), expenses, references: savedReferences, ...(workflowDirty ? { workflow: cleanWorkflow(workflow) } : {}) })) { setSaved(true); setSaveAcknowledgement({ revision: w.revision, draft: draftValues }); } }
     finally { setBusy(false); }
   }
 
@@ -379,7 +383,8 @@ function TaskEditor({ task, workspace: w, command, onClose, onWorkspace, initial
     if (!recordsEditable || uploadBusy) return;
     setMessage(''); setSaved(false);
     const documents = savedReferences.filter(reference => reference.type === 'document');
-    if (expenses.some(item => !item.date || !item.description.trim() || !Number.isFinite(item.amount) || item.amount < 0)) { setTab('budget'); setMessage('집행일, 집행 내용, 0 이상의 금액을 모두 입력해 주세요.'); return; }
+    const expenseError = taskExpenseIssue(expenses, task.expenses);
+    if (expenseError) { setTab('budget'); setMessage(expenseError); return; }
     if (documents.some(item => !item.title.trim() || (!item.content.trim() && !item.attachmentId) || (item.url && !/^https?:\/\//i.test(item.url)))) { setTab('references'); setMessage('생산 문서의 제목과 내용 또는 첨부파일을 입력하고 원문 링크를 확인해 주세요.'); return; }
     setBusy(true);
     try { if (await command('task.record', { taskId: task.id, expenses, documents })) { setSaved(true); setSaveAcknowledgement({ revision: w.revision, draft: draftValues }); } }
@@ -416,7 +421,7 @@ function TaskEditor({ task, workspace: w, command, onClose, onWorkspace, initial
 
       {tab === 'performance' && <TaskPerformance workspace={w} task={task} command={command} onGoPerformance={() => { window.location.hash = 'performance'; onClose(); }} />}
 
-      {tab === 'budget' && <div className="form-stack"><div className="pw-budget-summary"><div><span>사업 예산</span><strong>{money(Number(budget) || 0)}<small>원</small></strong></div><div><span>집행 합계</span><strong>{money(total)}<small>원</small></strong></div><div><span>{Number(budget) >= total ? '남은 예산' : '초과 집행'}</span><strong>{money(Math.abs((Number(budget) || 0) - total))}<small>원</small></strong></div></div><Field label="사업 예산 (원)"><input type="number" min="0" step="1" disabled={!editable} value={budget} onChange={e => { setBudget(e.target.value); setSaved(false); }} /></Field><div className="pw-section-intro"><div><h3>집행 내역</h3><p>집행일과 금액을 기록하면 합계가 자동으로 계산됩니다.</p></div>{expensesEditable && <Button type="button" variant="secondary" onClick={() => { setExpenses(items => [...items, { id: newId('expense'), date: todayFor(w), description: '', amount: 0 }]); setSaved(false); }}><Plus size={15} />집행 추가</Button>}</div><div className="pw-expense-list">{expenses.map((expense, index) => <div className="pw-expense-row" key={expense.id}><Field label={`${index + 1}. 집행일`}><input aria-label={`${index + 1}번 집행일`} type="date" disabled={!expensesEditable} value={expense.date} onChange={e => { setExpenses(items => items.map(item => item.id === expense.id ? { ...item, date: e.target.value } : item)); setSaved(false); }} /></Field><Field label="집행 내용"><input aria-label={`${index + 1}번 집행 내용`} disabled={!expensesEditable} value={expense.description} maxLength={500} placeholder="예: 보고서 인쇄비" onChange={e => { setExpenses(items => items.map(item => item.id === expense.id ? { ...item, description: e.target.value } : item)); setSaved(false); }} /></Field><Field label="금액 (원)"><input aria-label={`${index + 1}번 집행 금액`} type="number" min="0" step="1" disabled={!expensesEditable} value={expense.amount} onChange={e => { setExpenses(items => items.map(item => item.id === expense.id ? { ...item, amount: Number(e.target.value) } : item)); setSaved(false); }} /></Field>{expensesEditable && <button type="button" className="pw-icon-button" aria-label={`${index + 1}번 집행 내역 삭제`} onClick={() => { setExpenses(items => items.filter(item => item.id !== expense.id)); setSaved(false); }}><Trash2 size={17} /></button>}</div>)}</div>{!expenses.length && <div className="pw-inline-empty"><Wallet size={25} /><p>아직 등록된 집행 내역이 없습니다.</p></div>}</div>}
+      {tab === 'budget' && <TaskBudgetSection value={budgetDraft} onChange={value => { setBudgetDraft(value); setSaved(false); }} expenses={expenses} onExpensesChange={items => { setExpenses(items); setSaved(false); }} previousExpenses={task.expenses ?? []} definitionEditable={editable && !busy && !uploadBusy} expensesEditable={expensesEditable && !busy && !uploadBusy} today={todayFor(w)} defaultProjectName={title} serverTime={w.serverTime}/> }
 
       {tab === 'references' && <TaskReferences workspace={w} taskId={task.id} references={references} editable={editable || recordsEditable} documentsOnly={recordsEditable} command={command} onBusyChange={setUploadBusy} onChange={items => { setReferences(items); setSaved(false); }}/>}
       {!historyViewing && ['budget', 'references'].includes(tab) && !!task.recordHistory?.length && <details className="pw-record-history"><summary>수행 기록 변경 이력 · {task.recordHistory.length}건</summary>{[...task.recordHistory].sort((a, b) => b.recordedAt.localeCompare(a.recordedAt)).map(record => <article key={record.id}><strong>{new Date(record.recordedAt).toLocaleString('ko-KR', { timeZone: 'Asia/Seoul' })}</strong><small> · {w.users.find(user => user.id === record.recordedBy)?.name || w.identities?.find(user => user.id === record.recordedBy)?.name || '이전 담당자'}</small><p>집행 합계 {money(record.expensesBefore.reduce((sum, item) => sum + item.amount, 0))}원 → {money(record.expensesAfter.reduce((sum, item) => sum + item.amount, 0))}원</p><p>이전 생산 문서: {record.documentsBefore.map(document => document.title).join(', ') || '없음'}</p><p>변경 후 생산 문서: {record.documentsAfter.map(document => document.title).join(', ') || '없음'}</p></article>)}</details>}
