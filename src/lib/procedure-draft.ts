@@ -82,7 +82,13 @@ export function procedureErrors(steps: WorkflowStep[]): string[] {
   return errors;
 }
 
-/** Merge by identity, preserving every existing step and its completed state. */
+/** A reviewed final draft is one procedure. Execution history is preserved by the server command. */
+export function replaceProcedureDraft(draft: WorkflowStep[]): WorkflowStep[] {
+  const errors = procedureErrors(draft); if (errors.length) throw new Error(errors[0]);
+  return structuredClone(draft).map(step => ({ ...step, done: false }));
+}
+
+/** Legacy merge by identity, preserving every existing step and its completed state. */
 export function applyProcedureDraft(current: WorkflowStep[], draft: WorkflowStep[], mode: 'append' | 'replace', canReplace = false): WorkflowStep[] {
   if (mode === 'replace' && (!canReplace || current.some(step => step.done))) throw new Error('완료한 절차가 없는 개인업무만 전체 교체할 수 있습니다.');
   if (mode === 'replace') {

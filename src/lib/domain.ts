@@ -12,6 +12,7 @@ import { executePersonnelTransfer } from './personnel-handover';
 import { canActAsDeputy } from './delegations';
 import { executeDelegationCommand, prepareTaskDelegation, storeTaskDelegation } from './delegation-commands';
 import { organizationDivisionForUser } from './organization-division';
+import { withReplacedRunProcedure } from './procedure-replacement';
 import { organizationIdentityIssue, organizationUserChangeIssue } from './organization-management';
 import { canCreateCommon, canReviewCommon, commonApprovalSnapshot, commonOriginDepartment, commonPublished } from './common-approval';
 import type { AuditEvent, Command, CommonApprovalRequest, CommonTask, CommonDistribution, DepartmentDivisionReadModel, Handover, PerformanceSubmissionStatus, Run, Source, Task, Unit, User, WorkflowStep, Workspace, WorkspaceData } from './types';
@@ -290,6 +291,9 @@ export function getWorkspace(state: WorkspaceData, userId: string, now = new Dat
     const { snapshot: _snapshot, history: _history, ...metadata } = plan; return metadata;
   });
   const canReadEvaluation = (item: { personId: string; departmentId: string }) => user.role === 'admin' || user.role === 'head' && item.departmentId === user.departmentId || item.personId === user.id;
+  for (const run of runs) for (const history of run.procedureHistory ?? []) {
+    [history.replacedBy, history.primaryId, history.reviewerId, ...history.supportIds, ...history.notes.map(note => note.authorId), ...history.steps.flatMap(step => [step.completedBy, ...step.checklist.map(check => check.completedBy)])].forEach(personId => { if (personId) identityIds.add(personId); });
+  }
   for (const item of [...(state.unitScorePlans ?? []), ...(state.unitEvaluations ?? []), ...state.performances.filter(performance => performance.period).map(performance => ({ personId: performance.authorId, departmentId: performance.departmentId }))].filter(canReadEvaluation)) identityIds.add(item.personId);
   const submissionKeys = new Map<string, { personId: string; departmentId: string; period: string }>();
   for (const item of [...(state.unitScorePlans ?? []), ...(state.unitEvaluations ?? []), ...state.performances.filter(performance => performance.period).map(performance => ({ personId: performance.authorId, departmentId: performance.departmentId, period: performance.period! }))]) {
@@ -513,6 +517,29 @@ export function executeCommand(state: WorkspaceData, userId: string, raw: unknow
         task.expenses = expensesAfter; task.references = references; task.updatedAt = now.toISOString();
       }
       targetId = task.id; departmentId = task.departmentId; title = '업무 수행 기록 저장'; detail = `${task.title} · 집행 ${expensesAfter.length}건 / 생산 문서 ${documentsAfter.length}건 · 업무 기준 유지`; break;
+    }
+    case 'task.procedure.replace': {
+      const input = parse(z.object({ taskId: text, workflow: workflowInput, references: referenceInput.optional(), reason: z.string().trim().min(1).max(2000).default('AI·자료 분석 절차 적용') }).strict(), p);
+      const task = getTask(state, user, input.taskId, now); ensureRegistered(state, task);
+      if (task.primaryId !== user.id && !manageDepartment(user, task.departmentId)) fail(403, 'EDIT_DENIED', '담당자 또는 부서 관리자가 업무 절차를 적용할 수 있습니다.');
+      if (task.status === 'archived') fail(409, 'TASK_ARCHIVED', '보관된 업무의 절차는 변경할 수 없습니다.');
+      const next: Task = { ...task, workflow: input.workflow.map(step => ({ ...step, done: false })), ...(input.references !== undefined ? { references: input.references } : {}), version: Math.max(task.version, ...task.versions.map(version => version.version)) + 1 };
+      detailValidation(next, state); validateWorkflow(next, state);
+      const legacy = !state.runs.some(run => run.taskId === task.id) && task.workflow.some(step => step.done) ? legacyExecution(task, now) : undefined;
+      const activeRuns = [...state.runs.filter(run => run.taskId === task.id && run.status !== 'completed'), ...(legacy && legacy.status !== 'completed' ? [legacy] : [])];
+      // Replacing an undated procedure must not revalidate or rewrite an overdue legacy schedule.
+      // Only newly supplied step dates need to fit the existing occurrence's date range.
+      if (next.workflow.some(step => step.startDate || step.dueDate)) for (const run of activeRuns) validateCycleSchedule(next.workflow, { startDate: run.startDate ?? run.startedAt.slice(0, 10), dueDate: run.dueDate, steps: next.workflow.map(step => ({ stepId: step.id, startDate: step.startDate, dueDate: step.dueDate, scheduleDetails: step.scheduleDetails })) });
+      const replacements = activeRuns.map(run => withReplacedRunProcedure(task, run, next.workflow, next.version, { id: id('procedure-change'), replacedAt: now.toISOString(), replacedBy: user.id, reason: input.reason }));
+      // All permissions, evidence and workflow/schedule checks finish before modifying any record.
+      if (!task.versions.some(version => version.version === task.version)) task.versions.push(snapshot(task, undefined, now.toISOString()));
+      Object.assign(task, next, { updatedAt: now.toISOString() }); task.versions.push(snapshot(task, user.id, now.toISOString()));
+      if (legacy) state.runs.unshift(legacy);
+      for (const replacement of replacements) Object.assign(state.runs.find(run => run.id === replacement.id)!, replacement);
+      invalidateHandoverConfirmations(state, task.id);
+      const distribution = state.commonTasks.find(common => common.id === task.commonId)?.distributions.find(item => item.taskId === task.id);
+      if (distribution) distribution.status = 'registered';
+      targetId = task.id; departmentId = task.departmentId; title = '검토한 최종 절차 적용'; detail = `${task.title} · v${task.version} · ${task.workflow.length}단계 · 이전 수행 절차 ${replacements.length}건 이력 보관 · ${input.reason}`; break;
     }
     case 'task.configure': {
       const task = getTask(state, user, required(p, 'taskId'), now); ensureRegistered(state, task);

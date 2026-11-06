@@ -6,7 +6,8 @@ import type { Frequency, Task, TaskReference, Unit, WorkflowStep, Workspace } fr
 import { Badge, Button, EmptyState, Field, Modal, Progress } from './ui';
 import './personal-work.css';
 import { canEditDepartmentDefinitions, isDepartmentConfirmed } from '@/lib/work-division';
-import { ProcedureBuilder, ProcedureFlow } from './procedure-builder';
+import { ProcedureBuilder } from './procedure-builder';
+import { ProcedureEditor } from './procedure-editor';
 import { WorkCycles } from './work-cycles';
 import { TaskReferences } from './task-references';
 import { TaskPerformance } from './task-performance';
@@ -17,6 +18,8 @@ import { latestTaskRun, taskExecution } from '@/lib/common-status';
 import { activeTaskDelegations, canActAsDeputy } from '@/lib/delegations';
 import { DeputyRequestFields, TaskDelegationSection, deputyPayload, initialDeputyDraft, validDeputyDraft } from './delegation-work';
 import { TaskDescriptionFiles } from './task-description-files';
+import { procedureErrors } from '@/lib/procedure-draft';
+import { taskProcedureParticipants } from '@/lib/procedure-participants';
 
 type CommandFn = (type: string, payload: Record<string, unknown>) => Promise<boolean>;
 type ViewProps = { workspace: Workspace; command: CommandFn; onOpenTask?: (id: string) => void; onWorkspace?: (workspace: Workspace) => void };
@@ -33,7 +36,7 @@ const formatDate = (date?: string) => date ? `${Number(date.slice(5, 7))}.${Numb
 const todayFor = (w: Workspace) => new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Seoul', year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date(w.serverTime));
 const newId = (prefix: string) => `${prefix}-${crypto.randomUUID().slice(0, 8)}`;
 const DELEGATED_UNIT_ID = '__personal_delegated_work__';
-const cleanWorkflow = (steps: PlannedStep[]) => steps.map(step => ({ ...step, startDate: step.startDate || undefined, dueDate: step.dueDate || undefined }));
+const cleanWorkflow = (steps: PlannedStep[]) => steps.map(step => ({ ...step, checklist: step.checklist.map(item => item.trim()).filter(Boolean), startDate: step.startDate || undefined, dueDate: step.dueDate || undefined }));
 const isRegistered = (task: Task, workspace: Workspace) => {
   const distribution = workspace.commonTasks.find(common => common.id === task.commonId)?.distributions.find(item => item.taskId === task.id);
   return !distribution || ['registered', 'submitted', 'assigned'].includes(distribution.status);
@@ -267,6 +270,9 @@ function TaskEditor({ task, workspace: w, command, onClose, onWorkspace, initial
   const [expenses, setExpenses] = useState<Expense[]>(structuredClone(task.expenses || []));
   const [references, setReferences] = useState<Reference[]>(structuredClone(task.references || []));
   const [workflow, setWorkflow] = useState<PlannedStep[]>(structuredClone(task.workflow));
+  const [flowRevision, setFlowRevision] = useState(0);
+  const [drawnWorkflow, setDrawnWorkflow] = useState(JSON.stringify(task.workflow));
+  const [procedureNotice, setProcedureNotice] = useState('');
   const [busy, setBusy] = useState(false);
   const [uploadBusy, setUploadBusy] = useState(false);
   const [message, setMessage] = useState('');
@@ -286,6 +292,8 @@ function TaskEditor({ task, workspace: w, command, onClose, onWorkspace, initial
   const progress = taskProgress(task, w);
   const withoutDone = (steps: PlannedStep[]) => JSON.stringify(cleanWorkflow(steps).map(({ done: _done, ...rest }) => rest));
   const workflowDirty = withoutDone(workflow) !== withoutDone(task.workflow);
+  const participants = taskProcedureParticipants(w, task);
+  const diagramChanged = JSON.stringify(workflow) !== drawnWorkflow;
   const savedReferences = referencesForSave(references);
   const formDirty = workflowDirty || unitId !== task.unitId || title !== task.title || description !== task.description || JSON.stringify(descriptionAttachmentIds) !== JSON.stringify(task.descriptionAttachmentIds ?? []) || dueDate !== task.dueDate || frequency !== task.frequency || budget !== String(task.budget ?? 0) || JSON.stringify(expenses) !== JSON.stringify(task.expenses || []) || JSON.stringify(savedReferences) !== JSON.stringify(task.references || []);
   const draftValues = { unitId, title, description, descriptionAttachmentIds, dueDate, frequency, budget, expenses, references, workflow };
@@ -323,10 +331,32 @@ function TaskEditor({ task, workspace: w, command, onClose, onWorkspace, initial
     previousRunId.current = currentRunId;
     setWorkflow(structuredClone(task.workflow)); setDueDate(task.dueDate); setTitle(task.title); setDescription(task.description); setUnitId(task.unitId); setFrequency(task.frequency); setDescriptionAttachmentIds(task.descriptionAttachmentIds ?? []);
     setBudget(String(task.budget ?? 0)); setExpenses(structuredClone(task.expenses || [])); setReferences(structuredClone(task.references || []));
-    setShowBuilder(false); setHistoryViewing(false); setMessage(''); setSaved(false);
+    setShowBuilder(false); setHistoryViewing(false); setMessage(''); setSaved(false); setProcedureNotice(''); setDrawnWorkflow(JSON.stringify(task.workflow)); setFlowRevision(value => value + 1);
   }, [currentRunId]);
-  const changeStep = (id: string, changes: Partial<PlannedStep>) => { setSaved(false); setWorkflow(items => items.map(item => item.id === id ? { ...item, ...changes } : item)); };
-  const removeStep = (id: string) => { setSaved(false); setWorkflow(items => items.filter(item => item.id !== id).map(item => ({ ...item, dependsOn: item.dependsOn.filter(dependency => dependency !== id) }))); };
+  const changeStep = (id: string, changes: Partial<PlannedStep>) => { setSaved(false); setProcedureNotice(''); setWorkflow(items => items.map(item => item.id === id ? { ...item, ...changes } : item)); };
+  const removeStep = (id: string) => { setSaved(false); setProcedureNotice(''); setWorkflow(items => items.filter(item => item.id !== id).map(item => ({ ...item, dependsOn: item.dependsOn.filter(dependency => dependency !== id) }))); };
+
+  function redrawProcedure() {
+    const errors = procedureErrors(cleanWorkflow(workflow));
+    if (errors.length) { setMessage(errors[0]); return; }
+    setMessage(''); setDrawnWorkflow(JSON.stringify(workflow)); setFlowRevision(value => value + 1);
+    setProcedureNotice('수정한 절차와 수행 주체로 절차도를 다시 그렸습니다. 변경사항 저장을 누르면 수정 내용이 저장됩니다.');
+  }
+
+  async function applyProcedure(steps: WorkflowStep[], addedReferences: TaskReference[]): Promise<boolean> {
+    if (!editable || busy || uploadBusy || formDirty) { setMessage('작성 중인 업무 변경사항을 먼저 저장한 뒤 절차를 적용해 주세요.'); return false; }
+    const nextReferences = referencesForSave([...references.filter(item => !addedReferences.some(added => added.id === item.id)), ...addedReferences]);
+    setMessage(''); setBusy(true);
+    try {
+      if (!await command('task.procedure.replace', { taskId: task.id, workflow: cleanWorkflow(steps), references: nextReferences, reason: '근거 분석 초안 검토 후 절차 교체' })) return false;
+      setWorkflow(steps); setReferences(nextReferences); setSaved(true);
+      setSaveAcknowledgement({ revision: w.revision, draft: { ...draftValues, workflow: steps, references: nextReferences } });
+      setDrawnWorkflow(JSON.stringify(steps)); setFlowRevision(value => value + 1); setShowBuilder(false);
+      setProcedureNotice('새 절차를 저장하고 기존 절차를 교체했습니다. 아래 절차를 수정하거나 일정 등록에서 업무를 이어갈 수 있습니다.');
+      return true;
+    } catch { setMessage('절차를 적용하지 못했습니다. 초안을 유지했으니 연결 상태와 최신 업무를 확인한 뒤 다시 적용해 주세요.'); return false; }
+    finally { setBusy(false); }
+  }
 
   async function save() {
     if (!editable || uploadBusy) return;
@@ -337,6 +367,8 @@ function TaskEditor({ task, workspace: w, command, onClose, onWorkspace, initial
     if (expenses.some(item => !item.date || !item.description.trim() || !Number.isFinite(item.amount) || item.amount < 0)) { setTab('budget'); setMessage('집행일, 집행 내용, 0 이상의 금액을 모두 입력해 주세요.'); return; }
     if (savedReferences.some(item => !item.title.trim() || (!item.content.trim() && !item.attachmentId) || (item.url && !/^https?:\/\//i.test(item.url)))) { setTab('references'); setMessage('근거의 제목과 내용 또는 첨부파일을 입력하고, 링크는 http:// 또는 https://로 시작해 주세요.'); return; }
     if (!workflow.length || workflow.some(step => !step.title.trim() || (step.startDate && step.dueDate && step.startDate > step.dueDate))) { setTab('workflow'); setMessage('각 절차의 이름을 입력하고 종료일을 시작일 이후로 설정해 주세요.'); return; }
+    const workflowErrors = procedureErrors(cleanWorkflow(workflow));
+    if (workflowErrors.length) { setTab('workflow'); setMessage(workflowErrors[0]); return; }
     setBusy(true);
     try { if (await command('task.configure', { taskId: task.id, ...(unitId !== task.unitId ? { unitId } : {}), ...(!task.commonId ? { title, ...(dueDate !== task.dueDate ? { dueDate } : {}), frequency } : {}), description, descriptionAttachmentIds, budget: Number(budget), expenses, references: savedReferences, ...(workflowDirty ? { workflow: cleanWorkflow(workflow) } : {}) })) { setSaved(true); setSaveAcknowledgement({ revision: w.revision, draft: draftValues }); } }
     finally { setBusy(false); }
@@ -368,21 +400,13 @@ function TaskEditor({ task, workspace: w, command, onClose, onWorkspace, initial
       {tab === 'details' && <div className="form-stack"><div className="pw-unit-move"><Field label="소속 단위업무 · 상위 업무 묶음"><select value={unitId} disabled={!editable || task.primaryId !== w.currentUser.id} onChange={e => { setUnitId(e.target.value); setSaved(false); }}>{!ownUnits.some(unit => unit.id === task.unitId) && <option value={task.unitId}>{originalUnit?.title || '기존 연결 단위업무'}{originalUnit?.ownerId !== task.primaryId ? ' · 공유 단위' : ''}</option>}{ownUnits.map(unit => <option key={unit.id} value={unit.id}>{unit.title}</option>)}</select></Field><p><Folder size={13} />{!mayEdit ? '이 세부업무가 속한 단위업무입니다.' : unitId !== task.unitId ? '변경사항을 저장하면 선택한 단위업무 아래로 이동합니다.' : ownUnits.some(unit => unit.id === task.unitId) ? '내 단위업무를 선택해 이 세부업무를 다른 업무 묶음으로 옮길 수 있습니다.' : '공유 단위에 연결된 업무입니다. 내가 만든 단위업무로 옮길 수 있습니다.'}</p>{!ownUnits.length && editable && <p>옮길 단위업무가 없습니다. 개인업무 화면에서 내 단위업무를 먼저 만들어 주세요.</p>}</div>{!task.commonId && <div className="form-grid"><Field label="세부업무 이름" span><input required maxLength={150} value={title} disabled={!editable} onChange={e => { setTitle(e.target.value); setSaved(false); }} /></Field><Field label="업무 마감일"><input required type="date" value={dueDate} disabled={!editable} onChange={e => { setDueDate(e.target.value); setSaved(false); }} /></Field><Field label="반복 주기"><select value={frequency} disabled={!editable} onChange={e => { setFrequency(e.target.value as Frequency); setSaved(false); }}>{Object.entries(frequencyNames).map(([key, label]) => <option key={key} value={key}>{label}</option>)}</select></Field></div>}<div className="pw-facts"><div><span>담당자</span><strong>{w.users.find(user => user.id === task.primaryId)?.name || '배정 대기'}</strong></div><div><span>소속 부서</span><strong>{w.departments.find(dept => dept.id === task.departmentId)?.name || '부서'}</strong></div><div><span>업무대행</span><strong>{deputies.length ? deputies.map(item => w.users.find(user => user.id === item.toId)?.name || '대행자').join(', ') : '현재 대행자 없음'}</strong></div><div><span>수행 주기</span><strong>{frequencyNames[task.frequency]}</strong></div></div><Field label="업무 설명"><textarea rows={7} maxLength={20000} value={description} disabled={!editable} onChange={e => { setDescription(e.target.value); setSaved(false); }} /></Field><TaskDescriptionFiles workspace={w} taskId={task.id} title={title} description={description} attachmentIds={descriptionAttachmentIds} onAttachmentsChange={ids => { setDescriptionAttachmentIds(ids); setSaved(false); }} onDescriptionChange={value => { setDescription(value); setSaved(false); }} onWorkspace={onWorkspace} onBusyChange={setUploadBusy} disabled={!editable || busy}/><TaskDelegationSection workspace={w} command={command} task={task} disabled={formDirty || busy || uploadBusy}/><div className="pw-soft-block"><h3>완료 기준</h3><p>{task.completionCriteria}</p></div>{common && <div className="pw-source-origin"><Inbox size={19} /><div><strong>공통업무에서 이어진 일</strong><p>{common.title}{common.projectName ? ` · ${common.projectName}` : ''}</p>{common.kind === 'directive' && <p>지시자 {common.directiveIssuer ? directiveIssuerLabels[common.directiveIssuer] : '미입력'} · 지시일자 {common.instructedOn || '미입력'} · 완료 전까지 매월 실적 관리</p>}</div></div>}<div className="pw-detail-footnote"><span>업무 기준 v{task.version}</span><span>{new Date(task.updatedAt).toLocaleDateString('ko-KR', { timeZone: 'Asia/Seoul' })} 수정</span></div></div>}
 
       {tab === 'workflow' && <div className="form-stack">
-        <div className="pw-section-intro"><div><h3>근거를 바탕으로 업무 절차 만들기</h3><p>수행 순서와 역할, 결과물을 정하고 일정 등록 탭에서 날짜와 상세 내용을 계획하세요.</p></div>{editable && <Button type="button" variant="secondary" onClick={() => { const last = workflow.at(-1); setWorkflow(items => [...items, { id: newId('step'), title: '', role: 'primary', description: '', output: '업무 결과', required: true, dependsOn: last ? [last.id] : [], checklist: [] }]); setSaved(false); }}><Plus size={15}/>절차 추가</Button>}</div>
-        <div className="pw-procedure-launch"><div><h3>관련 근거 → AI 분석 → 절차도</h3><p>저장한 법령·지침·생산 문서에서 BizRouter AI가 업무 프로세스를 분석합니다. 생성된 역할과 선행 관계는 절차도로 함께 표시됩니다.</p></div><Button variant="secondary" disabled={!editable || formDirty || busy} onClick={() => setShowBuilder(value => !value)}><ListChecks size={16}/>{showBuilder ? '분석 닫기' : 'AI로 절차·절차도 만들기'}</Button></div>
-        {formDirty && <p className="pw-form-note">관련 근거와 업무 내용을 먼저 저장한 뒤 AI 분석을 실행하세요.</p>}
-        {showBuilder && editable && <ProcedureBuilder taskId={task.id} disabled={formDirty || busy} workflow={workflow} references={references} canReplace={!task.commonId && !task.workflow.some(step => step.done)} onApply={(steps, addedReferences) => { setWorkflow(steps); setReferences(items => [...items.filter(item => !addedReferences.some(added => added.id === item.id)), ...addedReferences]); setSaved(false); setShowBuilder(false); setMessage('AI·자료 초안을 적용했습니다. 절차와 근거를 검토한 뒤 변경사항을 저장하고 일정을 등록하세요.'); }}/> }
-        <ProcedureFlow workflow={workflow}/>
-        <div className="pw-workflow-list">{workflow.map((step, index) => {
-          const done = task.workflow.find(item => item.id === step.id)?.done ?? false;
-          const requiredCommon = !!common?.requiredSteps.includes(step.title);
-          const lastReviewer = step.role === 'reviewer' && workflow.filter(item => item.role === 'reviewer').length === 1;
-          return <section className={`pw-step ${done ? 'is-done' : ''}`} key={step.id}>
-            <div className="pw-step-heading"><span className="pw-step-number">{String(index + 1).padStart(2, '0')}</span><div><span>{roleNames[step.role]}</span>{requiredCommon && <Badge tone="outline">공통 필수</Badge>}</div>{editable && !requiredCommon && !lastReviewer && !done && <button type="button" className="pw-icon-button" aria-label={`${step.title || index + 1 + '번'} 절차 삭제`} onClick={() => removeStep(step.id)}><Trash2 size={16}/></button>}</div>
-            <div className="form-grid"><Field label="절차 이름" span><input value={step.title} disabled={!editable || requiredCommon || done} maxLength={150} placeholder="예: 자료 취합 및 검증" onChange={e => changeStep(step.id, { title: e.target.value })}/></Field><Field label="수행 내용과 근거" span><textarea rows={3} maxLength={5000} disabled={!editable || done} value={step.description} onChange={e => changeStep(step.id, { description: e.target.value })}/></Field><Field label="담당 역할"><select disabled={!editable || requiredCommon || lastReviewer || done} value={step.role} onChange={e => changeStep(step.id, { role: e.target.value as WorkflowStep['role'] })}>{Object.entries(roleNames).map(([key, label]) => <option value={key} key={key}>{label}</option>)}</select></Field><Field label="결과물"><input disabled={!editable || done} maxLength={1000} value={step.output} onChange={e => changeStep(step.id, { output: e.target.value })} placeholder="예: 검토 보고서"/></Field></div>
-            <p className="pw-step-dependency"><Link2 size={13}/>{step.dependsOn.length ? step.dependsOn.map(id => workflow.find(item => item.id === id)?.title).filter(Boolean).join(', ') + ' 완료 후 수행' : '시작 절차'}</p>
-          </section>;
-        })}</div><div className="pw-section-intro"><Button type="button" variant="secondary" onClick={() => setTab('schedule')}><CalendarDays size={16}/>일정 등록으로 이동<ArrowRight size={15}/></Button><Button type="button" variant="secondary" onClick={() => setTab('performance')}><Trophy size={16}/>마지막 절차 · 업무 성과 입력<ArrowRight size={15}/></Button></div>
+        <div className="pw-procedure-launch"><div><h3>관련 근거 → AI 분석 → 절차도</h3><p>AI 초안을 검토하고 적용하면 기존 절차를 새 절차 하나로 교체하여 저장합니다.</p></div><Button variant="secondary" disabled={!editable || formDirty || busy} onClick={() => { setShowBuilder(value => !value); setProcedureNotice(''); }}><ListChecks size={16}/>{showBuilder ? '초안 닫기 · 현재 절차 보기' : 'AI로 절차·절차도 만들기'}</Button></div>
+        {formDirty && <p className="pw-form-note">변경사항을 저장한 뒤 새로운 AI 분석을 실행할 수 있습니다.</p>}
+        {procedureNotice && <p className="pw-procedure-notice" role="status"><CheckCircle2 size={17}/>{procedureNotice}</p>}
+        {showBuilder && editable ? <ProcedureBuilder taskId={task.id} disabled={formDirty || busy || uploadBusy} workflow={workflow} references={references} participants={participants} requiredStepTitles={common?.requiredSteps} onApply={applyProcedure}/>
+          : <ProcedureEditor workflow={workflow} originalWorkflow={task.workflow} participants={participants} requiredStepTitles={common?.requiredSteps} editable={editable} busy={busy || uploadBusy} diagramChanged={diagramChanged} redrawKey={flowRevision} onRedraw={redrawProcedure} onChange={changeStep} onRemove={removeStep} onAdd={() => { const last = workflow.at(-1); setWorkflow(items => [...items, { id: newId('step'), title: '', role: 'primary', description: '', output: '업무 결과', required: true, dependsOn: last ? [last.id] : [], checklist: [] }]); setSaved(false); setProcedureNotice(''); }}/>
+        }
+        {!showBuilder && <div className="pw-section-intro"><Button type="button" variant="secondary" onClick={() => setTab('schedule')}><CalendarDays size={16}/>일정 등록으로 이동<ArrowRight size={15}/></Button><Button type="button" variant="secondary" onClick={() => setTab('performance')}><Trophy size={16}/>마지막 절차 · 업무 성과 입력<ArrowRight size={15}/></Button></div>}
       </div>}
 
       {tab === 'schedule' && <><WorkCycles key={currentRunId || task.id} workspace={w} task={task} command={command} dirty={formDirty} onHistoryChange={setHistoryViewing}/>{!historyViewing && <Button type="button" variant="secondary" onClick={() => setTab('performance')}><Trophy size={16}/>업무 성과 입력<ArrowRight size={15}/></Button>}</>}
@@ -398,7 +422,7 @@ function TaskEditor({ task, workspace: w, command, onClose, onWorkspace, initial
 
     </div>
     {message && <p className="pw-form-error" role="alert">{message}</p>}
-    <div className="form-actions pw-editor-actions"><span className="pw-save-state" role="status">{historyViewing ? '지난 회차의 기록을 확인하고 있습니다. 현재 회차에서 업무를 이어갈 수 있습니다.' : tab === 'monthly' ? '월별 실적은 이 탭에서 별도로 저장합니다.' : tab === 'performance' ? '업무 성과는 이 탭에서 저장하고, 성과 · 평가에서 제출합니다.' : saved ? <><CheckCircle2 size={15} />변경사항을 저장했습니다.</> : tab === 'schedule' ? '일정과 수행 기록은 이 탭에서 별도로 저장합니다.' : recordsEditable ? '생산 문서와 집행 내역은 수행 기록 저장을 눌러 반영합니다.' : divisionLocked ? '업무 기준은 잠겨 있습니다. 수행 기록 입력으로 생산 문서·집행 내역을 추가할 수 있습니다.' : !mayEdit ? '업무 담당자가 내용을 수정할 수 있습니다.' : mode === 'view' ? '보기 모드입니다. 수정하기를 눌러 내용을 변경하세요.' : '변경한 내용은 저장 후 반영됩니다.'}</span><Button type="button" variant="secondary" onClick={onClose}>닫기</Button>{recordsEditable && (['references', 'budget'].includes(tab) || formDirty) && <Button type="button" disabled={busy || uploadBusy || !formDirty} onClick={saveRecords}>{busy ? '저장 중…' : '수행 기록 저장'}</Button>}{editable && (!['schedule', 'performance', 'monthly'].includes(tab) || formDirty) && <Button type="button" disabled={busy || uploadBusy} onClick={save}>{busy ? '저장 중…' : '변경사항 저장'}</Button>}</div>
+    <div className="form-actions pw-editor-actions"><span className="pw-save-state" role="status">{historyViewing ? '지난 회차의 기록을 확인하고 있습니다. 현재 회차에서 업무를 이어갈 수 있습니다.' : tab === 'monthly' ? '월별 실적은 이 탭에서 별도로 저장합니다.' : tab === 'performance' ? '업무 성과는 이 탭에서 저장하고, 성과 · 평가에서 제출합니다.' : saved ? <><CheckCircle2 size={15} />변경사항을 저장했습니다.</> : tab === 'schedule' ? '일정과 수행 기록은 이 탭에서 별도로 저장합니다.' : recordsEditable ? '생산 문서와 집행 내역은 수행 기록 저장을 눌러 반영합니다.' : divisionLocked ? '업무 기준은 잠겨 있습니다. 수행 기록 입력으로 생산 문서·집행 내역을 추가할 수 있습니다.' : !mayEdit ? '업무 담당자가 내용을 수정할 수 있습니다.' : mode === 'view' ? '보기 모드입니다. 수정하기를 눌러 내용을 변경하세요.' : '변경한 내용은 저장 후 반영됩니다.'}</span><Button type="button" variant="secondary" onClick={onClose}>닫기</Button>{recordsEditable && (['references', 'budget'].includes(tab) || formDirty) && <Button type="button" disabled={busy || uploadBusy || !formDirty} onClick={saveRecords}>{busy ? '저장 중…' : '수행 기록 저장'}</Button>}{editable && (!['schedule', 'performance', 'monthly'].includes(tab) || formDirty) && <Button type="button" disabled={busy || uploadBusy || (tab === 'workflow' && showBuilder)} onClick={save}>{busy ? '저장 중…' : '변경사항 저장'}</Button>}</div>
   </Modal>;
 }
 
