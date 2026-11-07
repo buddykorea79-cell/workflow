@@ -11,15 +11,14 @@ import { nextCycleWorkflow, runWorkflow, taskCycleState } from '@/lib/work-cycle
 import { taskProcedureParticipants } from '@/lib/procedure-participants';
 import { Badge, Button, Field, Progress, type CommandFn } from './ui';
 import { ProcedureFlow } from './procedure-builder';
+import { TaskFileAttachments } from './task-file-attachments';
 import './work-cycles.css';
 
 const roleNames: Record<WorkflowStep['role'], string> = { primary: '담당자 수행', support: '협업·지원', reviewer: '검토·승인' };
 const statusNames: Record<Run['status'], string> = { scheduled: '시작 전', in_progress: '진행 중', review: '검토 대기', completed: '완료', paused: '일시 중지' };
 const displayDate = (value?: string) => value ? value.slice(0, 10).replaceAll('-', '.') : '미지정';
 const displayTime = (value?: string) => value ? new Date(value).toLocaleString('ko-KR', { timeZone: 'Asia/Seoul', year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' }) : '기록 없음';
-const todayFor = (w: Workspace) => new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Seoul', year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date(w.serverTime));
 const dayValue = (value: string) => Date.parse(`${value}T00:00:00Z`);
-const dayOffset = (value: string, days: number) => new Date(dayValue(value) + days * 86_400_000).toISOString().slice(0, 10);
 const validDate = (value: string) => /^\d{4}-\d{2}-\d{2}$/.test(value) && Number.isFinite(dayValue(value)) && new Date(dayValue(value)).toISOString().slice(0, 10) === value;
 const nameOf = (w: Workspace, id?: string) => w.users.find(user => user.id === id)?.name || w.identities?.find(user => user.id === id)?.name || '담당자 기록 없음';
 
@@ -72,43 +71,28 @@ function CycleScheduleForm({ workspace: w, task, latest, cycleNumber, mode, comm
   const isNext = mode === 'next';
   const workflow = isNext ? nextCycleWorkflow(task) : latest ? runWorkflow(task, latest) : task.workflow;
   const participants = taskProcedureParticipants(w, isNext ? task : latest || task);
-  const priorWorkflow = latest ? runWorkflow(task, latest) : task.workflow;
-  const priorDates = priorWorkflow.flatMap(step => [step.startDate, step.dueDate]).filter((value): value is string => !!value && validDate(value)).sort();
-  const previousStart = latest?.startDate || priorDates[0] || latest?.dueDate || task.dueDate;
-  const previousEnd = latest?.dueDate || priorDates.at(-1) || task.dueDate;
-  const defaultStart = isNext ? dayOffset([todayFor(w), previousEnd].sort().at(-1)!, 1) : latest?.startDate || priorDates[0] || [todayFor(w), previousEnd].sort()[0];
-  const duration = Math.max(1, Math.round((dayValue(previousEnd) - dayValue(previousStart)) / 86_400_000));
-  const initialShift = Math.round((dayValue(defaultStart) - dayValue(previousStart)) / 86_400_000);
-  const [title, setTitle] = useState((isNext ? `${task.title} · ${cycleNumber}회차` : latest?.title || `${task.title} · ${cycleNumber}회차`).slice(0, 150));
-  const [startDate, setStartDate] = useState(defaultStart);
-  const [dueDate, setDueDate] = useState(isNext ? dayOffset(defaultStart, duration) : previousEnd);
+  const title = (isNext ? `${task.title} · ${cycleNumber}회차` : latest?.title || `${task.title} · ${cycleNumber}회차`).slice(0, 150);
   const [scheduleDetails, setScheduleDetails] = useState(isNext ? '' : latest?.scheduleDetails || '');
-  const [steps, setSteps] = useState(() => workflow.map(step => {
-    const prior = priorWorkflow.find(item => item.id === step.id);
-    return { stepId: step.id, startDate: prior?.startDate && validDate(prior.startDate) ? isNext ? dayOffset(prior.startDate, initialShift) : prior.startDate : '', dueDate: prior?.dueDate && validDate(prior.dueDate) ? isNext ? dayOffset(prior.dueDate, initialShift) : prior.dueDate : '', scheduleDetails: isNext ? '' : prior?.scheduleDetails || '' };
-  }));
+  const [steps, setSteps] = useState(() => workflow.map(step => ({ stepId: step.id, startDate: !isNext && step.startDate && validDate(step.startDate) ? step.startDate : '', dueDate: !isNext && step.dueDate && validDate(step.dueDate) ? step.dueDate : '', scheduleDetails: isNext ? '' : step.scheduleDetails || '' })));
+  const dates = steps.flatMap(step => [step.startDate, step.dueDate]).filter(validDate).sort();
+  const startDate = dates[0] || '';
+  const dueDate = dates.at(-1) || '';
+  const scheduledCount = steps.filter(step => step.startDate || step.dueDate).length;
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
   const common = w.commonTasks.find(item => item.id === task.commonId);
   const reportingRun = isNext && common && validDate(startDate) ? { period: currentPeriod(common.frequency, new Date(`${startDate}T12:00:00+09:00`)) } : latest;
   const deadline = common ? commonDeadline(common, reportingRun) : undefined;
-  const updateStart = (value: string) => {
-    if (validDate(startDate) && validDate(value)) {
-      const shift = Math.round((dayValue(value) - dayValue(startDate)) / 86_400_000);
-      if (validDate(dueDate)) setDueDate(dayOffset(dueDate, shift));
-      setSteps(items => items.map(item => ({ ...item, startDate: item.startDate ? dayOffset(item.startDate, shift) : '', dueDate: item.dueDate ? dayOffset(item.dueDate, shift) : '' })));
-    }
-    setStartDate(value); setError('');
-  };
   function validate() {
-    if (!title.trim()) return '회차 이름을 입력해 주세요.';
-    if (!validDate(startDate) || !validDate(dueDate) || startDate > dueDate) return '회차 시작일과 종료일을 올바르게 입력해 주세요.';
+    if (!workflow.length) return '절차를 먼저 만들고 저장해 주세요.';
+    if (!dates.length) return '일정을 등록할 절차에 시작일 또는 종료일을 입력해 주세요.';
     for (const step of steps) {
       const name = workflow.find(item => item.id === step.stepId)?.title || '절차';
-      if ([step.startDate, step.dueDate].some(value => value && (!validDate(value) || value < startDate || value > dueDate))) return `‘${name}’의 일정은 회차 시작일과 종료일 사이로 입력해 주세요.`;
+      if ([step.startDate, step.dueDate].some(value => value && !validDate(value))) return `‘${name}’의 날짜를 올바르게 입력해 주세요.`;
       if (step.startDate && step.dueDate && step.startDate > step.dueDate) return `‘${name}’의 종료일은 시작일 이후여야 합니다.`;
       const dependencies = workflow.find(item => item.id === step.stepId)?.dependsOn || [];
-      if (dependencies.some(id => { const prior = steps.find(item => item.stepId === id); return prior?.dueDate && step.startDate && prior.dueDate > step.startDate; })) return `‘${name}’은 선행 절차가 끝난 뒤 시작하도록 일정을 설정해 주세요.`;
+      const effectiveStart = step.startDate || step.dueDate;
+      if (effectiveStart && dependencies.some(id => { const prior = steps.find(item => item.stepId === id); const priorEnd = prior?.dueDate || prior?.startDate; return priorEnd && priorEnd > effectiveStart; })) return `‘${name}’은 선행 절차가 끝난 뒤 시작하도록 일정을 설정해 주세요.`;
     }
     return '';
   }
@@ -120,15 +104,15 @@ function CycleScheduleForm({ workspace: w, task, latest, cycleNumber, mode, comm
       if (saved) onClose(); else setError('일정을 저장하지 못했습니다. 표시된 안내와 현재 회차 상태를 확인해 주세요.');
     } catch (cause) { setError(cause instanceof Error ? cause.message : '일정을 저장하지 못했습니다.'); } finally { setSaving(false); }
   }}>
-    <div className="wc-form-heading"><div><span>{isNext ? '새로운 업무 사이클' : '이번 업무 사이클'}</span><h3>{cycleNumber}회차 일정 등록</h3></div><button type="button" className="icon-btn" aria-label="일정 등록 닫기" disabled={saving} onClick={onClose}><X size={18} /></button></div>
-    <p className="wc-form-description">{isNext ? '등록된 절차를 새 일정에 적용합니다. 완료 표시·체크리스트·결과물은 새로 시작하며 지난 회차의 기록은 보존합니다.' : '만들어진 절차별로 날짜와 이번 회차에서 수행할 세부 내용을 입력하세요. 저장한 날짜는 전체 일정에도 표시됩니다.'}</p>
+    <div className="wc-form-heading"><div><span>{cycleNumber}회차 · 저장된 절차 {workflow.length}개</span><h3>절차별 일정 {isNext ? '등록' : '설정'}</h3></div><button type="button" className="icon-btn" aria-label="일정 등록 닫기" disabled={saving} onClick={onClose}><X size={18} /></button></div>
+    <p className="wc-form-description">절차별로 날짜만 정해 주세요. 전체 기간은 입력한 날짜에 맞춰 자동으로 정해집니다.{isNext && ' 지난 회차의 완료 기록은 그대로 보관됩니다.'}</p>
     {deadline && <p className={validDate(dueDate) && dueDate > deadline ? "wc-warning" : "wc-note"} role="status">중앙 제출기한: {deadline}. {validDate(dueDate) && dueDate > deadline ? "내부 종료일이 중앙 제출기한을 넘습니다. 저장해도 제출기한은 연장되지 않고 중앙 기준으로 지연 표시됩니다." : "회차 일정을 수정해도 중앙 제출기한은 유지됩니다."}</p>}
     <fieldset disabled={saving || disabled} className="wc-form-fields">
-    <div className="form-grid"><Field label="회차 이름" span><input required maxLength={150} value={title} onChange={event => setTitle(event.target.value)} /></Field><Field label="회차 시작일"><input type="date" required value={startDate} onChange={event => updateStart(event.target.value)} /></Field><Field label="회차 종료일"><input type="date" required min={startDate || undefined} value={dueDate} onChange={event => { setDueDate(event.target.value); setError(''); }} /></Field><Field label="이번 회차 세부 내용" span><textarea rows={3} maxLength={5000} value={scheduleDetails} placeholder="이번 회차의 목표, 대상, 제출 일정 등을 입력하세요." onChange={event => setScheduleDetails(event.target.value)} /></Field></div>
-    <p className="wc-note"><CalendarDays size={14} />시작일을 바꾸면 이전 절차의 일정 간격을 유지해 함께 옮깁니다. 각 날짜를 개별 조정할 수 있습니다.</p>
-    <div className="wc-date-steps">{workflow.map((step, index) => { const dates = steps.find(item => item.stepId === step.id)!; return <section key={step.id}><div><span>{String(index + 1).padStart(2, '0')}</span><div><h4>{step.title}</h4><small>{roleNames[step.role]} · {participants[step.role]}{step.dependsOn.length > 0 && ` · 선행: ${step.dependsOn.map(id => workflow.find(item => item.id === id)?.title).filter(Boolean).join(', ')}`}</small></div></div>{step.description && <p className="wc-step-description">{step.description}</p>}<div className="form-grid"><Field label={`${step.title} 시작일`}><input type="date" min={startDate || undefined} max={dueDate || undefined} value={dates.startDate} onChange={event => { setSteps(items => items.map(item => item.stepId === step.id ? { ...item, startDate: event.target.value } : item)); setError(''); }} /></Field><Field label={`${step.title} 종료일`}><input type="date" min={dates.startDate || startDate || undefined} max={dueDate || undefined} value={dates.dueDate} onChange={event => { setSteps(items => items.map(item => item.stepId === step.id ? { ...item, dueDate: event.target.value } : item)); setError(''); }} /></Field><Field label={`${step.title} 세부 내용`} span><textarea rows={3} maxLength={5000} value={dates.scheduleDetails} placeholder="담당 업무, 준비 자료, 회의 장소, 제출 방법 등을 입력하세요." onChange={event => setSteps(items => items.map(item => item.stepId === step.id ? { ...item, scheduleDetails: event.target.value } : item))} /></Field></div></section>; })}</div>
+    <div className="wc-schedule-summary" aria-live="polite"><CalendarDays size={19}/><div><span>전체 일정</span><strong>{dates.length ? `${displayDate(startDate)} — ${displayDate(dueDate)}` : '절차의 날짜를 입력해 주세요'}</strong></div><span>{scheduledCount} / {workflow.length}개 설정</span></div>
+    <div className="wc-date-steps">{workflow.map((step, index) => { const stepDates = steps.find(item => item.stepId === step.id)!; return <section key={step.id} aria-label={`${index + 1}. ${step.title} 일정`}><div><span>{String(index + 1).padStart(2, '0')}</span><div><h4>{step.title}</h4><small><UserRound size={13}/>{participants[step.role]}</small></div></div><div className="wc-procedure-dates"><Field label="시작일"><input aria-label={`${step.title} 시작일`} type="date" value={stepDates.startDate} onChange={event => { setSteps(items => items.map(item => item.stepId === step.id ? { ...item, startDate: event.target.value } : item)); setError(''); }} /></Field><span aria-hidden="true">—</span><Field label="종료일"><input aria-label={`${step.title} 종료일`} type="date" min={stepDates.startDate || undefined} value={stepDates.dueDate} onChange={event => { setSteps(items => items.map(item => item.stepId === step.id ? { ...item, dueDate: event.target.value } : item)); setError(''); }} /></Field></div>{step.dependsOn.length > 0 && <p className="wc-step-dependencies"><ArrowRight size={13}/>{step.dependsOn.map(id => workflow.find(item => item.id === id)?.title).filter(Boolean).join(', ')} 완료 후 시작</p>}<details className="wc-schedule-extra"><summary><span>진행 방법 · 일정 메모{stepDates.scheduleDetails ? ' 있음' : ' (선택)'}</span><ChevronDown size={15}/></summary>{step.description && <p className="wc-step-description">{step.description}</p>}<Field label="일정 메모"><textarea aria-label={`${step.title} 일정 메모`} rows={2} maxLength={5000} value={stepDates.scheduleDetails} placeholder="이번 일정에 필요한 장소, 준비 사항 등을 적어 주세요." onChange={event => setSteps(items => items.map(item => item.stepId === step.id ? { ...item, scheduleDetails: event.target.value } : item))} /></Field></details></section>; })}</div>
+    <details className="wc-schedule-extra wc-cycle-memo"><summary><span>전체 일정 메모{scheduleDetails ? ' 있음' : ' (선택)'}</span><ChevronDown size={15}/></summary><Field label="전체 일정 메모"><textarea rows={2} maxLength={5000} value={scheduleDetails} placeholder="전체 절차에 공통으로 적용할 안내가 있으면 적어 주세요." onChange={event => setScheduleDetails(event.target.value)}/></Field></details>
     </fieldset>
-    <p className="wc-note">날짜를 비워 둔 절차는 일정 미정으로 시작합니다. 이전 회차의 날짜가 자동으로 남지 않습니다.</p>
+    <p className="wc-note">날짜가 정해진 절차부터 등록할 수 있습니다. 비워 둔 절차는 ‘일정 미정’으로 표시됩니다.</p>
     {error && <p role="alert" className="wc-error">{error}</p>}
     <div className="form-actions"><Button variant="secondary" disabled={saving} onClick={onClose}>취소</Button><Button type="submit" disabled={saving || disabled || !workflow.length}><CalendarDays size={15} />{saving ? '일정 저장 중…' : isNext ? '새 일정으로 회차 시작' : '일정 저장'}</Button></div>
   </form>;
@@ -157,7 +141,7 @@ function CurrentCycleSteps({ workspace: w, task, run, command, disabled }: { wor
     <div className="wc-current-heading"><div><h3>일정에 따라 한 단계씩</h3><p>수행 내용을 확인하고 체크리스트와 결과를 기록하세요.</p></div><Badge tone="outline">{workflow.filter(step => done(step.id)).length} / {workflow.length} 완료</Badge></div>
     {!run && <p className="wc-note">일정을 등록하면 이번 회차의 체크리스트와 수행 결과를 함께 기록할 수 있습니다.</p>}
     {run?.status === 'paused' && <p className="wc-warning">일시 중지된 회차입니다. 현재 수행 상태를 변경할 수 없습니다.</p>}
-    <ProcedureFlow workflow={workflow} participants={participants}/>
+    <CollapsedProcedureFlow workflow={workflow} participants={participants}/>
     <div className="wc-history-steps wc-execution-steps">{workflow.map((step, index) => {
       const execution = run?.steps.find(item => item.stepId === step.id);
       const completed = done(step.id);
@@ -169,6 +153,7 @@ function CurrentCycleSteps({ workspace: w, task, run, command, disabled }: { wor
         <header><span className={completed ? 'wc-step-number done' : 'wc-step-number'}>{completed ? <Check size={16} /> : String(index + 1).padStart(2, '0')}</span><div><span>{roleNames[step.role]}</span><h4>{step.title}</h4><p className="wc-step-participant"><UserRound size={14}/>{participants[step.role]}</p></div><Badge tone={completed ? 'success' : ready ? 'info' : 'soft'}>{completed ? '완료' : ready ? '수행 가능' : '선행 절차 대기'}</Badge></header>
         <div className="wc-step-times"><span><CalendarDays size={14} />{step.startDate || step.dueDate ? `${displayDate(step.startDate)} — ${displayDate(step.dueDate)}` : '일정 미정'}</span>{completed && execution?.completedAt && <span><UserRound size={14} />{nameOf(w, execution.completedBy)} · {displayTime(execution.completedAt)}</span>}</div>
         {step.description && <p className="wc-step-description">{step.description}</p>}
+        <TaskFileAttachments workspace={w} taskId={task.id} attachmentIds={step.attachmentIds || []} label="절차 참고 파일"/>
         {step.scheduleDetails && <div className="wc-schedule-details"><strong>이번 일정의 세부 내용</strong><p>{step.scheduleDetails}</p></div>}
         {step.dependsOn.length > 0 && <p className="wc-step-dependencies"><ArrowRight size={13} />{step.dependsOn.map(id => workflow.find(item => item.id === id)?.title).filter(Boolean).join(', ')} 완료 후 수행</p>}
         {!!execution?.checklist.length && <div className="wc-execution-checklist" aria-label={`${step.title} 체크리스트`}>{execution.checklist.map(item => <label key={item.id}><input type="checkbox" checked={item.done} disabled={locked || completed || !ready || !mayCheck} onChange={event => void perform('run.check', { runId: run!.id, stepId: step.id, checkId: item.id, done: event.target.checked }, step.id)} /><span>{item.title}</span></label>)}</div>}
@@ -194,13 +179,14 @@ function CycleHistory({ workspace: w, task, run, number }: { workspace: Workspac
     <p className="wc-readonly"><LockKeyhole size={15} />지난 회차의 절차·일정·수행 결과입니다. 현재 회차를 수정해도 이 기록은 바뀌지 않습니다.</p>
     {run.scheduleDetails && <div className="wc-schedule-details"><strong>회차 세부 내용</strong><p>{run.scheduleDetails}</p></div>}
     {!run.workflowSnapshot && <p className="wc-note">이전 버전의 회차는 연결된 업무 기준과 남아 있는 수행 기록으로 표시합니다. 기록되지 않은 날짜·완료자는 미지정으로 표시합니다.</p>}
-    <ProcedureFlow workflow={workflow} participants={participants}/>
+    <CollapsedProcedureFlow workflow={workflow} participants={participants}/>
     <div className="wc-history-steps">{workflow.map((step, index) => {
       const execution = run.steps.find(item => item.stepId === step.id);
       const done = execution?.status === 'completed';
       return <article key={step.id}><header><span className={done ? 'wc-step-number done' : 'wc-step-number'}>{done ? <Check size={16} /> : String(index + 1).padStart(2, '0')}</span><div><span>{roleNames[step.role]}</span><h4>{step.title}</h4><p className="wc-step-participant"><UserRound size={14}/>{participants[step.role]}</p></div><Badge tone={done ? 'success' : 'soft'}>{done ? '완료' : execution?.status === 'in_progress' ? '진행 중' : '대기'}</Badge></header>
         <div className="wc-step-times"><span><CalendarDays size={14} />{step.startDate || step.dueDate ? `${displayDate(step.startDate)} — ${displayDate(step.dueDate)}` : '절차 일정 미지정'}</span>{done && <span><UserRound size={14} />{nameOf(w, execution?.completedBy)} · {displayTime(execution?.completedAt)}</span>}</div>
         {step.description && <p className="wc-step-description">{step.description}</p>}
+        <TaskFileAttachments workspace={w} taskId={task.id} attachmentIds={step.attachmentIds || []} label="절차 참고 파일"/>
         {step.scheduleDetails && <div className="wc-schedule-details"><strong>일정 세부 내용</strong><p>{step.scheduleDetails}</p></div>}
         {step.dependsOn.length > 0 && <p className="wc-step-dependencies"><ArrowRight size={13} />{step.dependsOn.map(id => workflow.find(item => item.id === id)?.title).filter(Boolean).join(', ')} 완료 후 수행</p>}
         {!!execution?.checklist.length && <ul className="wc-checklist" aria-label={`${step.title} 체크리스트`}>{execution.checklist.map(item => <li key={item.id}><span className={item.done ? 'checked' : ''}>{item.done ? <Check size={12} /> : null}</span><div><strong>{item.title}</strong>{item.done && <small>{nameOf(w, item.completedBy)} · {displayTime(item.completedAt)}</small>}</div></li>)}</ul>}
@@ -234,13 +220,14 @@ function ProcedureRevisionEntry({ workspace: w, task, run, entry }: { workspace:
       <div className="wc-procedure-reason"><strong>교체 사유</strong><p>{entry.reason || '사유 기록 없음'}</p></div>
       <div className="wc-history-meta"><div><span>당시 회차 상태</span><strong>{statusNames[entry.status]}</strong></div><div><span>당시 회차 일정</span><strong>{entry.startDate ? `${displayDate(entry.startDate)} — ` : ''}{displayDate(entry.dueDate)}</strong></div><div><span>당시 업무 담당자</span><strong>{participants.primary}</strong></div><div><span>당시 지원 담당자</span><strong>{participants.support}</strong></div><div><span>당시 검토자</span><strong>{participants.reviewer}</strong></div>{entry.completedAt && <div><span>완료 시각</span><strong>{displayTime(entry.completedAt)}</strong></div>}</div>
       {entry.scheduleDetails && <div className="wc-schedule-details"><strong>당시 회차 세부 내용</strong><p>{entry.scheduleDetails}</p></div>}
-      <ProcedureFlow workflow={workflow} participants={participants}/>
+      <CollapsedProcedureFlow workflow={workflow} participants={participants}/>
       <div className="wc-history-steps">{workflow.map((step, index) => {
         const execution = entry.steps.find(item => item.stepId === step.id);
         const done = execution?.status === 'completed';
         return <article key={step.id}><header><span className={done ? 'wc-step-number done' : 'wc-step-number'}>{done ? <Check size={16}/> : String(index + 1).padStart(2, '0')}</span><div><span>{roleNames[step.role]}</span><h4>{step.title}</h4><p className="wc-step-participant"><UserRound size={14}/>{participants[step.role]}</p></div><Badge tone={done ? 'success' : 'soft'}>{done ? '완료' : execution?.status === 'in_progress' ? '진행 중' : '대기'}</Badge></header>
           <div className="wc-step-times"><span><CalendarDays size={14}/>{step.startDate || step.dueDate ? `${displayDate(step.startDate)} — ${displayDate(step.dueDate)}` : '절차 일정 미지정'}</span>{done && <span><UserRound size={14}/>{nameOf(w, execution?.completedBy)} · {displayTime(execution?.completedAt)}</span>}</div>
           {step.description && <p className="wc-step-description">{step.description}</p>}
+          <TaskFileAttachments workspace={w} taskId={task.id} attachmentIds={step.attachmentIds || []} label="절차 참고 파일"/>
           {step.scheduleDetails && <div className="wc-schedule-details"><strong>당시 일정의 세부 내용</strong><p>{step.scheduleDetails}</p></div>}
           {!!step.dependsOn.length && <p className="wc-step-dependencies"><ArrowRight size={13}/>{step.dependsOn.map(id => workflow.find(item => item.id === id)?.title).filter(Boolean).join(', ')} 완료 후 수행</p>}
           {!!execution?.checklist.length && <ul className="wc-checklist">{execution.checklist.map(item => <li key={item.id}><span className={item.done ? 'checked' : ''}>{item.done ? <Check size={12}/> : null}</span><div><strong>{item.title}</strong>{item.done && <small>{nameOf(w, item.completedBy)} · {displayTime(item.completedAt)}</small>}</div></li>)}</ul>}
@@ -250,4 +237,9 @@ function ProcedureRevisionEntry({ workspace: w, task, run, entry }: { workspace:
       {!!entry.notes.length && <div className="wc-history-notes"><h4><FileText size={16}/>당시 회차 메모</h4>{entry.notes.map(note => <article key={note.id}><header><strong>{nameOf(w, note.authorId)}</strong><time>{displayTime(note.createdAt)}</time></header>{note.stepId && <small>{workflow.find(step => step.id === note.stepId)?.title || '연결된 절차'}</small>}<p>{note.body}</p></article>)}</div>}
     </div>}
   </details>;
+}
+
+function CollapsedProcedureFlow({ workflow, participants }: { workflow: WorkflowStep[]; participants: ReturnType<typeof taskProcedureParticipants> }) {
+  const [open, setOpen] = useState(false);
+  return <details className="wc-flow-disclosure" onToggle={event => setOpen(event.currentTarget.open)}><summary><span>전체 절차 흐름 보기</span><ChevronDown size={15}/></summary>{open && <ProcedureFlow workflow={workflow} participants={participants}/>}</details>;
 }

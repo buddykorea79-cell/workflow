@@ -1,0 +1,29 @@
+.pe-editor{display:flex;flex-direction:column;gap:20px;min-width:0}
+.pe-editor .pw-section-intro{align-items:flex-start}.pe-editor .pw-section-intro h3 span{font-size:15px;font-weight:450}
+.pe-steps{display:flex;flex-direction:column;gap:18px}
+.pe-step{border:1px solid #e1e7ee;border-radius:16px;padding:22px;background:#fff;min-width:0}
+.pe-step.is-done{background:#fcfdfd}
+.pe-step-heading{display:flex;align-items:center;gap:10px;margin-bottom:20px;min-width:0}
+.pe-step-heading h4{font-size:16px;line-height:1.6;font-weight:650;margin:0;flex:1;min-width:0;overflow-wrap:anywhere}
+.pe-step-heading .badge{font-size:12px;white-space:nowrap}
+.pe-step-number{display:grid;place-items:center;flex-shrink:0;width:29px;height:29px;border-radius:9px;background:#edf3fd;color:#315a94;font-size:13px;font-weight:650;font-variant-numeric:tabular-nums}
+.pe-step.is-done .pe-step-number{background:#edf6ef;color:#2b6b48}
+.pe-essential-fields{display:grid;grid-template-columns:minmax(190px,1fr) minmax(0,1.8fr);gap:16px}
+.pe-essential-fields .field>span{font-size:14px;font-weight:600;color:#334962}
+.pe-essential-fields textarea{line-height:1.8;resize:vertical;min-height:88px}
+.pe-essential-fields select,.pe-essential-fields input{min-width:0;width:100%;font-size:15px}
+.pe-essential-readonly,.pe-extra-readonly{display:grid;gap:14px;margin:0}
+.pe-essential-readonly>div,.pe-extra-readonly>div{display:grid;grid-template-columns:58px minmax(0,1fr);gap:16px;font-size:15px;line-height:1.85}
+.pe-essential-readonly dt,.pe-extra-readonly dt{color:#6b7a8d;font-size:14px}
+.pe-essential-readonly dd,.pe-extra-readonly dd{margin:0;color:#334962;white-space:pre-wrap;overflow-wrap:anywhere}
+.pe-essential-readonly dd small{margin-left:10px;color:#6b7a8d;font-size:13px}
+.pe-extra-readonly ul{margin:0;padding-left:18px}
+.pe-disclosure>summary{display:flex;align-items:center;gap:8px;cursor:pointer;list-style:none;font-size:14px;color:#536880;line-height:1.7}
+.pe-disclosure>summary::-webkit-details-marker{display:none}.pe-disclosure>summary::after{content:'+';margin-left:auto;font-size:19px;font-weight:400}.pe-disclosure[open]>summary::after{content:'−'}
+.pe-disclosure>summary small{font-size:12px;color:#7a899b;margin-left:3px}.pe-disclosure>summary:focus-visible{outline:2px solid #376cb8;outline-offset:5px;border-radius:4px}
+.pe-diagram{border:1px solid #e8edf3;border-radius:12px;background:#f9fbfd}.pe-diagram>summary{padding:13px 17px}.pe-diagram-body{padding:0 15px 15px}.pe-diagram-actions{display:flex;gap:12px;align-items:center;justify-content:space-between;margin:5px 0 12px}.pe-diagram-actions p{font-size:13px;line-height:1.7;color:#6a7c91;margin:0}.pe-diagram-actions .btn{font-size:13px;min-height:33px;flex-shrink:0}
+.pe-step .task-files{margin-top:18px}
+.pe-options{border-top:1px solid #edf0f4;margin-top:18px;padding-top:13px}.pe-options-body{display:grid;gap:15px;padding-top:18px}.pe-options-body .pw-step-predecessors{margin:0}.pe-options-body .pw-step-required{margin:0}.pe-order-hint{display:flex;align-items:flex-start;gap:7px;font-size:13px;line-height:1.7;color:#62778d;margin:0}.pe-order-hint svg{flex-shrink:0;margin-top:4px}.pe-add-step{align-self:center;min-width:150px}
+.pw-task-route{display:flex;gap:12px;align-items:center;justify-content:space-between;padding:18px 20px;border-radius:13px;background:#f5f8fc}.pw-task-route p{margin:0;font-size:14px;line-height:1.7;color:#62758d}.pw-task-route .btn{flex-shrink:0;font-size:14px}
+.pw-procedure-helper{border:1px solid #e7ecf3;border-radius:13px;padding:16px 18px}.pw-procedure-helper>div{display:flex;align-items:center;justify-content:space-between;gap:18px}.pw-procedure-helper h3{font-size:14px;font-weight:600;margin:0 0 5px;color:#405774}.pw-procedure-helper p{font-size:13px;color:#6b7e95;line-height:1.7;margin:0}.pw-procedure-helper .btn{flex-shrink:0;font-size:13px;min-height:36px}
+@media(max-width:760px){.pe-step{padding:17px}.pe-essential-fields{grid-template-columns:minmax(0,1fr)}.pe-step-heading{gap:8px;flex-wrap:wrap}.pe-step-heading h4{font-size:15px}.pe-disclosure>summary small{display:none}.pe-essential-readonly>div,.pe-extra-readonly>div{grid-template-columns:45px minmax(0,1fr);gap:10px}.pw-procedure-helper>div,.pw-task-route{flex-direction:column;align-items:stretch}.pe-editor .pw-section-intro{flex-wrap:wrap}.pe-editor .pw-section-intro>.btn{width:auto}.pe-diagram-actions{align-items:flex-start}.pe-step-heading .pw-icon-button{width:30px;height:30px}}

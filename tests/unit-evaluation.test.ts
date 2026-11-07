@@ -246,15 +246,15 @@ test('unit submission: explicit submission locks drafts and weights, withdrawal 
   assert.equal(getUnitEvaluation(state, personId, period)?.performanceSnapshot[0].description, '수정된 최종 성과');
 });
 
-test('unit submission: ownership, plan version, missing evidence and invalid saved plans are rejected atomically', () => {
+test('unit submission: ownership, plan version, missing content and invalid saved plans are rejected atomically', () => {
   const state = createSeed(now); state.performances = []; setPlan(state);
   rejects('PERFORMANCE_DENIED', () => dispatch(state, 'u-doyun', 'performance.submitPerson', { personId, period, planVersion: 1 }));
   rejects('PERFORMANCE_DENIED', () => dispatch(state, headId, 'performance.submitPerson', { period, planVersion: 1 }));
   rejects('PERFORMANCE_DENIED', () => dispatch(state, 'u-doyun', 'performance.withdrawSubmission', { personId, period }));
   rejects('PERFORMANCE_REQUIRED', () => submitPerson(state));
-  addPerformance(state, personId, undefined, { status: 'draft', evidence: '' });
+  addPerformance(state, personId, undefined, { status: 'draft', description: '', evidence: '' });
   rejects('PERFORMANCE_INCOMPLETE', () => submitPerson(state));
-  state.performances[0].evidence = '확인 근거';
+  state.performances[0].description = '확인한 성과 내용';
   rejects('SCORE_PLAN_CHANGED', () => dispatch(state, personId, 'performance.submitPerson', { period, planVersion: 999 }));
   getUnitScorePlan(state, personId, period)!.allocations[0].maxScore = 49;
   rejects('SCORE_TOTAL_REQUIRED', () => submitPerson(state));

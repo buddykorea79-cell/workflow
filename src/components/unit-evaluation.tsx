@@ -1,10 +1,11 @@
 'use client';
 
-import { useState } from 'react';
+import { useId, useState } from 'react';
 import { ArrowRight, ArrowUpRight, CalendarDays, CheckCheck, CheckCircle2, ChevronRight, ClipboardCheck, FileText, FolderOpen, LockKeyhole, Pencil, Plus, Save, Search, Send, ShieldCheck, SlidersHorizontal, Undo2, Users } from 'lucide-react';
 import type { Performance, UnitScorePlan, User, Workspace } from '@/lib/types';
 import { currentPersonPerformances, eligibleScoreUnits, scoreUnitsForPeriod, getUnitEvaluation, getUnitScorePlan, hasCompletePerformance, missingPerformanceUnitIds, personUnitPerformanceSummary } from '@/lib/unit-evaluation';
 import { Badge, Button, EmptyState, Field, Modal, type CommandFn } from './ui';
+import { TaskFileAttachments } from './task-file-attachments';
 import './unit-evaluation.css';
 
 type Props = { workspace: Workspace; command: CommandFn; onOpenTask: (id: string) => void };
@@ -160,7 +161,7 @@ function PersonPerformance({ workspace: w, command, onOpenTask, person, period, 
             const source = performance as Performance & { taskTitle?: string };
             const task = w.tasks.find(task => task.id === performance.taskId);
             const canOpen = !!task;
-            return <section className="ue-performance" key={performance.id}><div className="ue-performance-heading"><span><FileText size={14} />세부업무</span>{canOpen ? <button type="button" className="ue-task-link" onClick={() => onOpenTask(performance.taskId)}>{source.taskTitle || task.title}<ArrowUpRight size={14} /></button> : <strong>{source.taskTitle || '기존 세부업무'}</strong>}<Badge tone={performance.status === 'changes_requested' ? 'warning' : 'soft'}>{evaluation ? '평가 반영' : performance.status === 'confirmed' ? '기존 확정 성과' : !submitted && performance.status === 'review' ? '작성 완료 · 제출 전' : statusLabels[performance.status]}</Badge></div><h4>{performance.title}</h4><p>{performance.description}</p>{performance.metricName && performance.value !== undefined && <div className="ue-individual-metric">{performance.metricName}<strong>{scoreText(performance.value)} {performance.unit}</strong></div>}<div className="ue-evidence"><span>성과 근거</span><p>{performance.evidence}</p></div>{performance.status === 'changes_requested' && <div className="ue-correction"><p><strong>보완 의견</strong>{performance.comment || '성과 내용과 근거를 보완해 주세요.'}</p></div>}{self && !submitted && !evaluation && performance.status !== 'confirmed' && performance.authorId === w.currentUser.id && <div className="ue-performance-actions"><Button variant="secondary" type="button" onClick={() => onEdit(performance)}><Pencil size={14} />{performance.status === 'changes_requested' ? '성과 보완' : '성과 수정'}</Button></div>}</section>;
+            return <section className="ue-performance" key={performance.id}><div className="ue-performance-heading"><span><FileText size={14} />세부업무</span>{canOpen ? <button type="button" className="ue-task-link" onClick={() => onOpenTask(performance.taskId)}>{source.taskTitle || task.title}<ArrowUpRight size={14} /></button> : <strong>{source.taskTitle || '기존 세부업무'}</strong>}<Badge tone={performance.status === 'changes_requested' ? 'warning' : 'soft'}>{evaluation ? '평가 반영' : performance.status === 'confirmed' ? '기존 확정 성과' : !submitted && performance.status === 'review' ? '작성 완료 · 제출 전' : statusLabels[performance.status]}</Badge></div><p className="ue-performance-content">{performance.description}</p>{performance.metricName && performance.value !== undefined && <div className="ue-individual-metric">{performance.metricName}<strong>{scoreText(performance.value)} {performance.unit}</strong></div>}<TaskFileAttachments workspace={w} taskId={performance.taskId} attachmentIds={performance.attachmentIds || []} label="성과 참고 파일"/>{performance.evidence && <details className="ue-legacy-evidence"><summary>이전에 작성한 근거 보기</summary><p>{performance.evidence}</p></details>}{performance.status === 'changes_requested' && <div className="ue-correction"><p><strong>보완 의견</strong>{performance.comment || '성과 내용과 참고 파일을 확인해 주세요.'}</p></div>}{self && !submitted && !evaluation && performance.status !== 'confirmed' && performance.authorId === w.currentUser.id && <div className="ue-performance-actions"><Button variant="secondary" type="button" onClick={() => onEdit(performance)}><Pencil size={14} />{performance.status === 'changes_requested' ? '성과 보완' : '성과 수정'}</Button></div>}</section>;
           })}{!unit.performances.length && <p className="ue-no-performance"><FileText size={16} />이 단위업무에 등록된 반기 성과가 없습니다.</p>}</div>
           {isRated && <div className="ue-unit-rating"><div><span><ShieldCheck size={15} />부서장 평가</span>{!evaluation && submitted && !evidence.length && <small>제출된 성과가 없어 0점으로 평가합니다.</small>}</div>{evaluation ? <><strong className="ue-readonly-score">{scoreText(unit.score || 0)}<small>/ {scoreText(unit.maxScore || 0)}점</small></strong>{unit.comment && <p className="ue-rating-comment">{unit.comment}</p>}</> : isReviewer ? <><label className="ue-score-input"><span className="sr-only">{unit.unitTitle} 평가 점수</span><input type="number" min="0" max={unit.maxScore || 0} step="0.01" required disabled={!canEvaluate || !evidence.length} value={score} aria-invalid={scoreInvalid} onChange={event => setScores(previous => ({ ...previous, [unit.unitId]: event.target.value }))} placeholder="점수" /><span>/ {scoreText(unit.maxScore || 0)}점</span></label><label className="ue-unit-comment"><span className="sr-only">{unit.unitTitle} 평가 의견</span><textarea rows={2} maxLength={5000} disabled={!canEvaluate} value={comments[unit.unitId] || ''} onChange={event => setComments(previous => ({ ...previous, [unit.unitId]: event.target.value }))} placeholder="이 단위업무의 성과에 대한 의견을 남겨 주세요. (선택)" /></label>{scoreInvalid && <p className="form-error">점수는 0점부터 업무 비중 {scoreText(unit.maxScore || 0)}점 이내로 입력해 주세요.</p>}</> : <span className="ue-awaiting">{submitted ? '부서장 평가 대기' : '제출 후 평가 진행'}</span>}</div>}
         </article>;
@@ -173,7 +174,7 @@ function PersonPerformance({ workspace: w, command, onOpenTask, person, period, 
       <div><h3>성과와 업무 비중을 확인하고 제출하세요.</h3><p>제출하면 부서장이 단위업무별 성과를 평가합니다. 부서 담당자는 제출 여부를 확인할 수 있습니다.</p></div>
       <ul className="ue-readiness"><li data-ready={!!plan && !stalePlan && summary.totalMaxScore === 50}><CheckCircle2 size={16} /><span>모든 단위업무의 업무 비중 합계 50점</span><strong>{plan ? `${scoreText(summary.totalMaxScore)} / 50점` : '설정 필요'}</strong></li><li data-ready={!!plan && incompleteUnits.length === 0 && incompleteRecords.length === 0 && ratedPerformances.length > 0 && !needsChanges}><CheckCircle2 size={16} /><span>업무 비중이 있는 단위업무의 성과 작성</span><strong>{plan ? incompleteUnits.length ? `${incompleteUnits.length}개 미작성` : needsChanges || incompleteRecords.length ? '보완 필요' : ratedPerformances.length ? '작성 완료' : '작성 필요' : '비중 설정 후 확인'}</strong></li></ul>
       {incompleteUnits.length > 0 && <p className="ue-validation">성과를 입력할 단위업무: {incompleteUnits.map(unit => unit.unitTitle).join(', ')}</p>}
-      {incompleteRecords.length > 0 && <p className="ue-validation">제목·내용·근거가 누락된 성과 {incompleteRecords.length}건을 보완해 주세요.</p>}
+      {incompleteRecords.length > 0 && <p className="ue-validation">성과 내용이 누락된 {incompleteRecords.length}건을 보완해 주세요.</p>}
       {needsChanges && <p className="ue-validation">보완 요청된 성과를 수정하여 저장한 뒤 제출해 주세요.</p>}
       {error && <p className="form-error" role="alert">{error}</p>}
       <footer><p className="ue-footnote">제출 전에는 저장한 성과와 업무 비중을 수정할 수 있습니다.</p><Button disabled={!canSubmit || saving} onClick={() => void changeSubmission(false)}><Send size={17} />{saving ? '제출 중…' : '제출하기'}</Button></footer>
@@ -192,7 +193,7 @@ function WeightEditor({ workspace: w, command, period, plan, onClose }: { worksp
   return <Modal title="단위업무별 업무 비중 설정" description={`${periodName(period)} · 내 단위업무의 업무 비중 합계를 50점으로 정합니다.`} onClose={onClose}><form className="form-stack" onSubmit={async event => { event.preventDefault(); if (!valid) return; setSaving(true); setError(''); try { const saved = await command('performance.setWeights', { period, allocations: units.map(unit => ({ unitId: unit.id, maxScore: Number(values[unit.id]) })) }); if (saved) onClose(); else setError('업무 비중을 저장하지 못했습니다. 안내 메시지를 확인해 주세요.'); } catch (error) { setError(error instanceof Error ? error.message : '업무 비중을 저장하지 못했습니다.'); } finally { setSaving(false); } }}><div className="ue-weight-total" data-valid={valid}><div><span>업무 비중 합계</span><strong>{scoreText(total)}<small>/ 50점</small></strong></div><span>{valid ? '합계가 50점입니다.' : total > 50 ? `${scoreText(total - 50)}점을 줄여 주세요.` : `${scoreText(50 - total)}점을 더 배정해 주세요.`}</span></div><div className="ue-weight-fields">{units.map((unit, index) => <label key={unit.id}><span><small>단위업무 {index + 1}</small><strong>{unit.title}</strong></span><span><input type="number" min="0" max="50" step="0.01" required aria-label={`${unit.title} 업무 비중`} value={values[unit.id]} onChange={event => setValues(previous => ({ ...previous, [unit.id]: event.target.value }))} placeholder="0" /><small>점</small></span></label>)}</div><p className="ue-footnote">업무 비중은 각 단위업무의 최고 점수입니다. 평가 대상이 아닌 단위업무는 0점으로 설정할 수 있습니다. 제출 전까지 수정할 수 있으며, 저장 후에는 성과 · 평가에서 제출하기를 눌러 주세요.</p>{error && <p role="alert" className="form-error">{error}</p>}<div className="form-actions"><Button variant="secondary" type="button" onClick={onClose}>취소</Button><Button type="submit" disabled={!valid || saving}><Save size={16} />{saving ? '저장 중…' : '업무 비중 저장'}</Button></div></form></Modal>;
 }
 
-export function PerformanceEditor({ workspace: w, command, period, existing, fixedTaskId, embedded = false, onClose }: { workspace: Workspace; command: CommandFn; period: string; existing?: Performance; fixedTaskId?: string; embedded?: boolean; onClose: () => void }) {
+export function PerformanceEditor({ workspace: w, command, period, existing, fixedTaskId, embedded = false, onClose, onBusyChange }: { workspace: Workspace; command: CommandFn; period: string; existing?: Performance; fixedTaskId?: string; embedded?: boolean; onClose: () => void; onBusyChange?: (busy: boolean) => void }) {
   const plan = getUnitScorePlan(w, w.currentUser.id, period);
   const tasks = activeTasks(w, w.currentUser.id).filter(task => !plan || task.departmentId === plan.departmentId);
   const current = currentPersonPerformances(w, w.currentUser.id, period);
@@ -200,42 +201,38 @@ export function PerformanceEditor({ workspace: w, command, period, existing, fix
   const pinnedTaskId = fixedTaskId || record?.taskId;
   const eligible = tasks.filter(task => pinnedTaskId ? task.id === pinnedTaskId : !current.some(item => item.taskId === task.id));
   const [taskId, setTaskId] = useState(pinnedTaskId || eligible[0]?.id || '');
-  const [title, setTitle] = useState(record?.title || '');
+  const contentHelpId = useId();
   const [description, setDescription] = useState(record?.description || '');
-  const [evidence, setEvidence] = useState(record?.evidence || '');
-  const [metricName, setMetricName] = useState(record?.metricName || '');
-  const [value, setValue] = useState(record?.value === undefined ? '' : String(record.value));
-  const [unit, setUnit] = useState(record?.unit || '');
+  const [attachmentIds, setAttachmentIds] = useState(record?.attachmentIds || []);
+  const [uploading, setUploading] = useState(false);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
   const [saved, setSaved] = useState(false);
   const locked = !!getUnitScorePlan(w, w.currentUser.id, period)?.submittedAt || !!getUnitEvaluation(w, w.currentUser.id, period) || record?.status === 'confirmed';
   const ownHistoricalRecord = record?.authorId === w.currentUser.id && record.period === period && record.taskId === taskId;
-  const valid = !locked && (ownHistoricalRecord || eligible.some(task => task.id === taskId)) && !!title.trim() && !!description.trim() && !!evidence.trim() && (value === '' || Number.isFinite(Number(value)));
+  const valid = !locked && !uploading && (ownHistoricalRecord || eligible.some(task => task.id === taskId)) && !!description.trim() && description.length <= 500;
   const form = <form className="form-stack ue-performance-editor" onSubmit={async event => {
     event.preventDefault(); if (!valid || saving) return;
-    setSaving(true); setError(''); setSaved(false);
+    setSaving(true); onBusyChange?.(true); setError(''); setSaved(false);
     try {
-      const completed = await command('performance.saveHalf', { taskId, period, title, description, evidence, metricName: metricName || undefined, value: value === '' ? undefined : Number(value), unit: unit || undefined });
+      const completed = await command('performance.saveHalf', { taskId, period, description, attachmentIds, metricName: record?.metricName, value: record?.value, unit: record?.unit });
       if (completed) { setSaved(true); onClose(); }
       else setError('성과를 저장하지 못했습니다. 안내 메시지를 확인해 주세요.');
     } catch (cause) { setError(cause instanceof Error ? cause.message : '성과를 저장하지 못했습니다.'); }
-    finally { setSaving(false); }
+    finally { setSaving(false); onBusyChange?.(false); }
   }}>
     {ownHistoricalRecord && !eligible.length && <div className="ue-notice"><FileText size={18} /><div><strong>인수인계 전 작성한 내 성과를 보완합니다.</strong><p>이 성과의 작성자·당시 부서·단위업무는 보존됩니다. 후임자의 업무 내용은 변경하지 않습니다.</p></div></div>}
     {record?.status === 'changes_requested' && record.comment && <div className="ue-notice"><ClipboardCheck size={18} /><div><strong>부서장 보완 의견</strong><p>{record.comment}</p></div></div>}
-    <p className="ue-footnote">{periodName(period)} 성과를 저장합니다. 성과 · 평가에서 단위업무별 업무 비중을 정한 뒤 제출하기를 눌러 주세요.</p>
-    {pinnedTaskId ? <div className="ue-editor-task"><FolderOpen size={17} /><div><small>{w.units.find(item => item.id === tasks.find(task => task.id === pinnedTaskId)?.unitId)?.title}</small><strong>{tasks.find(task => task.id === pinnedTaskId)?.title || '이전 담당 업무 · ' + (record?.title || '기존 성과')}</strong></div></div> : <Field label="세부업무"><select required disabled={saving || locked} value={taskId} onChange={event => { setTaskId(event.target.value); setSaved(false); }}><option value="">성과를 기록할 업무 선택</option>{eligible.map(task => <option key={task.id} value={task.id}>{w.units.find(item => item.id === task.unitId)?.title} › {task.title}</option>)}</select></Field>}
+    {!embedded && <p className="ue-footnote">{periodName(period)} · 성과 내용과 필요한 참고 파일을 저장하세요.</p>}
+    {pinnedTaskId ? !embedded && <div className="ue-editor-task"><FolderOpen size={17} /><div><small>{w.units.find(item => item.id === tasks.find(task => task.id === pinnedTaskId)?.unitId)?.title}</small><strong>{tasks.find(task => task.id === pinnedTaskId)?.title || '이전 담당 업무 · ' + (record?.title || '기존 성과')}</strong></div></div> : <Field label="세부업무"><select required disabled={saving || uploading || locked} value={taskId} onChange={event => { setTaskId(event.target.value); setAttachmentIds([]); setSaved(false); }}><option value="">성과를 기록할 업무 선택</option>{eligible.map(task => <option key={task.id} value={task.id}>{w.units.find(item => item.id === task.unitId)?.title} › {task.title}</option>)}</select></Field>}
     {!eligible.length && !ownHistoricalRecord && <p role="alert" className="ue-validation">새로 작성할 세부업무가 없습니다. 이미 작성한 성과는 단위업무별 성과 목록에서 수정할 수 있습니다.</p>}
     {locked && <p className="ue-validation">제출되었거나 평가가 확정된 성과입니다. 제출한 성과는 성과 · 평가에서 제출을 회수한 후 수정할 수 있습니다.</p>}
     <fieldset disabled={saving || locked} className="ue-editor-fields" onChange={() => setSaved(false)}>
-      <Field label="성과 제목"><input required maxLength={150} value={title} onChange={event => setTitle(event.target.value)} placeholder="예: 예산 집행 자료의 정확도 및 처리 속도 개선" /></Field>
-      <Field label="성과 내용"><textarea required rows={4} maxLength={5000} value={description} onChange={event => setDescription(event.target.value)} placeholder="목표 대비 결과, 추진 내용, 개선 사항을 기록하세요." /></Field>
-      <div className="ue-performance-metric-fields"><Field label="성과 지표 · 선택"><input value={metricName} onChange={event => setMetricName(event.target.value)} placeholder="예: 점검 완료 사업" maxLength={150} /></Field><Field label="달성 수치 · 선택"><input type="number" step="any" value={value} onChange={event => setValue(event.target.value)} placeholder="0" /></Field><Field label="단위 · 선택"><input value={unit} onChange={event => setUnit(event.target.value)} placeholder="건, %, 명" maxLength={30} /></Field></div>
-      <Field label="성과 근거"><textarea required rows={3} maxLength={5000} value={evidence} onChange={event => setEvidence(event.target.value)} placeholder="결과보고서, 실적 수치의 산출 기준, 확인 가능한 자료를 작성하세요." /></Field>
+      <div className="ue-content-field"><Field label="성과 내용"><textarea required rows={6} maxLength={500} value={description} aria-describedby={contentHelpId} aria-invalid={description.length > 500} onChange={event => setDescription(event.target.value)} placeholder="무엇을 추진했고, 어떤 결과나 개선을 이루었나요? 핵심 내용을 500자 이내로 작성해 주세요." /></Field><div className="ue-content-help" id={contentHelpId}><span>{description.length > 500 ? '기존 내용을 500자 이내로 정리해 주세요.' : '결과와 달라진 점을 간결하게 적어 주세요.'}</span><strong data-over={description.length > 500}>{description.length.toLocaleString()} / 500자</strong></div></div>
+      <TaskFileAttachments key={taskId} workspace={w} taskId={taskId} attachmentIds={attachmentIds} onChange={ids => { setAttachmentIds(ids); setSaved(false); }} command={command} onBusyChange={busy => { setUploading(busy); onBusyChange?.(busy); }} disabled={saving || locked} label="성과 참고 파일"/>
     </fieldset>
     {error && <p role="alert" className="form-error">{error}</p>}{saved && embedded && <p role="status" className="ue-save-success"><CheckCircle2 size={16} />성과를 저장했습니다. 성과 · 평가에서 제출을 진행해 주세요.</p>}
-    <div className="form-actions">{!embedded && <Button type="button" variant="secondary" disabled={saving} onClick={onClose}>취소</Button>}<Button type="submit" disabled={saving || !valid}><Save size={16} />{saving ? '저장 중…' : '성과 저장'}</Button></div>
+    <div className="form-actions">{!embedded && <Button type="button" variant="secondary" disabled={saving || uploading} onClick={onClose}>취소</Button>}<Button type="submit" disabled={saving || !valid}><Save size={16} />{uploading ? '파일 업로드 중…' : saving ? '저장 중…' : '성과 저장'}</Button></div>
   </form>;
-  return embedded ? form : <Modal title={record ? '업무 성과 수정' : '반기 성과 입력'} description={`${periodName(period)} · 세부업무별 성과가 단위업무 아래 모입니다.`} wide onClose={onClose}>{form}</Modal>;
+  return embedded ? form : <Modal title={record ? '업무 성과 수정' : '반기 성과 입력'} description="성과 내용은 500자 이내로 작성하고, 참고 자료는 파일로 첨부하세요." wide onClose={() => { if (!saving && !uploading) onClose(); }}>{form}</Modal>;
 }

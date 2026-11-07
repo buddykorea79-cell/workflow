@@ -44,7 +44,8 @@ export function performanceUnitId(state: Pick<WorkspaceData, 'tasks'>, performan
   return performance.unitId || state.tasks.find(task => task.id === performance.taskId)?.unitId || '';
 }
 
-export const hasCompletePerformance = (performance: Performance) => !!(performance.title.trim() && performance.description.trim() && performance.evidence.trim());
+// Existing long-form records remain submittable; the 500-character limit applies when saving new edits.
+export const hasCompletePerformance = (performance: Performance) => !!performance.description.trim();
 
 export function missingPerformanceUnitIds(state: Pick<WorkspaceData, 'tasks'>, allocations: UnitScoreAllocation[], performances: Performance[], departmentId: string) {
   return allocations.filter(allocation => allocation.maxScore > 0 && !performances.some(performance => performance.departmentId === departmentId && performance.status !== 'changes_requested' && performanceUnitId(state, performance) === allocation.unitId && hasCompletePerformance(performance))).map(allocation => allocation.unitId);

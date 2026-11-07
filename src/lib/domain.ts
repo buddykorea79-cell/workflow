@@ -16,13 +16,15 @@ import { organizationDivisionForUser } from './organization-division';
 import { withReplacedRunProcedure } from './procedure-replacement';
 import { organizationIdentityIssue, organizationUserChangeIssue } from './organization-management';
 import { canCreateCommon, canReviewCommon, commonApprovalSnapshot, commonOriginDepartment, commonPublished } from './common-approval';
-import type { AuditEvent, Command, CommonApprovalRequest, CommonTask, CommonDistribution, DepartmentDivisionReadModel, Handover, PerformanceSubmissionStatus, Run, Source, Task, Unit, User, WorkflowStep, Workspace, WorkspaceData } from './types';
+import type { Attachment, AuditEvent, Command, CommonApprovalRequest, CommonTask, CommonDistribution, DepartmentDivisionReadModel, Handover, Performance, PerformanceSubmissionStatus, Run, Source, Task, Unit, User, WorkflowStep, Workspace, WorkspaceData } from './types';
 
 export class DomainError extends Error { constructor(public status: number, public code: string, message: string) { super(message); } }
 function fail(status: number, code: string, message: string): never { throw new DomainError(status, code, message); }
 const id = (prefix: string) => `${prefix}-${randomUUID().slice(0, 12)}`;
 const text = z.string().trim().min(1).max(5000);
 const taskDescription = z.string().trim().min(1).max(20_000);
+const attachmentIdsInput = z.array(text).max(30);
+const performanceFields = { title: z.string().trim().max(150).optional(), description: text.max(500, '성과 내용은 500자 이내로 입력해 주세요.'), evidence: z.string().trim().max(5000).optional(), attachmentIds: attachmentIdsInput.optional(), metricName: z.string().max(150).optional(), value: z.number().finite().optional(), unit: z.string().max(50).optional() };
 const date = z.string().regex(/^\d{4}-\d{2}-\d{2}$/, '날짜 형식이 올바르지 않습니다.').refine(v => !Number.isNaN(Date.parse(v)) && new Date(v).toISOString().slice(0, 10) === v, '실제 존재하는 날짜를 입력해 주세요.');
 const datetime = z.string().refine(v => !Number.isNaN(Date.parse(v)), '날짜와 시각을 확인해 주세요.');
 const directiveIssuer = z.enum(['minister', 'vice_minister', 'office_head', 'bureau_head']);
@@ -35,7 +37,7 @@ const unitScore = z.number().finite().min(0).max(UNIT_SCORE_TOTAL).refine(value 
 // Optional time is retained only for compatibility with previously stored expense records.
 const expenseInput = z.array(z.object({ id: text, date, time: z.string().regex(/^(?:[01]\d|2[0-3]):[0-5]\d$/).optional(), projectName: text.max(200).optional(), vendor: text.max(200).optional(), description: text.max(500), amount: money })).max(500);
 const referenceInput = z.array(z.object({ id: text, type: z.enum(['law', 'guideline', 'national_agenda', 'directive', 'document', 'other']), title: text.max(300), content: z.string().max(200000), url: z.union([z.literal(''), z.url().refine(v => /^https?:\/\//i.test(v), 'HTTP(S) 주소만 입력할 수 있습니다.')]).optional(), attachmentId: text.optional() })).max(100);
-const workflowInput = z.array(z.object({ id: text, title: text.max(150), role: z.enum(['primary', 'support', 'reviewer']), description: z.string().max(5000), output: z.string().max(1000), required: z.boolean(), dependsOn: z.array(text), checklist: z.array(text).max(50), startDate: date.optional(), dueDate: date.optional(), scheduleDetails: z.string().trim().max(5000).optional(), done: z.boolean().optional() })).min(1).max(50);
+const workflowInput = z.array(z.object({ id: text, title: text.max(150), role: z.enum(['primary', 'support', 'reviewer']), description: z.string().max(5000), output: z.string().max(1000), required: z.boolean(), dependsOn: z.array(text), checklist: z.array(text).max(50), attachmentIds: attachmentIdsInput.optional(), startDate: date.optional(), dueDate: date.optional(), scheduleDetails: z.string().trim().max(5000).optional(), done: z.boolean().optional() })).min(1).max(50);
 const cycleScheduleInput = z.object({ title: text.max(150).optional(), startDate: date, dueDate: date, scheduleDetails: z.string().trim().max(5000).optional(), steps: z.array(z.object({ stepId: text, startDate: date.optional(), dueDate: date.optional(), scheduleDetails: z.string().trim().max(5000).optional() })).min(1).max(50) });
 const legacyTaskInput = z.object({ title: text.max(150), description: taskDescription, unitId: text, primaryId: text, supportIds: z.array(text).max(30).default([]), reviewerId: text, dueDate: date, frequency: z.enum(['once', 'monthly', 'quarterly', 'half_yearly', 'yearly']), priority: z.enum(['high', 'medium', 'low']).default('medium'), completionCriteria: text.default('필수 체크와 결과물 확인 및 총괄 검토 완료'), card: z.object({ purpose: z.string(), stakeholders: z.string(), evidence: z.string(), responsibility: z.string(), procedure: z.string(), finance: z.string(), documents: z.string(), issues: z.string(), handover: z.string() }).optional(), workflow: z.array(z.object({ id: text, title: text.max(150), role: z.enum(['primary', 'support', 'reviewer']), description: z.string().max(5000), output: z.string().max(1000), required: z.boolean(), dependsOn: z.array(text), checklist: z.array(text).max(50) })).min(1).max(50).optional(), sourceIds: z.array(text).max(50).default([]) });
 const taskInput = legacyTaskInput.extend({ reviewerId: text.optional(), descriptionAttachmentIds: z.array(text).max(10).optional(), ...budgetFields, expenses: expenseInput.optional(), references: referenceInput.optional(), workflow: workflowInput.optional() });
@@ -140,6 +142,22 @@ function validateDescriptionAttachments(state: WorkspaceData, user: User, taskId
 function claimDescriptionAttachments(state: WorkspaceData, task: Task) {
   for (const attachmentId of task.descriptionAttachmentIds ?? []) state.attachments.find(item => item.id === attachmentId)!.taskId = task.id;
 }
+function validateLinkedAttachments(state: WorkspaceData, taskId: string, attachmentIds: string[] | undefined, kind: 'PROCEDURE' | 'PERFORMANCE', allowedIds?: Set<string>) {
+  if (!attachmentIds) return;
+  if (new Set(attachmentIds).size !== attachmentIds.length) fail(422, `${kind}_ATTACHMENT_DUPLICATE`, '같은 파일을 중복하여 연결할 수 없습니다.');
+  for (const attachmentId of attachmentIds) {
+    if (!state.attachments.some(attachment => attachment.id === attachmentId && attachment.taskId === taskId) || allowedIds && !allowedIds.has(attachmentId)) fail(422, `${kind}_ATTACHMENT_INVALID`, '이 세부업무에 업로드한 접근 가능한 파일만 연결할 수 있습니다.');
+  }
+}
+/** Evaluation evidence remains available to its author and reviewing department after a transfer. */
+export function canReadAttachment(state: WorkspaceData, user: User, attachment: Attachment, now = new Date()) {
+  const task = state.tasks.find(item => item.id === attachment.taskId);
+  const draftPrefix = `draft:${user.id}:`;
+  if (task && canReadTask(state, user, task, now) || attachment.uploadedBy === user.id && attachment.taskId.startsWith(draftPrefix) && /^[a-f0-9-]{36}$/i.test(attachment.taskId.slice(draftPrefix.length))) return true;
+  const canReadRecord = (record: Performance) => record.authorId === user.id || approveDepartment(user, record.departmentId);
+  if (state.performances.some(record => record.taskId === attachment.taskId && record.attachmentIds?.includes(attachment.id) && canReadRecord(record))) return true;
+  return (state.unitEvaluations ?? []).some(evaluation => (evaluation.personId === user.id || approveDepartment(user, evaluation.departmentId)) && evaluation.performanceSnapshot.some(record => record.taskId === attachment.taskId && record.attachmentIds?.includes(attachment.id)));
+}
 function saveEmbeddedDelegation(state: WorkspaceData, user: User, delegation: ReturnType<typeof prepareTaskDelegation>, now: Date) {
   storeTaskDelegation(state, delegation, now);
   emit(state, user, 'delegation.request', 'delegation', delegation.id, '업무대행 지정 · 부서장 승인 요청', JSON.stringify({ taskId: delegation.taskId, fromId: delegation.fromId, toId: delegation.toId, startsAt: delegation.startsAt, endsAt: delegation.endsAt, reason: delegation.reason }), delegation.departmentId!, now);
@@ -157,6 +175,7 @@ export function validateWorkflow(task: Task, state: WorkspaceData) {
 }
 function detailValidation(task: Task, state: WorkspaceData) {
   validateTaskMoney(task);
+  for (const step of task.workflow) validateLinkedAttachments(state, task.id, step.attachmentIds, 'PROCEDURE');
   for (const entries of [task.expenses ?? [], task.references ?? []]) if (new Set(entries.map(item => item.id)).size !== entries.length) fail(422, 'DUPLICATE_DETAIL', '집행 내역과 근거 항목의 ID는 중복될 수 없습니다.');
   for (const reference of task.references ?? []) if (reference.attachmentId && !state.attachments.some(attachment => attachment.id === reference.attachmentId && attachment.taskId === task.id)) fail(422, 'REFERENCE_ATTACHMENT_INVALID', '해당 업무에 업로드한 파일만 근거에 연결할 수 있습니다.');
 }
@@ -310,7 +329,7 @@ export function getWorkspace(state: WorkspaceData, userId: string, now = new Dat
   return { revision: state.revision, currentUser: user, users: state.users.filter(member => deptIds.has(member.departmentId)), departments: state.departments.filter(department => deptIds.has(department.id)), identities: state.users.filter(member => identityIds.has(member.id)).map(userIdentity), departmentDirectory: state.departments.filter(department => canManageCommon(user, now) || isDirectiveCoordinator(state, user, now) || directoryIds.has(department.id)), departmentWorkPlans, departmentDivision: departmentDivisionReadModel(state, user.departmentId, now), organizationDivision: organizationDivisionForUser(state, user, now), delegatedTaskIds: tasks.filter(task => canActAsDeputy(state, user, task, undefined, now)).map(task => task.id), units: state.units.filter(u => deptIds.has(u.departmentId)), tasks, runs,
     handovers, workTransfers, commonTasks,
     sources: state.sources.filter(s => canReadSource(state, user, s, now)), performances: state.performances.filter(p => p.authorId === user.id || user.role === 'admin' || (user.role === 'head' ? p.departmentId === user.departmentId : !p.period && taskIds.has(p.taskId))), delegations: state.delegations.filter(d => [d.fromId, d.toId, d.requestedBy].includes(user.id) || manageDepartment(user, d.departmentId ?? state.tasks.find(task => task.id === d.taskId)?.departmentId ?? '')), audit, performanceSubmissionStatuses,
-    notifications: state.notifications.filter(n => n.userId === user.id), attachments: state.attachments.filter(a => taskIds.has(a.taskId) || a.uploadedBy === user.id && a.taskId.startsWith(`draft:${user.id}:`)).map(a => ({ ...a, storageKey: '' })), releases: state.releases ?? [], unitScorePlans: (state.unitScorePlans ?? []).filter(canReadEvaluation), unitEvaluations: (state.unitEvaluations ?? []).filter(canReadEvaluation),
+    notifications: state.notifications.filter(n => n.userId === user.id), attachments: state.attachments.filter(a => canReadAttachment(state, user, a, now)).map(a => ({ ...a, storageKey: '' })), releases: state.releases ?? [], unitScorePlans: (state.unitScorePlans ?? []).filter(canReadEvaluation), unitEvaluations: (state.unitEvaluations ?? []).filter(canReadEvaluation),
     mode: process.env.DATABASE_URL ? 'connected' : 'local', integrations: { database: process.env.DATABASE_URL ? 'Neon PostgreSQL 연결' : '로컬 파일 저장', auth: process.env.IEUM_PROTOTYPE_MODE === 'true' ? '프로토타입 역할 선택' : process.env.NEON_AUTH_BASE_URL ? 'Neon 인증 연결' : '로컬 데모 계정', storage: process.env.IEUM_STORAGE_PROVIDER === 'neon' ? (['AWS_ENDPOINT_URL_S3', 'AWS_REGION', 'AWS_ACCESS_KEY_ID', 'AWS_SECRET_ACCESS_KEY'].every(key => process.env[key]?.trim()) ? 'Neon Object Storage 연결 설정됨' : 'Neon 저장소 설정 필요') : process.env.VERCEL ? '미연결 · Neon 저장소 설정 필요' : '로컬 격리 저장', bizrouter: process.env.BIZROUTER_API_KEY?.trim() && process.env.BIZROUTER_MODEL?.trim() ? '연결 설정됨 · 호출 미검증' : process.env.BIZROUTER_API_KEY?.trim() ? '모델 설정 필요 · 수기 작성 가능' : '미연결 · 수기 작성 가능', law: process.env.LAW_API_OC ? '키 설정됨 · 호출 미검증' : '미연결 · 수기 등록 가능' }, serverTime: now.toISOString() };
 }
 
@@ -563,9 +582,9 @@ export function executeCommand(state: WorkspaceData, userId: string, raw: unknow
       if (input.workflow) {
         for (const completed of task.workflow.filter(s => s.done)) {
           const next = input.workflow.find(s => s.id === completed.id);
-          if (!next || next.title !== completed.title || next.role !== completed.role || next.description !== completed.description || next.output !== completed.output || next.required !== completed.required || JSON.stringify(next.dependsOn) !== JSON.stringify(completed.dependsOn) || JSON.stringify(next.checklist) !== JSON.stringify(completed.checklist)) fail(409, 'COMPLETED_STEP_LOCKED', '완료한 절차의 기준과 체크리스트는 보존됩니다. 미완료 절차를 수정하거나 후속 보완 절차를 추가해 주세요.');
+          if (!next || next.title !== completed.title || next.role !== completed.role || next.description !== completed.description || next.output !== completed.output || next.required !== completed.required || JSON.stringify(next.dependsOn) !== JSON.stringify(completed.dependsOn) || JSON.stringify(next.checklist) !== JSON.stringify(completed.checklist) || !isDeepStrictEqual(next.attachmentIds ?? completed.attachmentIds ?? [], completed.attachmentIds ?? [])) fail(409, 'COMPLETED_STEP_LOCKED', '완료한 절차의 기준과 체크리스트는 보존됩니다. 미완료 절차를 수정하거나 후속 보완 절차를 추가해 주세요.');
         }
-        input.workflow = input.workflow.map(step => ({ ...step, done: task.workflow.find(old => old.id === step.id)?.done ?? false }));
+        input.workflow = input.workflow.map(step => { const previous = task.workflow.find(old => old.id === step.id); return { ...step, ...(step.attachmentIds === undefined && previous?.attachmentIds ? { attachmentIds: [...previous.attachmentIds] } : {}), done: previous?.done ?? false }; });
       }
       const resolvedBudget = resolveTaskBudget(state, task, input); delete input.budgetItemId;
       const next = { ...task, ...input, ...resolvedBudget, reviewerId: taskReviewer(state, task.departmentId, task.primaryId, now), version: Math.max(task.version, ...task.versions.map(version => version.version)) + 1 }; detailValidation(next, state); validateWorkflow(next, state); validateDescriptionAttachments(state, user, task.id, next.descriptionAttachmentIds); const deputy = p.deputy === undefined ? undefined : prepareTaskDelegation(state, user, next, p.deputy, now, fail);
@@ -618,7 +637,7 @@ export function executeCommand(state: WorkspaceData, userId: string, raw: unknow
     case 'task.update': {
       const task = getTask(state, user, required(p, 'taskId'), now); ensureRegistered(state, task); if (!manageDepartment(user, task.departmentId) && task.primaryId !== user.id) fail(403, 'EDIT_DENIED', '업무를 수정할 권한이 없습니다.'); if (!['draft', 'revision'].includes(task.status)) fail(409, 'DEFINITION_LOCKED', '확정·검토 중인 기준은 직접 수정할 수 없습니다. 수정 허용 후 변경본을 작성해 주세요.');
       if (typeof p.unitId === 'string' && p.unitId !== task.unitId) { if (task.primaryId !== user.id && user.role !== 'admin') fail(403, 'TASK_OWNER_REQUIRED', '본인이 담당하는 세부업무만 이동할 수 있습니다.'); personalTargetUnit(state, user, p.unitId, task.departmentId, task.primaryId); }
-      const input = parse(taskInput, { ...task, ...p }); input.workflow = input.workflow?.map(step => ({ ...step, done: task.workflow.find(old => old.id === step.id)?.done ?? false })); if (task.versions.length && (input.primaryId !== task.primaryId || input.unitId !== task.unitId)) fail(409, 'HANDOVER_REQUIRED', '확정된 업무의 담당자·소유 변경은 인수인계 절차를 이용해 주세요.'); if (task.commonId && input.dueDate !== task.dueDate) fail(409, 'COMMON_DEADLINE_LOCKED', '공통업무의 필수 기한은 부서에서 변경할 수 없습니다.'); const resolvedBudget = resolveTaskBudget(state, task, input); delete input.budgetItemId; const next = { ...task, ...input, ...resolvedBudget, reviewerId: taskReviewer(state, task.departmentId, input.primaryId, now), card: input.card ?? task.card, workflow: input.workflow ?? task.workflow }; validateAssignments(state, user, next, now); detailValidation(next, state); validateDescriptionAttachments(state, user, task.id, next.descriptionAttachmentIds); const deputy = p.deputy === undefined ? undefined : prepareTaskDelegation(state, user, next, p.deputy, now, fail); Object.assign(task, next, { updatedAt: now.toISOString() }); claimDescriptionAttachments(state, task); if (deputy) saveEmbeddedDelegation(state, user, deputy, now); if (task.versions.length) invalidateHandoverConfirmations(state, task.id); targetId = task.id; departmentId = task.departmentId; detail = task.title; title = '업무 초안 수정'; break;
+      const input = parse(taskInput, { ...task, ...p }); input.workflow = input.workflow?.map(step => { const previous = task.workflow.find(old => old.id === step.id); return { ...step, ...(step.attachmentIds === undefined && previous?.attachmentIds ? { attachmentIds: [...previous.attachmentIds] } : {}), done: previous?.done ?? false }; }); if (task.versions.length && (input.primaryId !== task.primaryId || input.unitId !== task.unitId)) fail(409, 'HANDOVER_REQUIRED', '확정된 업무의 담당자·소유 변경은 인수인계 절차를 이용해 주세요.'); if (task.commonId && input.dueDate !== task.dueDate) fail(409, 'COMMON_DEADLINE_LOCKED', '공통업무의 필수 기한은 부서에서 변경할 수 없습니다.'); const resolvedBudget = resolveTaskBudget(state, task, input); delete input.budgetItemId; const next = { ...task, ...input, ...resolvedBudget, reviewerId: taskReviewer(state, task.departmentId, input.primaryId, now), card: input.card ?? task.card, workflow: input.workflow ?? task.workflow }; validateAssignments(state, user, next, now); detailValidation(next, state); validateDescriptionAttachments(state, user, task.id, next.descriptionAttachmentIds); const deputy = p.deputy === undefined ? undefined : prepareTaskDelegation(state, user, next, p.deputy, now, fail); Object.assign(task, next, { updatedAt: now.toISOString() }); claimDescriptionAttachments(state, task); if (deputy) saveEmbeddedDelegation(state, user, deputy, now); if (task.versions.length) invalidateHandoverConfirmations(state, task.id); targetId = task.id; departmentId = task.departmentId; detail = task.title; title = '업무 초안 수정'; break;
     }
     case 'task.submit': case 'task.confirm': case 'task.revise': case 'task.archive': {
       const task = getTask(state, user, required(p, 'taskId'), now); ensureRegistered(state, task); targetId = task.id; departmentId = task.departmentId; detail = task.title;
@@ -829,7 +848,7 @@ export function executeCommand(state: WorkspaceData, userId: string, raw: unknow
       if (plan.allocations.some(allocation => !unitScore.safeParse(allocation.maxScore).success) || plan.allocations.reduce((sum, allocation) => sum + Math.round(allocation.maxScore * 100), 0) !== UNIT_SCORE_TOTAL * 100) fail(422, 'SCORE_TOTAL_REQUIRED', '단위업무 업무 비중의 합계는 50점이어야 합니다.');
       const records = currentPersonPerformances(state, user.id, input.period).filter(performance => performance.departmentId === plan.departmentId);
       if (records.some(performance => performance.status === 'changes_requested')) fail(409, 'PERFORMANCE_CHANGES_PENDING', '보완 요청된 성과를 저장한 뒤 제출해 주세요.');
-      if (records.some(performance => !hasCompletePerformance(performance))) fail(422, 'PERFORMANCE_INCOMPLETE', '모든 성과의 제목, 내용, 근거를 입력해 주세요.');
+      if (records.some(performance => !hasCompletePerformance(performance))) fail(422, 'PERFORMANCE_INCOMPLETE', '모든 성과의 내용을 입력해 주세요.');
       if (!records.some(performance => plan.allocations.some(allocation => allocation.maxScore > 0 && allocation.unitId === performanceUnitId(state, performance)))) fail(409, 'PERFORMANCE_REQUIRED', '업무 비중을 배정한 단위업무에 세부업무 성과를 먼저 입력해 주세요.');
       if (missingPerformanceUnitIds(state, plan.allocations, records, plan.departmentId).length) fail(409, 'UNIT_PERFORMANCE_REQUIRED', '업무 비중이 있는 모든 단위업무에 세부업무 성과를 입력해 주세요. 성과가 없는 단위업무는 비중을 0점으로 설정할 수 있습니다.');
       plan.submittedAt = now.toISOString(); plan.submittedBy = user.id;
@@ -876,14 +895,18 @@ export function executeCommand(state: WorkspaceData, userId: string, raw: unknow
     }
     case 'performance.saveHalf': case 'performance.submitHalf': {
       const taskId = required(p, 'taskId');
-      const input = parse(z.object({ period: z.string().regex(/^20\d{2}-H[12]$/, '예: 2026-H1 또는 2026-H2'), title: text.max(150), description: text, evidence: text, metricName: z.string().max(150).optional(), value: z.number().finite().optional(), unit: z.string().max(50).optional() }), p);
+      const input = parse(z.object({ period: halfYear, ...performanceFields }), p);
       if (getUnitEvaluation(state, user.id, input.period)) fail(409, 'EVALUATION_CONFIRMED', '개인별 평가가 확정된 반기의 성과는 추가하거나 변경할 수 없습니다.');
       if (getUnitScorePlan(state, user.id, input.period)?.submittedAt) fail(409, 'PERFORMANCE_SUBMITTED', '부서장에게 제출한 성과는 수정할 수 없습니다. 평가 전 제출을 취소한 뒤 수정해 주세요.');
       const existing = currentPersonPerformances(state, user.id, input.period).find(perf => perf.taskId === taskId);
+      const sourceTask = state.tasks.find(task => task.id === taskId && canReadTask(state, user, task, now));
+      const performanceTitle = sourceTask?.title ?? existing?.title ?? '';
+      const readableFiles = new Set(state.attachments.filter(file => canReadAttachment(state, user, file, now)).map(file => file.id));
+      validateLinkedAttachments(state, taskId, input.attachmentIds, 'PERFORMANCE', readableFiles);
       if (existing) {
         if (existing.status === 'confirmed') fail(409, 'PERFORMANCE_CONFIRMED', '이미 확정된 기존 성과는 변경할 수 없습니다.');
         // An author may complete their own historical record without regaining task access.
-        Object.assign(existing, input, { metricName: input.metricName, value: input.value, unit: input.unit, status: 'draft', score: undefined, comment: undefined, approvedBy: undefined, approvedAt: undefined }); targetId = existing.id; departmentId = existing.departmentId;
+        Object.assign(existing, input, { title: performanceTitle, evidence: input.evidence ?? existing.evidence, attachmentIds: input.attachmentIds ?? existing.attachmentIds, metricName: input.metricName, value: input.value, unit: input.unit, status: 'draft', score: undefined, comment: undefined, approvedBy: undefined, approvedAt: undefined }); targetId = existing.id; departmentId = existing.departmentId;
       } else {
         const task = getTask(state, user, taskId, now); ensureRegistered(state, task);
         if (task.primaryId !== user.id) fail(403, 'PERFORMANCE_DENIED', '세부업무의 본인 담당자만 새 반기 성과를 작성할 수 있습니다.');
@@ -891,10 +914,10 @@ export function executeCommand(state: WorkspaceData, userId: string, raw: unknow
         const plan = getUnitScorePlan(state, user.id, input.period);
         const recordedDepartment = plan?.departmentId ?? currentPersonPerformances(state, user.id, input.period)[0]?.departmentId;
         if (recordedDepartment && recordedDepartment !== task.departmentId) fail(409, 'PERFORMANCE_DEPARTMENT_MISMATCH', '이 반기는 이전 부서 성과를 정리하는 기록이 있습니다. 현재는 한 반기에 한 부서의 평가를 지원합니다.');
-        const performance = { ...input, id: id('perf'), taskId: task.id, unitId: task.unitId, runId: state.runs.find(r => r.taskId === task.id)?.id ?? '', authorId: user.id, departmentId: task.departmentId, status: 'draft' as const, createdAt: now.toISOString() };
+        const performance = { ...input, title: task.title, evidence: input.evidence ?? '', id: id('perf'), taskId: task.id, unitId: task.unitId, runId: state.runs.find(r => r.taskId === task.id)?.id ?? '', authorId: user.id, departmentId: task.departmentId, status: 'draft' as const, createdAt: now.toISOString() };
         state.performances.unshift(performance); targetId = performance.id; departmentId = task.departmentId;
       }
-      detail = `${input.title} · ${input.period}`; title = '세부업무 성과 저장'; break;
+      detail = `${performanceTitle} · ${input.period}`; title = '세부업무 성과 저장'; break;
     }
     case 'performance.evaluate': {
       const perf = state.performances.find(item => item.id === required(p, 'performanceId'));
@@ -916,8 +939,35 @@ export function executeCommand(state: WorkspaceData, userId: string, raw: unknow
       const release = { ...input, id: id('release'), date: koreaDate(now) }; state.releases ??= []; state.releases.unshift(release);
       targetId = release.id; detail = `${release.version} · ${release.title}`; title = '프로젝트 버전 등록'; break;
     }
-    case 'performance.create': { const run = getRun(state, user, required(p, 'runId'), now); if (run.taskId !== required(p, 'taskId')) fail(422, 'RUN_TASK_MISMATCH', '성과와 회차의 업무가 일치해야 합니다.'); if (!canExecute(state, user, run, command.type, now)) fail(403, 'PERFORMANCE_DENIED', '회차 담당자만 성과를 등록할 수 있습니다.'); const input = parse(z.object({ title: text.max(150), description: text, evidence: text, metricName: z.string().optional(), value: z.number().finite().optional(), unit: z.string().optional(), previousId: z.string().optional() }), p); if (state.performances.some(item => item.runId === run.id && item.evidence === input.evidence && item.metricName === input.metricName && item.id !== input.previousId)) fail(409, 'DUPLICATE_PERFORMANCE', '같은 회차·증빙·지표의 성과가 있습니다. 기존 성과를 확인해 주세요.'); if (input.previousId) { const previous = state.performances.find(item => item.id === input.previousId && item.runId === run.id && item.status === 'confirmed'); if (previous?.period) fail(409, 'HALF_COMMAND_REQUIRED', '반기 성과는 반기 제출 및 부서장 평가 절차를 이용해 주세요.'); if (!previous) fail(422, 'CORRECTION_TARGET', '확정된 같은 회차 성과를 정정 대상으로 선택해 주세요.'); if (state.performances.some(item => item.previousId === previous.id)) fail(409, 'CORRECTION_EXISTS', '이 성과의 정정본이 이미 있습니다. 최신 정정본을 확인해 주세요.'); } const performance = { ...input, id: id('perf'), taskId: run.taskId, runId: run.id, authorId: user.id, departmentId: run.departmentId, status: 'review' as const, createdAt: now.toISOString() }; state.performances.unshift(performance); targetId = performance.id; departmentId = run.departmentId; detail = performance.title; title = '성과 검토 요청'; break; }
-    case 'performance.resubmit': { const perf = state.performances.find(item => item.id === required(p, 'performanceId')); if (!perf) fail(404, 'NOT_FOUND', '성과를 찾을 수 없습니다.'); if (perf.period) fail(409, 'HALF_COMMAND_REQUIRED', '반기 성과는 반기 제출 및 부서장 평가 절차를 이용해 주세요.'); const run = getRun(state, user, perf.runId, now); if (perf.authorId !== user.id || !canExecute(state, user, run, 'performance.create', now)) fail(403, 'PERFORMANCE_DENIED', '현재 수행 권한이 있는 원작성자만 보완할 수 있습니다.'); if (perf.status !== 'changes_requested') fail(409, 'INVALID_STATE', '보완 요청된 성과만 다시 제출할 수 있습니다.'); perf.description = required(p, 'description'); perf.evidence = required(p, 'evidence'); perf.status = 'review'; targetId = perf.id; departmentId = perf.departmentId; detail = perf.title; title = '성과 보완 후 재검토 요청'; break; }
+    case 'performance.create': {
+      const run = getRun(state, user, required(p, 'runId'), now);
+      if (run.taskId !== required(p, 'taskId')) fail(422, 'RUN_TASK_MISMATCH', '성과와 회차의 업무가 일치해야 합니다.');
+      if (!canExecute(state, user, run, command.type, now)) fail(403, 'PERFORMANCE_DENIED', '회차 담당자만 성과를 등록할 수 있습니다.');
+      const input = parse(z.object({ ...performanceFields, previousId: z.string().optional() }), p);
+      validateLinkedAttachments(state, run.taskId, input.attachmentIds, 'PERFORMANCE');
+      const evidence = input.evidence ?? '';
+      if (state.performances.some(item => item.runId === run.id && item.id !== input.previousId && item.metricName === input.metricName && (evidence ? item.evidence === evidence : !item.evidence && item.description === input.description && isDeepStrictEqual([...(item.attachmentIds ?? [])].sort(), [...(input.attachmentIds ?? [])].sort())))) fail(409, 'DUPLICATE_PERFORMANCE', '같은 회차에 동일한 성과가 있습니다. 기존 성과를 확인해 주세요.');
+      if (input.previousId) {
+        const previous = state.performances.find(item => item.id === input.previousId && item.runId === run.id && item.status === 'confirmed');
+        if (previous?.period) fail(409, 'HALF_COMMAND_REQUIRED', '반기 성과는 반기 제출 및 부서장 평가 절차를 이용해 주세요.');
+        if (!previous) fail(422, 'CORRECTION_TARGET', '확정된 같은 회차 성과를 정정 대상으로 선택해 주세요.');
+        if (state.performances.some(item => item.previousId === previous.id)) fail(409, 'CORRECTION_EXISTS', '이 성과의 정정본이 이미 있습니다. 최신 정정본을 확인해 주세요.');
+      }
+      const performance = { ...input, title: state.tasks.find(task => task.id === run.taskId)!.title, evidence, id: id('perf'), taskId: run.taskId, runId: run.id, authorId: user.id, departmentId: run.departmentId, status: 'review' as const, createdAt: now.toISOString() };
+      state.performances.unshift(performance); targetId = performance.id; departmentId = run.departmentId; detail = performance.title; title = '성과 검토 요청'; break;
+    }
+    case 'performance.resubmit': {
+      const perf = state.performances.find(item => item.id === required(p, 'performanceId'));
+      if (!perf) fail(404, 'NOT_FOUND', '성과를 찾을 수 없습니다.');
+      if (perf.period) fail(409, 'HALF_COMMAND_REQUIRED', '반기 성과는 반기 제출 및 부서장 평가 절차를 이용해 주세요.');
+      const run = getRun(state, user, perf.runId, now);
+      if (perf.authorId !== user.id || !canExecute(state, user, run, 'performance.create', now)) fail(403, 'PERFORMANCE_DENIED', '현재 수행 권한이 있는 원작성자만 보완할 수 있습니다.');
+      if (perf.status !== 'changes_requested') fail(409, 'INVALID_STATE', '보완 요청된 성과만 다시 제출할 수 있습니다.');
+      const input = parse(z.object({ description: performanceFields.description, evidence: performanceFields.evidence, attachmentIds: performanceFields.attachmentIds }), p);
+      validateLinkedAttachments(state, perf.taskId, input.attachmentIds, 'PERFORMANCE');
+      perf.description = input.description; if (input.evidence !== undefined) perf.evidence = input.evidence; if (input.attachmentIds !== undefined) perf.attachmentIds = input.attachmentIds;
+      perf.status = 'review'; targetId = perf.id; departmentId = perf.departmentId; detail = perf.title; title = '성과 보완 후 재검토 요청'; break;
+    }
     case 'performance.approve': case 'performance.requestChanges': { const perf = state.performances.find(item => item.id === required(p, 'performanceId')); if (!perf) fail(404, 'NOT_FOUND', '성과를 찾을 수 없습니다.'); if (perf.period) fail(409, 'HALF_COMMAND_REQUIRED', '반기 성과는 반기 제출 및 부서장 평가 절차를 이용해 주세요.'); const run = getRun(state, user, perf.runId, now); if (user.id === perf.authorId) fail(403, 'SELF_APPROVAL', '작성자는 자신의 성과를 승인할 수 없습니다.'); if (run.reviewerId !== user.id && !approveDepartment(user, run.departmentId)) fail(403, 'REVIEW_DENIED', '지정된 총괄 또는 부서장만 검토할 수 있습니다.'); if (perf.status !== 'review') fail(409, 'INVALID_STATE', '검토 중인 성과만 처리할 수 있습니다.'); perf.status = command.type === 'performance.approve' ? 'confirmed' : 'changes_requested'; if (perf.status === 'confirmed' && perf.previousId && state.performances.some(item => item.id !== perf.id && item.previousId === perf.previousId && item.status === 'confirmed')) fail(409, 'CORRECTION_CONFLICT', '다른 정정본이 먼저 승인되었습니다. 최신 성과를 확인해 주세요.'); if (perf.status === 'confirmed') { perf.approvedBy = user.id; perf.approvedAt = now.toISOString(); } targetId = perf.id; departmentId = perf.departmentId; detail = perf.title + (typeof p.reason === 'string' ? ` · ${p.reason}` : ''); title = perf.status === 'confirmed' ? '성과 확정' : '성과 보완 요청'; break; }
     case 'source.create': { const input = parse(z.object({ title: text.max(150), type: z.enum(['manual', 'guideline', 'law', 'reference']), publisher: text, version: text.max(50), effectiveDate: date, url: z.union([z.literal(''), z.url().refine(url => /^https?:\/\//i.test(url), 'HTTP(S) 주소만 허용됩니다.')]).default(''), description: text, classification: z.enum(['public', 'internal', 'restricted']), aiAllowed: z.boolean().default(false) }), p); if (input.aiAllowed && input.classification !== 'public') fail(422, 'AI_POLICY', '현재 정책에서는 공개자료만 AI 전송 허용으로 지정할 수 있습니다.'); const source = { ...input, id: id('source'), departmentId: user.departmentId, ownerId: user.id, verified: false, updatedAt: now.toISOString() }; state.sources.unshift(source); targetId = source.id; detail = source.title; title = '근거 자료 등록'; break; }
     case 'source.verify': case 'source.revise': { const source = state.sources.find(s => s.id === required(p, 'sourceId')); if (!source) fail(404, 'NOT_FOUND', '근거 자료를 찾을 수 없습니다.'); if (!canReadSource(state, user, source, now)) fail(403, 'SOURCE_ACCESS_DENIED', '자료 본문에 접근할 권한이 없습니다.'); scoped(user, source.departmentId, command.type === 'source.verify'); if (command.type === 'source.verify') { if (source.type === 'law' && !source.url) fail(422, 'SOURCE_URL_REQUIRED', '법령의 공식 원문 URL을 입력해 주세요.'); source.verified = true; title = '근거 자료 검토 확인'; } else { const next = { ...source, id: id('source'), version: required(p, 'version'), effectiveDate: parse(date, p.effectiveDate), description: typeof p.description === 'string' ? p.description : source.description, verified: false, updatedAt: now.toISOString() }; state.sources.unshift(next); title = '새 자료 버전 등록 · 기존 참조 보존'; } targetId = source.id; departmentId = source.departmentId; detail = source.title; break; }
