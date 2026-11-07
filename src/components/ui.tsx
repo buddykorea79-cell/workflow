@@ -2,14 +2,15 @@
 
 import { useEffect, useId, useRef, type ButtonHTMLAttributes, type ReactNode } from 'react';
 import { ArrowUpRight, FolderOpen, X } from 'lucide-react';
+import './task-detail-actions.css';
 
 export type CommandFn = (type: string, payload: Record<string, unknown>) => Promise<boolean>;
 
-export function Button({ variant = 'primary', className = '', type = 'button', ...props }: ButtonHTMLAttributes<HTMLButtonElement> & { variant?: 'primary' | 'secondary' | 'ghost' }) {
+export function Button({ variant = 'primary', className = '', type = 'button', ...props }: ButtonHTMLAttributes<HTMLButtonElement> & { variant?: 'primary' | 'secondary' | 'ghost' | 'accent' }) {
   return <button type={type} className={`btn btn-${variant} ${className}`} {...props} />;
 }
 
-export function Modal({ title, description, onClose, children, wide = false }: { title: string; description?: string; onClose: () => void; children: ReactNode; wide?: boolean }) {
+export function Modal({ title, description, onClose, children, wide = false, className = '' }: { title: string; description?: string; onClose: () => void; children: ReactNode; wide?: boolean; className?: string }) {
   const ref = useRef<HTMLDivElement>(null);
   const closeRef = useRef(onClose); closeRef.current = onClose;
   const headingId = useId();
@@ -30,7 +31,7 @@ export function Modal({ title, description, onClose, children, wide = false }: {
     document.addEventListener('keydown', key);
     return () => { document.body.style.overflow = originalOverflow; document.removeEventListener('keydown', key); previous?.focus(); };
   }, []);
-  return <div className="modal-backdrop" onMouseDown={e => { if (e.target === e.currentTarget) onClose(); }}><div ref={ref} className={`modal ${wide ? 'modal-wide' : ''}`} role="dialog" aria-modal="true" aria-labelledby={headingId} tabIndex={-1}>
+  return <div className="modal-backdrop" onMouseDown={e => { if (e.target === e.currentTarget) onClose(); }}><div ref={ref} className={`modal ${wide ? 'modal-wide' : ''} ${className}`} role="dialog" aria-modal="true" aria-labelledby={headingId} tabIndex={-1}>
     <header className="modal-heading"><div><h2 id={headingId}>{title}</h2>{description && <p>{description}</p>}</div><button type="button" className="icon-btn" aria-label="닫기" onClick={onClose}><X size={21}/></button></header>
     <div className="modal-content">{children}</div>
   </div></div>;
