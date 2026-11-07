@@ -1,33 +1,21 @@
-/* Keep editing actions visible inside task details without recoloring navigation. */
-.btn.btn-accent,
-.pw-task-detail .btn[data-task-action="true"],
-.pw-task-detail .btn[type="submit"],
-.pw-task-detail .law-import-action .btn {
+/* Reserve orange for explicitly chosen edit and final-save actions. */
+.btn.btn-accent {
   background: #c65516;
   border-color: #c65516;
   color: #fff;
   font-weight: 600;
   box-shadow: 0 2px 5px #9d3e1114;
 }
-.btn.btn-accent:hover:not(:disabled),
-.pw-task-detail .btn[data-task-action="true"]:hover:not(:disabled),
-.pw-task-detail .btn[type="submit"]:hover:not(:disabled),
-.pw-task-detail .law-import-action .btn:hover:not(:disabled) {
+.btn.btn-accent:hover:not(:disabled) {
   background: #aa4510;
   border-color: #aa4510;
   color: #fff;
 }
-.btn.btn-accent:focus-visible,
-.pw-task-detail .btn[data-task-action="true"]:focus-visible,
-.pw-task-detail .btn[type="submit"]:focus-visible,
-.pw-task-detail .law-import-action .btn:focus-visible {
+.btn.btn-accent:focus-visible {
   outline: 3px solid #f6b58d;
   outline-offset: 3px;
 }
-.btn.btn-accent:disabled,
-.pw-task-detail .btn[data-task-action="true"]:disabled,
-.pw-task-detail .btn[type="submit"]:disabled,
-.pw-task-detail .law-import-action .btn:disabled {
+.btn.btn-accent:disabled {
   background: #f5e7dd;
   border-color: #ead3c1;
   color: #8a6650;
