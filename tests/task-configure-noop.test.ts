@@ -1,0 +1,36 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import { randomUUID } from 'node:crypto';
+import { DomainError, executeCommand } from '../src/lib/domain';
+import { createSeed } from '../src/lib/seed';
+
+const now = new Date('2026-11-07T03:00:00Z');
+test('saving an unchanged configuration preserves revisions, active execution and legacy handover approvals', () => {
+  const state = createSeed(now);
+  const send = (actor: string, type: string, payload: Record<string, unknown>, requestId = randomUUID(), expectedRevision = state.revision) => executeCommand(state, actor, { type, payload, requestId, expectedRevision }, now);
+  send('u-seoyeon', 'task.create', { title: '동일 저장 확인', description: '내용이 바뀐 경우만 업무 기준 갱신', unitId: 'unit-record', primaryId: 'u-seoyeon', supportIds: [], dueDate: '2026-11-30', frequency: 'monthly' });
+  const task = state.tasks[0];
+  send('u-seoyeon', 'run.schedule', { taskId: task.id, startDate: '2026-11-07', dueDate: '2026-11-30', steps: task.workflow.map(step => ({ stepId: step.id })) });
+  send('u-seoyeon', 'handover.create', { taskIds: [task.id], runIds: [], toId: 'u-jiho', effectiveAt: '2026-11-20T00:00:00Z', summary: '인계', pendingItems: '진행 확인', nextAction: '기한 확인' });
+  const handover = state.handovers[0];
+  send('u-head', 'handover.approve', { handoverId: handover.id });
+  for (const check of handover.checklist) send('u-jiho', 'handover.check', { handoverId: handover.id, checkId: check.id, checked: true });
+  send('u-jiho', 'handover.accept', { handoverId: handover.id });
+  const before = structuredClone(state), requestId = randomUUID();
+  const payload = { taskId: task.id, title: task.title, description: task.description, frequency: task.frequency, budget: task.budget ?? 0, descriptionAttachmentIds: [], references: [], expenses: [], workflow: task.workflow.map(step => ({ ...step, attachmentIds: [], startDate: undefined, dueDate: undefined })) };
+  send('u-seoyeon', 'task.configure', payload, requestId);
+  assert.equal(state.revision, before.revision);
+  assert.deepEqual(state.tasks, before.tasks);
+  assert.deepEqual(state.runs, before.runs);
+  assert.deepEqual(state.handovers, before.handovers);
+  assert.deepEqual(state.audit, before.audit);
+  assert.equal(state.processedRequests.length, before.processedRequests.length + 1);
+  const saved = structuredClone(state);
+  send('u-seoyeon', 'task.configure', payload, requestId, before.revision);
+  assert.deepEqual(state, saved);
+  assert.throws(() => send('u-seoyeon', 'task.configure', { ...payload, description: '다른 내용' }, requestId), error => error instanceof DomainError && error.code === 'IDEMPOTENCY_CONFLICT');
+  send('u-seoyeon', 'task.configure', { ...payload, description: '실제 변경한 내용' });
+  assert.equal(state.revision, before.revision + 1);
+  assert.equal(task.version, before.tasks[0].version + 1);
+  assert.equal(handover.status, 'approval');
+});

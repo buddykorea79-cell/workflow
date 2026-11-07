@@ -7,12 +7,14 @@ const step = (id: string, patch: Partial<WorkflowStep> = {}): WorkflowStep => ({
 const source = { title: '예산 집행 지침', type: 'guideline' as const, text: '1. 담당자는 요구자료를 작성한다.\n2. 지원자는 관련 자료를 취합한다.\n3. 부서장은 결과를 검토하고 승인한다.', url: 'https://example.org/manual' };
 
 test('numbered source produces editable ordered steps, role lanes and source references', () => {
-  const draft = generateProcedureDraft(source, 'draft');
+  const draft = generateProcedureDraft(source, 'draft', { hasSupport: true });
   assert.equal(draft.steps.length, 3);
   assert.deepEqual(draft.steps.map(item => item.role), ['primary', 'support', 'reviewer']);
   assert.deepEqual(draft.steps.map(item => item.dependsOn), [[], ['draft-1'], ['draft-2']]);
   assert.ok(draft.steps.every(item => !item.done));
-  assert.match(draft.steps[0].description, /예산 집행 지침 · 문단 1/);
+  assert.equal(draft.steps[0].description, '담당자는 요구자료를 작성한다.');
+  assert.deepEqual(draft.evidence['draft-1'], { sourceTitle: source.title, locator: '문단 1', excerpt: '1. 담당자는 요구자료를 작성한다.' });
+  assert.ok(draft.steps.every(item => item.output === '' && item.checklist.length === 0));
   assert.equal(draft.evidence['draft-3'].excerpt, '3. 부서장은 결과를 검토하고 승인한다.');
   assert.equal(draft.references[0].url, source.url);
   assert.match(draft.warnings[0], /규칙 기반/);

@@ -95,10 +95,10 @@ export function TaskDelegationSection({ workspace, command, task, disabled = fal
 
 type DelegationGroup = { id: string; records: Delegation[] };
 
-export function DelegationWork({ workspace: w, command, onOpenTask }: Props & { onOpenTask?: (id: string) => void }) {
+export function DelegationWork({ workspace: w, command, onOpenTask, initialDelegationId }: Props & { onOpenTask?: (id: string) => void; initialDelegationId?: string }) {
   const [filter, setFilter] = useState<'pending' | 'active' | 'history' | 'all'>(w.currentUser.role === 'head' ? 'pending' : 'all');
   const [requesting, setRequesting] = useState(false);
-  const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [selectedId, setSelectedId] = useState<string | null>(() => { const item = w.delegations.find(record => record.id === initialDelegationId); return item ? item.batchId || item.id : null; });
   const [resolution, setResolution] = useState(''); const [busy, setBusy] = useState(false); const [error, setError] = useState('');
   const now = new Date(w.serverTime);
   const recordPhase = (record: Delegation) => delegationStatus(record) === 'pending' ? 'pending' : delegationStatus(record) === 'approved' && new Date(record.endsAt) > now ? 'active' : 'history';

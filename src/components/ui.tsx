@@ -6,6 +6,9 @@ import './task-detail-actions.css';
 
 export type CommandFn = (type: string, payload: Record<string, unknown>) => Promise<boolean>;
 
+let openModalCount = 0;
+let pageOverflowBeforeModals = '';
+
 export function Button({ variant = 'primary', className = '', type = 'button', ...props }: ButtonHTMLAttributes<HTMLButtonElement> & { variant?: 'primary' | 'secondary' | 'ghost' | 'accent' }) {
   return <button type={type} className={`btn btn-${variant} ${className}`} {...props} />;
 }
@@ -16,10 +19,13 @@ export function Modal({ title, description, onClose, children, wide = false, cla
   const headingId = useId();
   useEffect(() => {
     const previous = document.activeElement as HTMLElement | null;
-    const originalOverflow = document.body.style.overflow;
+    if (openModalCount === 0) pageOverflowBeforeModals = document.body.style.overflow;
+    openModalCount++;
     document.body.style.overflow = 'hidden';
     ref.current?.focus();
     const key = (event: KeyboardEvent) => {
+      const dialogs = document.querySelectorAll('[role="dialog"][aria-modal="true"]');
+      if (event.defaultPrevented || dialogs.item(dialogs.length - 1) !== ref.current) return;
       if (event.key === 'Escape') { event.preventDefault(); closeRef.current(); }
       if (event.key !== 'Tab') return;
       const items = Array.from(ref.current?.querySelectorAll<HTMLElement>('button:not(:disabled), [href], input:not(:disabled), select:not(:disabled), textarea:not(:disabled), [tabindex="0"]') || []).filter(el => el.getClientRects().length);
@@ -29,7 +35,7 @@ export function Modal({ title, description, onClose, children, wide = false, cla
       else if (!event.shiftKey && (document.activeElement === last || document.activeElement === ref.current)) { event.preventDefault(); first.focus(); }
     };
     document.addEventListener('keydown', key);
-    return () => { document.body.style.overflow = originalOverflow; document.removeEventListener('keydown', key); previous?.focus(); };
+    return () => { openModalCount--; if (openModalCount === 0) document.body.style.overflow = pageOverflowBeforeModals; document.removeEventListener('keydown', key); if (previous?.isConnected) previous.focus(); };
   }, []);
   return <div className="modal-backdrop" onMouseDown={e => { if (e.target === e.currentTarget) onClose(); }}><div ref={ref} className={`modal ${wide ? 'modal-wide' : ''} ${className}`} role="dialog" aria-modal="true" aria-labelledby={headingId} tabIndex={-1}>
     <header className="modal-heading"><div><h2 id={headingId}>{title}</h2>{description && <p>{description}</p>}</div><button type="button" className="icon-btn" aria-label="닫기" onClick={onClose}><X size={21}/></button></header>

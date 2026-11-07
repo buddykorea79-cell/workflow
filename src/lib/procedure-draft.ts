@@ -8,6 +8,7 @@ export interface ProcedureSource { title: string; text: string; type: TaskRefere
 export interface ProcedureEvidence { sourceTitle: string; locator: string; excerpt: string }
 export interface ProcedureAnalysis { summary: string; sources: Array<{ referenceId: string; sourceTitle: string; summary: string; locator: string; excerpt: string }> }
 export interface ProcedureDraft { steps: WorkflowStep[]; references: TaskReference[]; evidence: Record<string, ProcedureEvidence>; warnings: string[]; analysis?: ProcedureAnalysis }
+export interface ProcedureGenerationOptions { hasSupport?: boolean }
 
 const numbered = /^(?:제\s*\d+\s*조(?:의\s*\d+)?(?:\([^)]*\))?|\d{1,3}[.)]\s*|[가-하][.)]\s*|[①-⑳]\s*|[-•○]\s*)/;
 const actions = /접수|신청|제출|검토|승인|심사|확인|작성|통보|배정|등록|취합|협의|지급|정산|보고|분석|처리|평가|결정|수집/;
@@ -31,7 +32,7 @@ function paragraphs(text: string): string[] {
   return result.length === 1 && !numbered.test(result[0]) ? result[0].split(/(?<=[.!?。])\s+/).filter(Boolean) : result;
 }
 
-export function generateProcedureDraft(source: ProcedureSource, idPrefix: string): ProcedureDraft {
+export function generateProcedureDraft(source: ProcedureSource, idPrefix: string, { hasSupport = false }: ProcedureGenerationOptions = {}): ProcedureDraft {
   if (!source.title.trim()) throw new Error('자료 제목을 입력해 주세요.');
   if (!validSourceUrl(source.url || '')) throw new Error('원문 주소는 HTTP 또는 HTTPS 주소로 입력해 주세요.');
   if (!source.text.trim() && !source.pages?.some(page => page.text.trim())) throw new Error('절차를 만들 본문을 입력해 주세요.');
@@ -46,13 +47,13 @@ export function generateProcedureDraft(source: ProcedureSource, idPrefix: string
   const steps = candidates.slice(0, PROCEDURE_STEP_LIMIT).map((item, index): WorkflowStep => {
     const id = `${idPrefix}-${index + 1}`;
     const title = item.text.replace(numbered, '').trim().slice(0, 90) || `절차 ${index + 1}`;
-    const role = /검토|승인|심사|평가|결정/.test(title) ? 'reviewer' : /취합|수집|지원|협조/.test(title) ? 'support' : 'primary';
+    const role = /검토|승인|심사|평가|결정/.test(title) ? 'reviewer' : hasSupport && /취합|수집|지원|협조/.test(title) ? 'support' : 'primary';
     evidence[id] = { sourceTitle: source.title.trim(), locator: item.locator, excerpt: item.text };
-    return { id, title, role, description: `[근거: ${source.title.trim()} · ${item.locator}]\n${item.text.slice(0, 4300)}\n\n역할·완료 조건은 검토 후 확정해 주세요.`, output: '결과물 확인 필요', required: true, dependsOn: index ? [`${idPrefix}-${index}`] : [], checklist: ['처리 결과와 근거 확인'], done: false };
+    return { id, title, role, description: item.text.replace(numbered, '').trim().slice(0, 5000), output: '', required: true, dependsOn: index ? [`${idPrefix}-${index}`] : [], checklist: [], done: false };
   });
   if (!steps.some(step => step.role === 'reviewer')) {
     const id = `${idPrefix}-review`;
-    steps.push({ id, title: '절차 및 결과 검토', role: 'reviewer', description: '원문에서 직접 추출한 단계가 아닙니다. 업무 확정에 필요한 필수 검토 단계로 추가했습니다. 실제 검토자와 완료 조건을 확인해 주세요.', output: '검토 의견', required: true, dependsOn: [steps.at(-1)!.id], checklist: ['원문과 업무 절차의 일치 확인'], done: false });
+    steps.push({ id, title: '절차 및 결과 검토', role: 'reviewer', description: '원문에서 직접 추출한 단계가 아닙니다. 실제 검토자가 업무 절차와 처리 결과가 원문에 맞는지 확인합니다.', output: '', required: true, dependsOn: [steps.at(-1)!.id], checklist: [], done: false });
     evidence[id] = { sourceTitle: source.title.trim(), locator: '검토용 추가 단계 · 직접 근거 없음', excerpt: '' };
     warnings.push('원문에서 검토 역할을 찾지 못해 검토용 단계를 추가했습니다. 실제 절차에 맞게 수정해 주세요.');
   }

@@ -61,14 +61,14 @@ export async function POST(request: NextRequest) {
         if (!file) throw new DomainError(409, 'AI_ATTACHMENT_MISSING', '이 업무의 첨부파일 연결을 확인해 주세요.');
         return [file];
       });
-      return structuredClone({ title: task.title, description: task.description, completionCriteria: task.completionCriteria, overviewAttachments, references: saved, attachments, requiredStepTitles: state.commonTasks.find(common => common.id === task.commonId)?.requiredSteps });
+      return structuredClone({ hasSupport: task.supportIds.length > 0, title: task.title, description: task.description, completionCriteria: task.completionCriteria, overviewAttachments, references: saved, attachments, requiredStepTitles: state.commonTasks.find(common => common.id === task.commonId)?.requiredSteps });
     });
     if (activeRequests.has(userId)) throw new DomainError(429, 'AI_ALREADY_RUNNING', '진행 중인 AI 분석이 끝난 뒤 다시 요청해 주세요.');
     activeRequests.add(userId); requestKey = userId;
     // Overview files are the primary input and are always read. This switch only controls reference files.
     const overview = await readProcedureOverviewDocuments(source.overviewAttachments);
     const prepared = input.readAttachments ? await readProcedureDocuments(source.references, source.attachments) : { references: source.references, warnings: [] };
-    const result = await generateAiProcedure({ title: source.title, description: source.description, completionCriteria: source.completionCriteria, documents: overview.documents, references: prepared.references, requiredStepTitles: source.requiredStepTitles }, { signal: request.signal });
+    const result = await generateAiProcedure({ hasSupport: source.hasSupport, title: source.title, description: source.description, completionCriteria: source.completionCriteria, documents: overview.documents, references: prepared.references, requiredStepTitles: source.requiredStepTitles }, { signal: request.signal });
     result.draft.warnings.push(...overview.warnings, ...prepared.warnings);
     return json(result);
   } catch (error) { return apiError(error); }

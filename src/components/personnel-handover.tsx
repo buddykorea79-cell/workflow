@@ -5,6 +5,7 @@ import { ArrowLeftRight, ArrowRight, Check, ChevronRight, Clock3, FileText, Fold
 import type { Task, Unit, User, WorkTransfer, Workspace } from '@/lib/types';
 import { residualTransferRoles, transferRoleLabels, transferRoleRecipientError } from '@/lib/transfer-roles';
 import { Badge, Button, EmptyState, Field, Modal, type CommandFn } from './ui';
+import { canCancelTransfer } from '@/lib/transfer-permissions';
 import './personnel-handover.css';
 
 type Tab = 'pending' | 'custody' | 'history';
@@ -218,7 +219,7 @@ function TransferDetail({ transfer, workspace, command, busy, onClose, onOpenTas
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
   const canApprove = user.role === 'head' && user.departmentId === transfer.departmentId && transfer.status === 'pending';
-  const canCancel = transfer.requestedBy === user.id && transfer.status === 'pending';
+  const canCancel = canCancelTransfer(user, transfer);
   const disabled = busy || saving;
   const eventLabels = { requested: '승인 요청', emergency: '긴급 이관', approved: '승인 · 배정 완료', rejected: '반려', cancelled: '요청 취소' };
   async function resolve(action: 'approve' | 'reject' | 'cancel') {

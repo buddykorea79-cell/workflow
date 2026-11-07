@@ -5,6 +5,7 @@ import { CalendarDays, CheckCircle2, ChevronRight, Clock3, FileText, LockKeyhole
 import type { CommonDistribution, CommonTask, DirectiveMonthlyReport, Workspace } from '@/lib/types';
 import { canRecordDirectiveReport, directiveIssuerLabels, directiveReportStartMonth, isCentralDirective } from '@/lib/directives';
 import { Badge, Button, EmptyState, Field, Modal, type CommandFn } from './ui';
+import { useUnsavedChanges, useUnsavedNavigation } from './unsaved-changes';
 import './directive-monthly.css';
 
 type Props = {
@@ -15,19 +16,24 @@ type Props = {
   embedded?: boolean;
   onClose?: () => void;
   initialMonth?: string;
+  preservedDraftIds?: readonly string[];
+  onBusyChange?: (busy: boolean) => void;
 };
 
 const monthLabel = (month: string) => `${month.slice(0, 4)}년 ${Number(month.slice(5, 7))}월`;
 const dateLabel = (date: string) => new Date(date).toLocaleString('ko-KR', { timeZone: 'Asia/Seoul', year: 'numeric', month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' });
 const personName = (w: Workspace, userId?: string) => w.users.find(user => user.id === userId)?.name || w.identities?.find(user => user.id === userId)?.name || '담당자';
 
-export function DirectiveMonthlyReports({ workspace: w, common: initialCommon, distribution: initialDistribution, command, embedded = false, onClose, initialMonth }: Props) {
+export function DirectiveMonthlyReports({ workspace: w, common: initialCommon, distribution: initialDistribution, command, embedded = false, onClose, initialMonth, preservedDraftIds = [], onBusyChange }: Props) {
   const common = w.commonTasks.find(item => item.id === initialCommon.id) || initialCommon;
   const distribution = common.distributions.find(item => item.id === initialDistribution.id) || initialDistribution;
   const today = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Seoul', year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date(w.serverTime));
   const currentMonth = today.slice(0, 7);
   const [month, setMonth] = useState(initialMonth && /^20\d{2}-(0[1-9]|1[0-2])$/.test(initialMonth) ? initialMonth : currentMonth);
   const [saving, setSaving] = useState(false);
+  const { requestNavigation } = useUnsavedNavigation();
+  const changeMonth = (next: string) => { if (!saving && next !== month) requestNavigation(() => setMonth(next), undefined, preservedDraftIds); };
+  const closeReports = () => { if (!saving && onClose) requestNavigation(onClose); };
   const reports = [...(distribution.monthlyReports || [])].sort((a, b) => b.month.localeCompare(a.month));
   const selected = reports.find(report => report.month === month);
   const startMonth = directiveReportStartMonth(common, distribution);
@@ -45,16 +51,16 @@ export function DirectiveMonthlyReports({ workspace: w, common: initialCommon, d
       <div className="dm-context-facts"><span><CalendarDays size={14} />지시일자 {common.instructedOn?.replaceAll('-', '.') || '미등록'}</span><span>{department}{distribution.team ? ` · ${distribution.team}` : ''}</span><span><UserRound size={14} />{currentAssigneeId ? personName(w, currentAssigneeId) : '담당자 배정 전'}</span></div>
       {isCentralDirective(common) && <p className="dm-coordinator">장·차관 지시사항 · 기획재정담당관실 기획팀 총괄 관리</p>}
     </header>
-    <div className="dm-month-bar"><label><CalendarDays size={18} /><span>실적 대상 월</span><input aria-label="실적 대상 월" type="month" required min={canRecord ? startMonth : undefined} max={currentMonth} value={month} disabled={saving} onChange={event => setMonth(event.target.value)} /></label><Badge tone={selected ? 'success' : 'soft'}>{selected ? '실적 등록' : '실적 미등록'}</Badge></div>
+    <div className="dm-month-bar"><label><CalendarDays size={18} /><span>실적 대상 월</span><input aria-label="실적 대상 월" type="month" required min={canRecord ? startMonth : undefined} max={currentMonth} value={month} disabled={saving} onChange={event => changeMonth(event.target.value)} /></label><Badge tone={selected ? 'success' : 'soft'}>{selected ? '실적 등록' : '실적 미등록'}</Badge></div>
     {!canRecord && <p className="dm-readonly"><LockKeyhole size={16} />{unavailable}</p>}
     {canRecord && !monthAllowed && <p className="dm-validation" role="alert">{monthLabel(startMonth)}부터 이번 달까지의 실적을 입력할 수 있습니다.</p>}
-    {canRecord && monthAllowed ? <MonthlyReportForm key={`${distribution.id}-${month}`} workspace={w} common={common} distribution={distribution} month={month} report={selected} command={command} onSavingChange={setSaving} /> : selected ? <div className="dm-selected-record"><div className="dm-record-meta"><strong>{monthLabel(selected.month)} 실적</strong><span>{personName(w, selected.authorId)} · {dateLabel(selected.updatedAt)}</span></div><ReportBody report={selected} /></div> : <EmptyState title={`${month ? monthLabel(month) : '선택한 월'} 실적이 없습니다.`} description={completed ? '업무 완료 전 저장한 다른 월의 실적은 아래 이력에서 확인할 수 있습니다.' : '담당자가 월별 추진 실적을 저장하면 이곳에 표시됩니다.'} />}
-    <section className="dm-history" aria-label="월별 실적 이력"><header><h3><Clock3 size={17} />월별 실적 이력</h3><span>{reports.length}개월 기록</span></header>{reports.length ? <div className="dm-history-list">{reports.map(report => <details key={report.id} className="dm-history-item"><summary><span><strong>{monthLabel(report.month)}</strong><small>{personName(w, report.authorId)} · {dateLabel(report.updatedAt)}</small></span><ChevronRight size={16} /></summary><ReportBody report={report} />{canRecord && report.month >= startMonth && report.month <= currentMonth && <Button data-task-action="true" variant="ghost" disabled={saving} onClick={() => setMonth(report.month)}>이 달 실적 수정<ChevronRight size={14} /></Button>}</details>)}</div> : <p className="dm-history-empty">아직 등록된 월별 실적이 없습니다. 지시사항을 완료하기 전까지 매월 추진 내용을 기록하세요.</p>}</section>
+    {canRecord && monthAllowed ? <MonthlyReportForm key={`${distribution.id}-${month}`} workspace={w} common={common} distribution={distribution} month={month} report={selected} command={command} onSavingChange={value => { setSaving(value); onBusyChange?.(value); }} /> : selected ? <div className="dm-selected-record"><div className="dm-record-meta"><strong>{monthLabel(selected.month)} 실적</strong><span>{personName(w, selected.authorId)} · {dateLabel(selected.updatedAt)}</span></div><ReportBody report={selected} /></div> : <EmptyState title={`${month ? monthLabel(month) : '선택한 월'} 실적이 없습니다.`} description={completed ? '업무 완료 전 저장한 다른 월의 실적은 아래 이력에서 확인할 수 있습니다.' : '담당자가 월별 추진 실적을 저장하면 이곳에 표시됩니다.'} />}
+    <section className="dm-history" aria-label="월별 실적 이력"><header><h3><Clock3 size={17} />월별 실적 이력</h3><span>{reports.length}개월 기록</span></header>{reports.length ? <div className="dm-history-list">{reports.map(report => <details key={report.id} className="dm-history-item"><summary><span><strong>{monthLabel(report.month)}</strong><small>{personName(w, report.authorId)} · {dateLabel(report.updatedAt)}</small></span><ChevronRight size={16} /></summary><ReportBody report={report} />{canRecord && report.month >= startMonth && report.month <= currentMonth && <Button data-task-action="true" variant="ghost" disabled={saving} onClick={() => changeMonth(report.month)}>이 달 실적 수정<ChevronRight size={14} /></Button>}</details>)}</div> : <p className="dm-history-empty">아직 등록된 월별 실적이 없습니다. 지시사항을 완료하기 전까지 매월 추진 내용을 기록하세요.</p>}</section>
     <p className="dm-footnote">{canRecord ? '같은 달의 실적은 수정하여 저장할 수 있습니다. 월별 실적 저장은 업무의 절차 완료 상태를 변경하지 않습니다.' : '월별 추진 실적과 업무 절차의 완료 상태는 별도로 관리합니다. 완료 전 저장한 실적 이력은 계속 확인할 수 있습니다.'}</p>
-    {!embedded && onClose && <div className="form-actions"><Button variant="secondary" disabled={saving} onClick={onClose}>닫기</Button></div>}
+    {!embedded && onClose && <div className="form-actions"><Button variant="secondary" disabled={saving} onClick={closeReports}>닫기</Button></div>}
   </section>;
 
-  return embedded || !onClose ? content : <Modal title="지시사항 월별 실적관리" description="담당자가 완료 전까지 매월 추진 실적을 기록하고, 총괄 부서에서 함께 확인합니다." wide onClose={onClose}>{content}</Modal>;
+  return embedded || !onClose ? content : <Modal title="지시사항 월별 실적관리" description="담당자가 완료 전까지 매월 추진 실적을 기록하고, 총괄 부서에서 함께 확인합니다." wide onClose={closeReports}>{content}</Modal>;
 }
 
 function ReportBody({ report }: { report: DirectiveMonthlyReport }) {
@@ -68,13 +74,16 @@ function MonthlyReportForm({ workspace: w, common, distribution, month, report, 
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
   const [error, setError] = useState('');
+  const draftSnapshot = JSON.stringify({ achievements, nextPlan, issues });
+  const [savedSnapshot, setSavedSnapshot] = useState(draftSnapshot);
+  useUnsavedChanges(saving || draftSnapshot !== savedSnapshot, '월별 실적');
   const valid = !!achievements.trim();
   async function submit(event: FormEvent) {
     event.preventDefault();
     if (!valid || saving || !canRecordDirectiveReport(w, w.currentUser, common, distribution, new Date(w.serverTime))) return;
     setSaving(true); onSavingChange(true); setSaved(false); setError('');
     try {
-      if (await command('directive.saveMonthlyReport', { commonId: common.id, distributionId: distribution.id, month, achievements, nextPlan, issues })) setSaved(true);
+      if (await command('directive.saveMonthlyReport', { commonId: common.id, distributionId: distribution.id, month, achievements, nextPlan, issues })) { setSaved(true); setSavedSnapshot(draftSnapshot); }
       else setError('월별 실적을 저장하지 못했습니다. 안내 메시지를 확인하고 다시 저장해 주세요.');
     } catch (cause) { setError(cause instanceof Error ? cause.message : '월별 실적을 저장하지 못했습니다.'); }
     finally { setSaving(false); onSavingChange(false); }

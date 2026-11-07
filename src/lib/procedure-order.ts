@@ -1,4 +1,5 @@
 import type { WorkflowStep } from './types';
+import { procedureScheduleConflicts } from './procedure-schedule';
 
 export type ProcedureMoveDirection = 'up' | 'down';
 export interface ProcedureOrderChange {
@@ -36,9 +37,10 @@ function orderedChange(workflow: WorkflowStep[]): ProcedureOrderChange {
     const step = ordered[index];
     const previous = ordered[index - 1];
     step.dependsOn = previous ? [previous.id] : [];
-    const starts = step.startDate || step.dueDate;
-    const previousEnds = previous?.dueDate || previous?.startDate;
-    if (starts && previousEnds && starts < previousEnds) {
+  }
+  const conflictingIds = new Set(procedureScheduleConflicts(ordered, ordered.map(step => ({ ...step, stepId: step.id }))).map(issue => issue.stepId));
+  for (const step of ordered.slice(start)) {
+    if (conflictingIds.has(step.id)) {
       delete step.startDate;
       delete step.dueDate;
       clearedScheduleIds.push(step.id);

@@ -7,12 +7,13 @@ import type { Attachment, Task, TaskReference, WorkflowStep } from '@/lib/types'
 import { replaceProcedureDraft, generateProcedureDraft, procedureErrors, PROCEDURE_PDF_LIMIT, PROCEDURE_TEXT_LIMIT, type ProcedureDraft, type ProcedurePage } from '@/lib/procedure-draft';
 import { appendProcedureStep, canMoveProcedureStep, canRemoveProcedureStep, moveProcedureStep, removeProcedureStep } from '@/lib/procedure-order';
 import { AI_REFERENCE_LIMIT, AI_REFERENCE_TEXT_LIMIT, procedureOverviewFingerprint, procedureReferenceFingerprint } from '@/lib/procedure-ai-input';
+import { useUnsavedChanges } from './unsaved-changes';
 import '@xyflow/react/dist/style.css';
 import './procedure-builder.css';
 
-const roles: WorkflowStep['role'][] = ['support', 'primary', 'reviewer'];
-const roleLabels = { primary: '담당자 수행', support: '협업·지원', reviewer: '검토·승인' };
-const participantFallbacks = { primary: '담당자 미지정', support: '협업자 미지정', reviewer: '부서장 미지정' };
+const roles: WorkflowStep['role'][] = ['primary', 'support', 'reviewer'];
+const roleLabels = { primary: '담당자', support: '협업·지원', reviewer: '검토자' };
+const participantFallbacks = { primary: '담당자 미지정', support: '지원자 미지정', reviewer: '검토자 미지정' };
 export type ProcedureParticipants = Partial<Record<WorkflowStep['role'], string>>;
 const prefix = () => `procedure-${crypto.randomUUID().slice(0, 12)}`;
 
@@ -25,6 +26,7 @@ export function ProcedureFlow({ workflow, participants, selectedId, onSelect, re
     return () => document.removeEventListener('keydown', escape, true);
   }, [expanded]);
   const { nodes, edges } = useMemo(() => {
+    const laneRoles = roles.filter(role => role !== 'support' || workflow.some(step => step.role === 'support'));
     const levels = new Map<string, number>();
     const depth = (id: string, trail = new Set<string>()): number => {
       if (levels.has(id)) return levels.get(id)!;
@@ -37,18 +39,18 @@ export function ProcedureFlow({ workflow, participants, selectedId, onSelect, re
     const width = Math.max(900, (Math.max(0, ...levels.values()) + 1) * 260 + 210);
     const rowSpacing = 136;
     const counts = new Map<string, number>(); const positions = new Map<string, { x: number; y: number }>();
-    const laneHeights = roles.map(role => {
+    const laneHeights = laneRoles.map(role => {
       const occurrences = new Map<number, number>();
       for (const step of workflow.filter(item => item.role === role)) { const level = levels.get(step.id) || 0; occurrences.set(level, (occurrences.get(level) || 0) + 1); }
       return Math.max(1, ...occurrences.values()) * rowSpacing + 65;
     });
     const laneTops = laneHeights.map((_, index) => laneHeights.slice(0, index).reduce((sum, height) => sum + height + 12, 0));
     for (const step of workflow) {
-      const lane = roles.indexOf(step.role); const level = levels.get(step.id) || 0; const key = `${lane}-${level}`; const row = counts.get(key) || 0; counts.set(key, row + 1);
+      const lane = laneRoles.indexOf(step.role); const level = levels.get(step.id) || 0; const key = `${lane}-${level}`; const row = counts.get(key) || 0; counts.set(key, row + 1);
       positions.set(step.id, { x: 185 + level * 260, y: laneTops[lane] + 48 + row * rowSpacing });
     }
     const participant = (role: WorkflowStep['role']) => participants?.[role]?.trim() || participantFallbacks[role];
-    const nodes: Node[] = roles.map((role, index) => ({ id: `lane-${role}`, position: { x: 0, y: laneTops[index] }, data: { label: <div className="procedure-lane-label"><strong>{roleLabels[role]}</strong><span>{participant(role)}</span></div> }, style: { width, height: laneHeights[index] }, className: `procedure-lane procedure-lane-${role}`, selectable: false, draggable: false, focusable: false, zIndex: -1 }));
+    const nodes: Node[] = laneRoles.map((role, index) => ({ id: `lane-${role}`, position: { x: 0, y: laneTops[index] }, data: { label: <div className="procedure-lane-label"><strong>{roleLabels[role]}</strong><span>{participant(role)}</span></div> }, style: { width, height: laneHeights[index] }, className: `procedure-lane procedure-lane-${role}`, selectable: false, draggable: false, focusable: false, zIndex: -1 }));
     nodes.push(...workflow.map((step, index): Node => ({ id: step.id, position: positions.get(step.id)!, sourcePosition: Position.Right, targetPosition: Position.Left, data: { label: <div className="procedure-node-content"><span>{String(index + 1).padStart(2, '0')} · {roleLabels[step.role]}{step.done && <Check size={12}/>}</span><strong>{step.title}</strong><small className="procedure-node-participant" title={participant(step.role)}>{participant(step.role)}</small></div> }, style: { width: 225 }, className: `procedure-node${step.done ? ' is-complete' : ''}`, selected: step.id === selectedId, ariaLabel: `${index + 1}. ${step.title}, ${roleLabels[step.role]}, ${participant(step.role)}`, draggable: false })));
     const ids = new Set(workflow.map(step => step.id));
     const edges: Edge[] = workflow.flatMap(step => step.dependsOn.filter(id => ids.has(id)).map(id => ({ id: `${id}-${step.id}`, source: id, target: step.id, type: 'smoothstep', markerEnd: { type: MarkerType.ArrowClosed, color: '#5483cc' }, style: { stroke: '#5483cc', strokeWidth: 1.6 } })));
@@ -74,13 +76,14 @@ export interface ProcedureBuilderProps {
   workflow: WorkflowStep[];
   references?: TaskReference[];
   participants?: ProcedureParticipants;
+  hasSupport?: boolean;
   requiredStepTitles?: string[];
   disabled?: boolean;
   onApply: (steps: WorkflowStep[], refs: TaskReference[]) => Promise<boolean> | boolean;
   onClose?: () => void;
 }
 
-export function ProcedureBuilder({ taskId, overview, overviewAttachments, workflow, references = [], participants, requiredStepTitles = [], disabled = false, onApply, onClose }: ProcedureBuilderProps) {
+export function ProcedureBuilder({ taskId, overview, overviewAttachments, workflow, references = [], participants, hasSupport = false, requiredStepTitles = [], disabled = false, onApply, onClose }: ProcedureBuilderProps) {
   const [title, setTitle] = useState(''); const [url, setUrl] = useState('');
   const [type, setType] = useState<TaskReference['type']>('guideline'); const [text, setText] = useState('');
   const [pages, setPages] = useState<ProcedurePage[] | undefined>(); const [draft, setDraft] = useState<ProcedureDraft | null>(null);
@@ -89,12 +92,15 @@ export function ProcedureBuilder({ taskId, overview, overviewAttachments, workfl
   const [applying, setApplying] = useState(false); const [diagramChanged, setDiagramChanged] = useState(false); const [redrawKey, setRedrawKey] = useState(0);
   const [sourceMode, setSourceMode] = useState<'ai' | 'local'>('ai');
   const [referenceIds, setReferenceIds] = useState<string[]>(() => references.filter(reference => reference.content.trim() || reference.attachmentId).slice(0, AI_REFERENCE_LIMIT).map(reference => reference.id));
+  const initialReferenceIds = useRef(JSON.stringify([...referenceIds].sort()));
   const [generatedBy, setGeneratedBy] = useState('');
   const [readAttachments, setReadAttachments] = useState(true);
+  const sourceEdited = title !== '' || url !== '' || text !== '' || type !== 'guideline' || !!pages?.length || !readAttachments || JSON.stringify([...referenceIds].sort()) !== initialReferenceIds.current;
+  useUnsavedChanges(!!draft || busy || applying || sourceEdited, '절차 초안');
   const selectedReferences = references.filter(reference => referenceIds.includes(reference.id));
   const referencesFingerprint = procedureReferenceFingerprint(selectedReferences);
   const overviewFingerprint = procedureOverviewFingerprint(overview);
-  const sourceFingerprint = JSON.stringify([overviewFingerprint, referencesFingerprint, readAttachments]);
+  const sourceFingerprint = JSON.stringify([overviewFingerprint, referencesFingerprint, readAttachments, hasSupport]);
   const latestFingerprint = useRef(sourceFingerprint); latestFingerprint.current = sourceFingerprint;
   const controller = useRef<AbortController | null>(null);
   const selectedLength = overview.title.length + overview.description.length + overview.completionCriteria.length + selectedReferences.reduce((sum, reference) => sum + reference.content.length, 0);
@@ -133,7 +139,7 @@ export function ProcedureBuilder({ taskId, overview, overviewAttachments, workfl
   }
   function generate() {
     setError('');
-    try { const next = generateProcedureDraft({ title, text, type, url, pages }, prefix()); setDraft(next); setSelectedId(next.steps[0]?.id || ''); setReviewed(false); setDiagramChanged(false); setRedrawKey(value => value + 1); setGeneratedBy('규칙 기반 초안'); }
+    try { const next = generateProcedureDraft({ title, text, type, url, pages }, prefix(), { hasSupport }); setDraft(next); setSelectedId(next.steps[0]?.id || ''); setReviewed(false); setDiagramChanged(false); setRedrawKey(value => value + 1); setGeneratedBy('규칙 기반 초안'); }
     catch (cause) { setError(cause instanceof Error ? cause.message : '초안을 만들지 못했습니다.'); }
   }
   async function generateAi() {
@@ -144,7 +150,8 @@ export function ProcedureBuilder({ taskId, overview, overviewAttachments, workfl
       const result = await response.json() as { error?: string; draft?: ProcedureDraft; model?: string };
       if (!response.ok || !result.draft) throw new Error(result.error || 'AI 절차를 생성하지 못했습니다.');
       if (latestFingerprint.current !== fingerprint) throw new Error('분석 중 업무 개요·붙임 파일 또는 관련 근거가 변경되었습니다. 저장한 뒤 다시 분석해 주세요.');
-      setDraft(result.draft); setSelectedId(result.draft.steps[0]?.id || ''); setDiagramChanged(false); setRedrawKey(value => value + 1); setGeneratedBy(`BizRouter AI · ${result.model || '분석 완료'}`);
+      const next = { ...result.draft, steps: result.draft.steps.map(step => ({ ...step, role: step.role === 'support' && !hasSupport ? 'primary' as const : step.role })) };
+      setDraft(next); setSelectedId(next.steps[0]?.id || ''); setDiagramChanged(false); setRedrawKey(value => value + 1); setGeneratedBy(`BizRouter AI · ${result.model || '분석 완료'}`);
     } catch (cause) { if (!requestController.signal.aborted) setError(cause instanceof Error ? cause.message : 'AI 분석을 완료하지 못했습니다.'); }
     finally { if (!requestController.signal.aborted) setBusy(false); controller.current = null; }
   }
@@ -202,7 +209,7 @@ export function ProcedureBuilder({ taskId, overview, overviewAttachments, workfl
       <div className="procedure-edit-layout"><nav className="procedure-step-list" aria-label="초안 단계 선택">{draft.steps.map((step, index) => <button type="button" key={step.id} className={step.id === selectedId ? 'selected' : ''} disabled={locked} onClick={() => setSelectedId(step.id)}><span>{String(index + 1).padStart(2, '0')}</span><div><b>{step.title || '새 절차'}</b><small>{roleLabels[step.role]}<br/>{participants?.[step.role]?.trim() || participantFallbacks[step.role]}</small></div></button>)}</nav>
       {selected && <div className="procedure-step-editor">
         <div className="procedure-editor-title"><h4>{draft.steps.findIndex(step => step.id === selected.id) + 1}번 절차 수정</h4><div className="procedure-draft-order"><button type="button" className="btn btn-secondary" disabled={locked || !canMoveProcedureStep(draft.steps, selected.id, 'up')} aria-label={`${selected.title || '새 절차'} 위로 이동`} onClick={() => moveSelected('up')}><ArrowUp size={14}/>위로</button><button type="button" className="btn btn-secondary" disabled={locked || !canMoveProcedureStep(draft.steps, selected.id, 'down')} aria-label={`${selected.title || '새 절차'} 아래로 이동`} onClick={() => moveSelected('down')}><ArrowDown size={14}/>아래로</button>{!selectedRequired && !selectedLastReviewer && canRemoveProcedureStep(draft.steps, selected.id) && <button type="button" className="procedure-remove" disabled={locked} onClick={() => { const remaining = removeProcedureStep(draft.steps, selected.id).workflow; setDraft({ ...draft, steps: remaining }); setSelectedId(remaining[0]?.id || ''); setReviewed(false); setDiagramChanged(true); }}><Trash2 size={14}/>삭제</button>}</div></div>
-        <div className="procedure-source-grid procedure-essential-grid"><label><span>누가</span><select value={selected.role} disabled={locked || selectedRequired || selectedLastReviewer} onChange={event => updateStep(selected.id, { role: event.target.value as WorkflowStep['role'] })}>{roles.map(role => <option key={role} value={role}>{participants?.[role]?.trim() || participantFallbacks[role]} · {roleLabels[role]}</option>)}</select></label><label><span>무엇을</span><input value={selected.title} maxLength={150} disabled={locked || selectedRequired} placeholder="예: 부서별 자료 취합" onChange={event => updateStep(selected.id, { title: event.target.value })}/></label></div>
+        <div className="procedure-source-grid procedure-essential-grid"><label><span>누가</span><select value={selected.role} disabled={locked || selectedRequired || selectedLastReviewer} onChange={event => updateStep(selected.id, { role: event.target.value as WorkflowStep['role'] })}>{roles.map(role => <option key={role} value={role} disabled={role === 'support' && !hasSupport}>{participants?.[role]?.trim() || participantFallbacks[role]} · {roleLabels[role]}</option>)}</select></label><label><span>무엇을</span><input value={selected.title} maxLength={150} disabled={locked || selectedRequired} placeholder="예: 부서별 자료 취합" onChange={event => updateStep(selected.id, { title: event.target.value })}/></label></div>
         <label><span>어떻게</span><textarea rows={4} value={selected.description} maxLength={5000} disabled={locked} placeholder="수행 방법을 간단하게 적어 주세요." onChange={event => updateStep(selected.id, { description: event.target.value })}/></label>
         {draft.evidence[selected.id]?.excerpt && <details className="procedure-evidence"><summary><FileText size={14}/>초안의 원문 참고</summary><span>{draft.evidence[selected.id].locator}</span><strong>{draft.evidence[selected.id].sourceTitle || title}</strong><p>{draft.evidence[selected.id].excerpt}</p></details>}
       </div>}</div>

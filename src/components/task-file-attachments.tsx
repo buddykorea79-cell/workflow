@@ -5,12 +5,14 @@ import { Download, FileText, LoaderCircle, Paperclip, Plus, X } from 'lucide-rea
 import type { Attachment, Workspace } from '@/lib/types';
 import { canActAsDeputy } from '@/lib/delegations';
 import { uploadAttachment } from '@/lib/upload-attachment';
+import { getUnitEvaluation, getUnitScorePlan } from '@/lib/unit-evaluation';
 import { Button, type CommandFn } from './ui';
 import './task-file-attachments.css';
 
 interface Props {
   workspace: Workspace;
   taskId: string;
+  performanceId?: string;
   attachmentIds: string[];
   onChange?: (ids: string[]) => void;
   command?: CommandFn;
@@ -20,17 +22,19 @@ interface Props {
   label?: string;
 }
 
-export function TaskFileAttachments({ workspace, taskId, attachmentIds, onChange, command, onWorkspace, onBusyChange, disabled = false, label = '참고 파일' }: Props) {
+export function TaskFileAttachments({ workspace, taskId, performanceId, attachmentIds, onChange, command, onWorkspace, onBusyChange, disabled = false, label = '참고 파일' }: Props) {
   const input = useRef<HTMLInputElement>(null);
   const headingId = useId();
   const [localFiles, setLocalFiles] = useState<Attachment[]>([]);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
   const [notice, setNotice] = useState('');
-  const files = [...workspace.attachments, ...localFiles.filter(file => !workspace.attachments.some(item => item.id === file.id))].filter(file => file.taskId === taskId);
+  const files = [...workspace.attachments, ...localFiles.filter(file => !workspace.attachments.some(item => item.id === file.id))].filter(file => file.taskId === taskId && (!file.performanceId || file.performanceId === performanceId));
   const task = workspace.tasks.find(item => item.id === taskId);
   const user = workspace.currentUser;
-  const canUpload = !!onChange && !!task && !task.deletedAt && task.status !== 'archived' && (user.role === 'admin' || [task.primaryId, ...task.supportIds].includes(user.id) || workspace.runs.some(run => run.taskId === taskId && run.status !== 'completed' && [run.primaryId, ...run.supportIds].includes(user.id)) || canActAsDeputy(workspace, user, task, 'attachment.upload', new Date(workspace.serverTime)));
+  const performance = performanceId ? workspace.performances.find(item => item.id === performanceId && item.taskId === taskId) : undefined;
+  const ownPerformance = !!performance && performance.authorId === user.id && !!performance.period && ['draft', 'changes_requested'].includes(performance.status) && !getUnitScorePlan(workspace, user.id, performance.period)?.submittedAt && !getUnitEvaluation(workspace, user.id, performance.period);
+  const canUpload = !!onChange && (performanceId ? ownPerformance : !!task && !task.deletedAt && task.status !== 'archived' && (user.role === 'admin' || [task.primaryId, ...task.supportIds].includes(user.id) || workspace.runs.some(run => run.taskId === taskId && run.status !== 'completed' && [run.primaryId, ...run.supportIds].includes(user.id)) || canActAsDeputy(workspace, user, task, 'attachment.upload', new Date(workspace.serverTime))));
   const selected = attachmentIds.map(id => ({ id, file: files.find(file => file.id === id) }));
   const available = files.filter(file => !attachmentIds.includes(file.id));
   const blocked = disabled || busy;
@@ -47,7 +51,7 @@ export function TaskFileAttachments({ workspace, taskId, attachmentIds, onChange
     try {
       for (const file of Array.from(chosen)) {
         try {
-          const updated = await uploadAttachment(file, taskId);
+          const updated = await uploadAttachment(file, taskId, performanceId);
           updatedWorkspace = updated;
           const attachment = updated.attachments.filter(item => item.taskId === taskId && item.uploadedBy === user.id && item.name === file.name && item.size === file.size && !known.has(item.id)).sort((a, b) => b.createdAt.localeCompare(a.createdAt))[0];
           if (!attachment) throw new Error('저장된 파일 정보를 확인하지 못했습니다.');

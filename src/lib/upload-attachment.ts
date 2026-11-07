@@ -7,13 +7,14 @@ async function responseJson<T>(response: Response): Promise<T> {
 }
 
 /** Only signed PUT URLs cross into the browser; storage credentials remain on the server. */
-export async function uploadAttachment(file: File, taskId: string): Promise<Workspace> {
+export async function uploadAttachment(file: File, taskId: string, performanceId?: string): Promise<Workspace> {
   if (!file.size || file.size > 10 * 1024 * 1024) throw new Error('비어 있지 않은 10MB 이하 파일을 선택해 주세요.');
   const hash = await crypto.subtle.digest('SHA-256', await file.arrayBuffer());
   const sha256 = Array.from(new Uint8Array(hash), value => value.toString(16).padStart(2, '0')).join('');
-  const prepared = await responseJson<{ provider: 'local' | 'neon'; uploadUrl?: string; token?: string; contentType?: string }>(await fetch('/api/attachments/upload', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'prepare', file: { taskId, name: file.name, size: file.size, mime: file.type || 'application/octet-stream', sha256 } }) }));
+  const prepared = await responseJson<{ provider: 'local' | 'neon'; uploadUrl?: string; token?: string; contentType?: string }>(await fetch('/api/attachments/upload', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'prepare', file: { taskId, ...(performanceId ? { performanceId } : {}), name: file.name, size: file.size, mime: file.type || 'application/octet-stream', sha256 } }) }));
   if (prepared.provider === 'local') {
     const form = new FormData(); form.append('file', file); form.append('taskId', taskId);
+    if (performanceId) form.append('performanceId', performanceId);
     return responseJson<Workspace>(await fetch('/api/attachments', { method: 'POST', body: form }));
   }
   if (!prepared.uploadUrl || !prepared.token) throw new Error('Neon 업로드 주소를 확인하지 못했습니다.');

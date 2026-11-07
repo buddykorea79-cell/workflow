@@ -10,6 +10,7 @@ import { POST } from '../src/app/api/procedure-generate/route';
 import { sessionCookie, signSession } from '../src/lib/auth';
 import { createSeed } from '../src/lib/seed';
 import { procedureOverviewFingerprint, procedureReferenceFingerprint } from '../src/lib/procedure-ai-input';
+import type { ProcedureDraft } from '../src/lib/procedure-draft';
 import type { Attachment } from '../src/lib/types';
 
 interface ModelSource { id: string; title: string; content: string; sourceKind: string; priority: string }
@@ -132,12 +133,23 @@ test('procedure route always reads saved overview HWPX and TXT files, supports z
       assert.ok(sources.every(source => !('attachmentId' in source) && !('storageKey' in source) && !('url' in source)));
       return completion(sources, 'document:overview-hwpx', quote);
     };
+    const assertPrimaryProvenance = (draft: ProcedureDraft) => {
+      const sourceTitle = '업무 첨부 · 통계연보 발간 업무계획.hwpx';
+      const evidence = { sourceTitle, locator: '본문', excerpt: quote };
+      assert.deepEqual(draft.evidence[draft.steps[0].id], evidence);
+      assert.deepEqual(draft.analysis?.sources.find(source => source.referenceId === 'document:overview-hwpx'), {
+        referenceId: 'document:overview-hwpx', ...evidence, summary: `${sourceTitle}의 업무 내용을 검토했습니다.`,
+      });
+      assert.equal(draft.steps[0].description, '부서장이 수집한 통계표를 검토합니다.\n결과: 검토한 통계표\n확인할 내용: 통계표 검토');
+      assert.equal(draft.steps[0].output, ''); assert.deepEqual(draft.steps[0].checklist, []);
+    };
     let response = await POST(request()); let generated = await response.json();
     assert.equal(response.status, 200, JSON.stringify(generated)); assert.equal(calls, 2);
-    assert.equal(generated.draft.analysis.sources.length, 4); assert.match(generated.draft.steps[0].description, /업무 첨부 · 통계연보 발간 업무계획.hwpx/);
+    assert.equal(generated.draft.analysis.sources.length, 4); assertPrimaryProvenance(generated.draft);
     includeReference = false;
     response = await POST(request()); generated = await response.json();
     assert.equal(response.status, 200, JSON.stringify(generated)); assert.equal(calls, 4); assert.equal(generated.draft.analysis.sources.length, 3);
+    assertPrimaryProvenance(generated.draft);
     assert.equal(await readFile(workspaceFile, 'utf8'), originalWorkspace, 'generating an overview-based procedure must not change saved data');
 
     calls = 0; globalThis.fetch = async () => { calls++; throw new Error('Invalid primary input must fail before any AI request'); };

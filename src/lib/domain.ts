@@ -1,6 +1,7 @@
 import { normalizePeriod, currentPeriod } from './schedule';
 import { executeBudgetCommand, resolveTaskBudget, validateTaskMoney } from './budget-catalog';
 import { nextCycleWorkflow, runWorkflow, taskCycleState } from './work-cycles';
+import { procedureScheduleConflicts } from './procedure-schedule';
 import { createHash, randomUUID } from 'node:crypto';
 import { isDeepStrictEqual } from 'node:util';
 import { z } from 'zod';
@@ -136,21 +137,28 @@ function validateDescriptionAttachments(state: WorkspaceData, user: User, taskId
   if (new Set(attachmentIds).size !== attachmentIds.length) fail(422, 'DESCRIPTION_ATTACHMENT_DUPLICATE', '업무 설명 파일을 중복하여 선택할 수 없습니다.');
   for (const attachmentId of attachmentIds) {
     const attachment = state.attachments.find(item => item.id === attachmentId);
-    if (!attachment || attachment.taskId !== taskId && !(attachment.uploadedBy === user.id && attachment.taskId.startsWith(`draft:${user.id}:`))) fail(422, 'DESCRIPTION_ATTACHMENT_INVALID', '해당 업무의 파일 또는 본인이 미리 올린 설명 파일만 연결할 수 있습니다.');
+    if (!attachment || attachment.performanceId || attachment.taskId !== taskId && !(attachment.uploadedBy === user.id && attachment.taskId.startsWith(`draft:${user.id}:`))) fail(422, 'DESCRIPTION_ATTACHMENT_INVALID', '해당 업무의 파일 또는 본인이 미리 올린 설명 파일만 연결할 수 있습니다.');
   }
 }
 function claimDescriptionAttachments(state: WorkspaceData, task: Task) {
   for (const attachmentId of task.descriptionAttachmentIds ?? []) state.attachments.find(item => item.id === attachmentId)!.taskId = task.id;
 }
-function validateLinkedAttachments(state: WorkspaceData, taskId: string, attachmentIds: string[] | undefined, kind: 'PROCEDURE' | 'PERFORMANCE', allowedIds?: Set<string>) {
+function validateLinkedAttachments(state: WorkspaceData, taskId: string, attachmentIds: string[] | undefined, kind: 'PROCEDURE' | 'PERFORMANCE', allowedIds?: Set<string>, performanceId?: string) {
   if (!attachmentIds) return;
   if (new Set(attachmentIds).size !== attachmentIds.length) fail(422, `${kind}_ATTACHMENT_DUPLICATE`, '같은 파일을 중복하여 연결할 수 없습니다.');
   for (const attachmentId of attachmentIds) {
-    if (!state.attachments.some(attachment => attachment.id === attachmentId && attachment.taskId === taskId) || allowedIds && !allowedIds.has(attachmentId)) fail(422, `${kind}_ATTACHMENT_INVALID`, '이 세부업무에 업로드한 접근 가능한 파일만 연결할 수 있습니다.');
+    const attachment = state.attachments.find(item => item.id === attachmentId && item.taskId === taskId);
+    if (!attachment || attachment.performanceId && (kind !== 'PERFORMANCE' || attachment.performanceId !== performanceId) || allowedIds && !allowedIds.has(attachmentId)) fail(422, `${kind}_ATTACHMENT_INVALID`, '이 세부업무 또는 해당 성과에 업로드한 접근 가능한 파일만 연결할 수 있습니다.');
   }
 }
 /** Evaluation evidence remains available to its author and reviewing department after a transfer. */
 export function canReadAttachment(state: WorkspaceData, user: User, attachment: Attachment, now = new Date()) {
+  // Performance-only evidence never inherits the current task assignee's access.
+  if (attachment.performanceId) {
+    const record = state.performances.find(item => item.id === attachment.performanceId && item.taskId === attachment.taskId && item.authorId === attachment.uploadedBy);
+    if (record && (record.authorId === user.id || record.attachmentIds?.includes(attachment.id) && approveDepartment(user, record.departmentId))) return true;
+    return (state.unitEvaluations ?? []).some(evaluation => (evaluation.personId === user.id || approveDepartment(user, evaluation.departmentId)) && evaluation.performanceSnapshot.some(item => item.id === attachment.performanceId && item.taskId === attachment.taskId && item.attachmentIds?.includes(attachment.id)));
+  }
   const task = state.tasks.find(item => item.id === attachment.taskId);
   const draftPrefix = `draft:${user.id}:`;
   if (task && canReadTask(state, user, task, now) || attachment.uploadedBy === user.id && attachment.taskId.startsWith(draftPrefix) && /^[a-f0-9-]{36}$/i.test(attachment.taskId.slice(draftPrefix.length))) return true;
@@ -177,17 +185,23 @@ function detailValidation(task: Task, state: WorkspaceData) {
   validateTaskMoney(task);
   for (const step of task.workflow) validateLinkedAttachments(state, task.id, step.attachmentIds, 'PROCEDURE');
   for (const entries of [task.expenses ?? [], task.references ?? []]) if (new Set(entries.map(item => item.id)).size !== entries.length) fail(422, 'DUPLICATE_DETAIL', '집행 내역과 근거 항목의 ID는 중복될 수 없습니다.');
-  for (const reference of task.references ?? []) if (reference.attachmentId && !state.attachments.some(attachment => attachment.id === reference.attachmentId && attachment.taskId === task.id)) fail(422, 'REFERENCE_ATTACHMENT_INVALID', '해당 업무에 업로드한 파일만 근거에 연결할 수 있습니다.');
+  for (const reference of task.references ?? []) if (reference.attachmentId && !state.attachments.some(attachment => attachment.id === reference.attachmentId && attachment.taskId === task.id && !attachment.performanceId)) fail(422, 'REFERENCE_ATTACHMENT_INVALID', '해당 업무에 업로드한 파일만 근거에 연결할 수 있습니다.');
+}
+/** Treat omitted optional defaults as the same stored configuration. */
+function comparableTaskConfiguration(task: Task) {
+  return JSON.parse(JSON.stringify({
+    ...task, version: 0, updatedAt: '', descriptionAttachmentIds: task.descriptionAttachmentIds ?? [],
+    budget: task.budget ?? 0, budgetMode: task.budgetMode ?? 'manual', expenses: task.expenses ?? [], references: task.references ?? [],
+    workflow: task.workflow.map(step => ({ ...step, done: !!step.done, attachmentIds: step.attachmentIds ?? [] })),
+  }));
 }
 function validateCycleSchedule(workflow: WorkflowStep[], input: z.infer<typeof cycleScheduleInput>) {
   if (input.startDate > input.dueDate) fail(422, 'CYCLE_DATE_RANGE', '회차 종료일은 시작일 이후여야 합니다.');
   if (new Set(input.steps.map(step => step.stepId)).size !== input.steps.length || input.steps.length !== workflow.length || input.steps.some(step => !workflow.some(item => item.id === step.stepId))) fail(422, 'CYCLE_STEPS_REQUIRED', '모든 절차의 일정을 한 번씩 입력해 주세요.');
   for (const schedule of input.steps) {
     if (schedule.startDate && (schedule.startDate < input.startDate || schedule.startDate > input.dueDate) || schedule.dueDate && (schedule.dueDate < input.startDate || schedule.dueDate > input.dueDate) || schedule.startDate && schedule.dueDate && schedule.startDate > schedule.dueDate) fail(422, 'CYCLE_STEP_DATE_RANGE', '각 절차 일정은 회차 기간 안에서 시작일·종료일 순서로 입력해 주세요.');
-    const definition = workflow.find(step => step.id === schedule.stepId)!;
-    const effectiveStart = schedule.startDate ?? schedule.dueDate;
-    if (effectiveStart && definition.dependsOn.some(dependency => { const prior = input.steps.find(step => step.stepId === dependency); const priorEnd = prior?.dueDate ?? prior?.startDate; return !!priorEnd && priorEnd > effectiveStart; })) fail(422, 'CYCLE_DEPENDENCY_DATE', '선행 절차의 종료일 이후에 다음 절차를 시작하도록 일정을 정해 주세요.');
   }
+  if (procedureScheduleConflicts(workflow, input.steps).length) fail(422, 'CYCLE_DEPENDENCY_DATE', '일정 미정인 중간 절차를 포함해 모든 선행 절차의 종료일 이후에 다음 절차를 시작하도록 일정을 정해 주세요.');
 }
 function scheduledWorkflow(workflow: WorkflowStep[], input: z.infer<typeof cycleScheduleInput>): WorkflowStep[] {
   return workflow.map(step => { const schedule = input.steps.find(item => item.stepId === step.id)!; return { ...step, startDate: schedule.startDate, dueDate: schedule.dueDate, scheduleDetails: schedule.scheduleDetails }; });
@@ -498,7 +512,7 @@ export function executeCommand(state: WorkspaceData, userId: string, raw: unknow
       const input = parse(taskInput, p); const unit = state.units.find(u => u.id === input.unitId); if (!unit) fail(422, 'UNIT_REQUIRED', '단위업무를 선택해 주세요.'); if (unit.departmentId !== user.departmentId && user.role !== 'admin') fail(403, 'OUTSIDE_SCOPE', '소속 부서의 단위업무를 선택해 주세요.');
       personalTargetUnit(state, user, unit.id, unit.departmentId);
       const resolvedBudget = resolveTaskBudget(state, undefined, input); delete input.budgetItemId;
-      const task: Task = { ...input, ...resolvedBudget, reviewerId: taskReviewer(state, unit.departmentId, input.primaryId, now), id: id('task'), code: `WK-${String(state.tasks.length + 1).padStart(3, '0')}`, departmentId: unit.departmentId, status: 'draft', version: 1, tags: [], card: input.card ?? defaultCard(input.description), workflow: (input.workflow ?? defaultWorkflow()).map(s => ({ ...s, done: false })), versions: [], createdAt: now.toISOString(), updatedAt: now.toISOString() }; validateAssignments(state, user, task, now); detailValidation(task, state); validateWorkflow(task, state); validateDescriptionAttachments(state, user, task.id, task.descriptionAttachmentIds); const deputy = p.deputy === undefined ? undefined : prepareTaskDelegation(state, user, task, p.deputy, now, fail); state.tasks.unshift(task); claimDescriptionAttachments(state, task); if (deputy) saveEmbeddedDelegation(state, user, deputy, now); targetId = task.id; departmentId = task.departmentId; detail = task.title; title = '새 업무 초안 작성'; break;
+      const task: Task = { ...input, ...resolvedBudget, reviewerId: taskReviewer(state, unit.departmentId, input.primaryId, now), id: id('task'), code: `WK-${String(state.tasks.length + 1).padStart(3, '0')}`, departmentId: unit.departmentId, status: 'draft', version: 1, tags: [], card: input.card ?? defaultCard(input.description), workflow: (input.workflow ?? defaultWorkflow({ hasSupport: input.supportIds.length > 0 })).map(s => ({ ...s, done: false })), versions: [], createdAt: now.toISOString(), updatedAt: now.toISOString() }; validateAssignments(state, user, task, now); detailValidation(task, state); validateWorkflow(task, state); validateDescriptionAttachments(state, user, task.id, task.descriptionAttachmentIds); const deputy = p.deputy === undefined ? undefined : prepareTaskDelegation(state, user, task, p.deputy, now, fail); state.tasks.unshift(task); claimDescriptionAttachments(state, task); if (deputy) saveEmbeddedDelegation(state, user, deputy, now); targetId = task.id; departmentId = task.departmentId; detail = task.title; title = '새 업무 초안 작성'; break;
     }
     case 'task.delete': {
       const task = getTask(state, user, required(p, 'taskId'), now);
@@ -588,6 +602,11 @@ export function executeCommand(state: WorkspaceData, userId: string, raw: unknow
       }
       const resolvedBudget = resolveTaskBudget(state, task, input); delete input.budgetItemId;
       const next = { ...task, ...input, ...resolvedBudget, reviewerId: taskReviewer(state, task.departmentId, task.primaryId, now), version: Math.max(task.version, ...task.versions.map(version => version.version)) + 1 }; detailValidation(next, state); validateWorkflow(next, state); validateDescriptionAttachments(state, user, task.id, next.descriptionAttachmentIds); const deputy = p.deputy === undefined ? undefined : prepareTaskDelegation(state, user, next, p.deputy, now, fail);
+      if (!deputy && isDeepStrictEqual(comparableTaskConfiguration(next), comparableTaskConfiguration(task))) {
+        // Remember the idempotency key without producing a new business event or revision.
+        state.processedRequests.push({ id: command.requestId, fingerprint, actorId: user.id });
+        return;
+      }
       if (!task.versions.length) task.versions.push(snapshot(task, undefined, now.toISOString()));
       Object.assign(task, next); claimDescriptionAttachments(state, task); if (deputy) saveEmbeddedDelegation(state, user, deputy, now); task.updatedAt = now.toISOString();
       task.versions.push(snapshot(task, user.id, now.toISOString())); invalidateHandoverConfirmations(state, task.id);
@@ -853,7 +872,7 @@ export function executeCommand(state: WorkspaceData, userId: string, raw: unknow
       if (missingPerformanceUnitIds(state, plan.allocations, records, plan.departmentId).length) fail(409, 'UNIT_PERFORMANCE_REQUIRED', '업무 비중이 있는 모든 단위업무에 세부업무 성과를 입력해 주세요. 성과가 없는 단위업무는 비중을 0점으로 설정할 수 있습니다.');
       plan.submittedAt = now.toISOString(); plan.submittedBy = user.id;
       for (const performance of records) if (performance.status === 'draft') performance.status = 'review';
-      for (const head of state.users.filter(member => member.departmentId === plan.departmentId && member.role === 'head' && member.active)) state.notifications.unshift({ id: id('notification'), title: '개인별 반기 성과 평가 요청', description: `${user.name} · ${input.period} · 업무 비중 50점`, type: 'task', targetId: records[0].taskId, read: false, userId: head.id });
+      for (const head of state.users.filter(member => member.departmentId === plan.departmentId && member.role === 'head' && member.active)) state.notifications.unshift({ id: id('notification'), title: '개인별 반기 성과 평가 요청', description: `${user.name} · ${input.period} · 업무 비중 50점`, type: 'task', targetId: records[0].taskId, destination: { view: 'performance', personId: user.id, period: input.period }, read: false, userId: head.id });
       targetId = plan.id; departmentId = plan.departmentId; detail = `${user.name} · ${input.period}`; title = '개인별 반기 성과 제출'; break;
     }
     case 'performance.withdrawSubmission': {
@@ -890,7 +909,7 @@ export function executeCommand(state: WorkspaceData, userId: string, raw: unknow
       const evaluation = { id: id('unit-evaluation'), planId: plan.id, planVersion: plan.version, personId: person.id, departmentId: plan.departmentId, period: plan.period, scores: plan.allocations.map(allocation => ({ ...allocation, ...input.scores.find(score => score.unitId === allocation.unitId)! })), totalScore: input.scores.reduce((sum, score) => sum + Math.round(score.score * 100), 0) / 100, comment: input.comment, evaluatedBy: user.id, evaluatedAt: now.toISOString(), performanceIds: performances.map(performance => performance.id), performanceSnapshot: performances.map(performance => ({ ...structuredClone(performance), unitId: performanceUnitId(state, performance), taskTitle: state.tasks.find(task => task.id === performance.taskId)?.title ?? '이전 세부업무' })) };
       state.unitEvaluations ??= []; state.unitEvaluations.unshift(evaluation);
       for (const performance of performances) { if (performance.status === 'review') { performance.status = 'confirmed'; performance.approvedBy = user.id; performance.approvedAt = now.toISOString(); } }
-      state.notifications.unshift({ id: id('notification'), title: '개인별 반기 성과 평가 완료', description: `${input.period} · ${evaluation.totalScore}/50점`, type: 'task', targetId: performances[0].taskId, read: false, userId: person.id });
+      state.notifications.unshift({ id: id('notification'), title: '개인별 반기 성과 평가 완료', description: `${input.period} · ${evaluation.totalScore}/50점`, type: 'task', targetId: performances[0].taskId, destination: { view: 'performance', personId: person.id, period: input.period }, read: false, userId: person.id });
       targetId = evaluation.id; departmentId = plan.departmentId; detail = `${person.name} · ${input.period} · ${evaluation.totalScore}/50점`; title = '단위업무별 개인 성과 평가 확정'; break;
     }
     case 'performance.saveHalf': case 'performance.submitHalf': {
@@ -902,7 +921,7 @@ export function executeCommand(state: WorkspaceData, userId: string, raw: unknow
       const sourceTask = state.tasks.find(task => task.id === taskId && canReadTask(state, user, task, now));
       const performanceTitle = sourceTask?.title ?? existing?.title ?? '';
       const readableFiles = new Set(state.attachments.filter(file => canReadAttachment(state, user, file, now)).map(file => file.id));
-      validateLinkedAttachments(state, taskId, input.attachmentIds, 'PERFORMANCE', readableFiles);
+      validateLinkedAttachments(state, taskId, input.attachmentIds, 'PERFORMANCE', readableFiles, existing?.id);
       if (existing) {
         if (existing.status === 'confirmed') fail(409, 'PERFORMANCE_CONFIRMED', '이미 확정된 기존 성과는 변경할 수 없습니다.');
         // An author may complete their own historical record without regaining task access.

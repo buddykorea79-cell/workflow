@@ -46,7 +46,7 @@ export function prepareTaskDelegation(state: WorkspaceData, user: User, task: Ta
   return delegation;
 }
 function notify(state: WorkspaceData, userIds: string[], delegation: Delegation, title: string, description: string) {
-  for (const userId of new Set(userIds)) state.notifications.unshift({ id: `notification-${randomUUID()}`, title, description, type: 'task', targetId: delegation.taskId, read: false, userId });
+  for (const userId of new Set(userIds)) state.notifications.unshift({ id: `notification-${randomUUID()}`, title, description, type: 'task', targetId: delegation.taskId, destination: { view: 'delegation', delegationId: delegation.id }, read: false, userId });
 }
 export function storeTaskDelegation(state: WorkspaceData, delegation: Delegation, now: Date) {
   state.delegations.unshift(delegation);

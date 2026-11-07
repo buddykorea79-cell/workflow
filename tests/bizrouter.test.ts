@@ -26,8 +26,9 @@ test('AI procedure uses validated evidence and fresh dependency IDs, preserving 
   const draft = parseAiProcedure(valid(), references, 'generated');
   assert.equal(draft.steps[0].id, 'generated-1');
   assert.deepEqual(draft.steps[1].dependsOn, ['generated-1']);
-  assert.match(draft.steps[0].description, /점검 지침/);
-  assert.match(draft.steps[0].description, /원문 인용/);
+  assert.equal(draft.steps[0].description, '담당자가 점검 자료를 작성합니다.\n결과: 작성 자료\n확인할 내용: 자료 작성 여부');
+  assert.ok(draft.steps.every(step => step.output === '' && step.checklist.length === 0));
+  assert.equal(draft.evidence['generated-1'].sourceTitle, '점검 지침');
   assert.equal(draft.evidence['generated-2'].excerpt, '검토자는 자료를 검토한다.');
   assert.deepEqual(draft.references, []);
   assert.equal(draft.analysis?.summary, valid().summary);
@@ -43,12 +44,36 @@ test('AI reviews every selected reference and combines their summaries with a ci
   result.sourceSummaries.push({ referenceId: 'ref-directive', summary: '지원담당자의 누락 확인을 추가합니다.', locator: '본문', quote: '지원담당자는 수집한 자료의 누락을 확인한다.' });
   result.steps.splice(1, 0, { id: 'support', title: '누락 확인', role: 'support', description: '수집 자료에 누락이 있는지 확인합니다.', output: '누락 점검표', required: true, dependsOn: ['prepare'], checklist: ['누락 여부 확인'], evidence: { referenceId: 'ref-directive', locator: '본문', quote: '지원담당자는 수집한 자료의 누락을 확인한다.' } });
   result.steps[2].dependsOn = ['support'];
-  const draft = parseAiProcedure(result, sources, 'multi');
+  const draft = parseAiProcedure(result, sources, 'multi', { hasSupport: true });
   assert.deepEqual(draft.analysis?.sources.map(source => [source.referenceId, source.sourceTitle]), [['ref-law', '점검 지침'], ['ref-directive', '보완 지시']]);
   assert.equal(draft.analysis?.summary, result.summary);
   assert.deepEqual(draft.steps[2].dependsOn, ['multi-2']);
   assert.equal(draft.evidence['multi-2'].excerpt, sources[1].content);
+  assert.equal(draft.steps[1].role, 'support');
+  assert.equal(parseAiProcedure(result, sources, 'solo').steps[1].role, 'primary');
   assert.deepEqual(sources, sourceBefore);
+});
+
+test('AI requests simple methods with no hidden checks and only assigned performer roles', async () => {
+  for (const hasSupport of [false, true]) {
+    let calls = 0;
+    const result = valid();
+    result.steps[0].role = 'support';
+    result.steps.forEach(step => { step.output = ''; step.checklist = []; });
+    const generated = await generateAiProcedure({ ...input, hasSupport }, { apiKey: 'test', model, fetcher: async (_url, init) => {
+      if (++calls === 1) return catalog();
+      const body = JSON.parse(String(init?.body));
+      const properties = body.response_format.json_schema.schema.properties.steps.items.properties;
+      assert.deepEqual(properties.role.enum, hasSupport ? ['primary', 'support', 'reviewer'] : ['primary', 'reviewer']);
+      assert.equal(properties.output.const, '');
+      assert.equal(properties.checklist.maxItems, 0);
+      assert.equal(JSON.parse(body.messages[1].content).task.hasSupport, hasSupport);
+      return completion(result);
+    } });
+    assert.equal(generated.draft.steps[0].role, hasSupport ? 'support' : 'primary');
+    assert.equal(generated.draft.steps[0].description, result.steps[0].description);
+    assert.ok(generated.draft.steps.every(step => step.output === '' && step.checklist.length === 0));
+  }
 });
 
 test('AI rejects missing, duplicated or unrelated source summaries and fabricated summary quotations', () => {
@@ -236,7 +261,7 @@ test('overview and task files are primary sources while references are separate 
   } });
   assert.equal(calls, 2);
   assert.equal(generated.draft.analysis?.sources.length, 3);
-  assert.match(generated.draft.steps[0].description, /업무 첨부 · 업무처리 안내.txt/);
+  assert.equal(generated.draft.evidence[generated.draft.steps[0].id].sourceTitle, '업무 첨부 · 업무처리 안내.txt');
 });
 
 test('a saved overview can generate procedures without requiring supporting references', async () => {

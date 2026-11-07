@@ -11,6 +11,7 @@ export function authorizeProcedureExtraction(state: WorkspaceData, userId: strin
   if (attachmentId) {
     const attachment = state.attachments.find(item => item.id === attachmentId && item.taskId === taskId);
     if (!attachment) throw new DomainError(404, 'ATTACHMENT_NOT_FOUND', '이 업무의 첨부파일을 찾을 수 없습니다.');
+    if (attachment.performanceId) throw new DomainError(403, 'PROCEDURE_ACCESS_DENIED', '성과 전용 파일은 절차 자료로 사용할 수 없습니다.');
     if (!attachment.size || attachment.size > PROCEDURE_PDF_LIMIT) throw new DomainError(413, 'FILE_TOO_LARGE', '문서는 비어 있지 않은 10MB 이하 파일이어야 합니다.');
     return attachment;
   }

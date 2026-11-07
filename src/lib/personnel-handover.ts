@@ -2,6 +2,7 @@ import { createHash, randomUUID } from 'node:crypto';
 import { z } from 'zod';
 import type { Run, Task, Unit, User, WorkTransfer, WorkTransferEvent, WorkspaceData } from './types';
 import { residualTransferRoles, transferRoleRecipientError } from './transfer-roles';
+import { canCancelTransfer } from './transfer-permissions';
 
 type Fail = (status: number, code: string, message: string) => never;
 type Result = { targetId: string; departmentId: string; title: string; detail: string };
@@ -356,7 +357,7 @@ function execute(state: WorkspaceData, user: User, type: string, payload: Record
       event(transfer, user, 'rejected', input.reason, now); title = '인수인계 배정 반려';
     }
   } else if (type === 'transfer.cancel') {
-    if (user.id !== transfer.requestedBy && !coordinator(user, transfer.departmentId)) fail(403, 'TRANSFER_CANCEL_DENIED', '요청자 또는 소속 부서 담당자만 요청을 취소할 수 있습니다.');
+    if (!canCancelTransfer(user, transfer)) fail(403, 'TRANSFER_CANCEL_DENIED', '요청자 또는 소속 부서 담당자만 요청을 취소할 수 있습니다.');
     transfer.status = 'cancelled'; transfer.resolvedBy = user.id; transfer.resolvedAt = now.toISOString(); transfer.resolutionReason = input.reason ?? '요청 취소';
     event(transfer, user, 'cancelled', transfer.resolutionReason, now); title = '인수인계 요청 취소';
   } else return fail(422, 'UNKNOWN_COMMAND', '지원하지 않는 인수인계 작업입니다.');

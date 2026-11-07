@@ -28,7 +28,7 @@ export async function POST(request: NextRequest) {
     const storage = getNeonStorageConfig();
     if (body.action === 'prepare') {
       const file = parseUploadDescriptor(body.file);
-      await transaction(state => { assertAttachmentUploadAllowed(state, userId, file.taskId); });
+      await transaction(state => { assertAttachmentUploadAllowed(state, userId, file.taskId, file.performanceId); });
       if (!storage) {
         if (process.env.VERCEL) throw new DomainError(503, 'STORAGE_NOT_CONFIGURED', 'Vercel에서 파일을 올리려면 IEUM_STORAGE_PROVIDER=neon과 Neon 저장소 연결값을 설정해 주세요.');
         return json({ provider: 'local' });
@@ -45,7 +45,7 @@ export async function POST(request: NextRequest) {
     const manifest = verifyUploadManifest(body.token, userId);
     if (manifest.bucket !== storage.bucket) throw new DomainError(409, 'STORAGE_CHANGED', '파일 저장소 설정이 바뀌었습니다. 파일을 다시 선택해 주세요.');
     const existing = await transaction(state => {
-      assertAttachmentUploadAllowed(state, userId, manifest.taskId);
+      assertAttachmentUploadAllowed(state, userId, manifest.taskId, manifest.performanceId);
       if (!state.attachments.some(item => item.id === manifest.id)) return null;
       recordNeonAttachment(state, manifest);
       return getWorkspace(state, userId);
@@ -54,7 +54,7 @@ export async function POST(request: NextRequest) {
     const buffer = await readNeonFile(manifest.uploadKey, manifest.bucket);
     verifyFile(buffer, manifest);
     const workspace = await transaction(async state => {
-      assertAttachmentUploadAllowed(state, userId, manifest.taskId);
+      assertAttachmentUploadAllowed(state, userId, manifest.taskId, manifest.performanceId);
       if (!state.attachments.some(item => item.id === manifest.id)) {
         try { await uploadNeonFile(manifest.storageKey, buffer, manifest.mime, manifest.bucket); }
         catch (error) {
