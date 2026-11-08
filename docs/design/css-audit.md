@@ -13,7 +13,7 @@ node scripts/css-audit.mjs --self-test
 `--check`는 현재 소스로 다시 계산한 보고서와 이 파일이 같은지 확인하며 파일을 쓰지 않는다. `--self-test`는 주석·문자열·URL 오인과 import 도달 판정의 고정 사례를 검사하며 파일을 쓰지 않는다. `--json`은 같은 감사 데이터의 전체 빈도표를 표준 출력으로 제공한다. 추가 패키지 설치나 환경 파일 읽기, 네트워크 접속은 필요하지 않다.
 
 - CSS 원본 SHA-256: `e17654d38349c675226bd82cded54d731db869963445aabfa5a76211855012c7`
-- 참조 분석에 사용한 src CSS·TS/TSX·JS/JSX 원본 SHA-256: `e0f371c8294160b709ce10738e0fc9f068ccb8e4b39d13268ab365256e956d2d`
+- 참조 분석에 사용한 src CSS·TS/TSX·JS/JSX 원본 SHA-256: `6a9ff4ec23fb54b1f81142a5580e3672eae29a6b604a4d1f5c8cf1e43f96dd82`
 - 파서: PostCSS 8.5.32, TypeScript 5.9.3, `next/dist/compiled/postcss-value-parser`
 - 생성 시각을 출력에 넣지 않아 같은 원본·도구에서는 반복 실행 결과가 같다. 값 빈도가 같으면 문자 코드 순으로 정렬한다.
 

@@ -8,6 +8,7 @@ import type { FieldIssue } from '@/lib/form-validation';
 import { PersonalWork, ScheduleView, TaskPanel, taskProgress } from './personal-work';
 import { DepartmentDashboard, DepartmentWork } from './department-work';
 import { demoCandidates, demoDefaultDepartment, selectDemoUser, type DemoRole } from '@/lib/demo-login';
+import { ACCESS_CODE_LENGTH, ACCESS_CODE_PATTERN, isValidAccessCode } from '@/lib/access-code';
 import { navBadges } from '@/lib/nav-badges';
 import { LandingGuide } from './landing-guide';
 import { UsageGuide, preloadUsageGuide, type GuideSection } from './usage-guide-dialog';
@@ -83,12 +84,12 @@ function DemoLogin({ users, departments, busy, error, onLogin }: { users: User[]
 
 function AccessCodeForm({ busy, error, onAccess }: { busy: boolean; error: string; onAccess: (code: string) => Promise<void> }) {
   const [code, setCode] = useState('');
-  return <form className="login-card" id="login" onSubmit={event => { event.preventDefault(); if (!busy) void onAccess(code); }}>
+  return <form className="login-card" id="login" onSubmit={event => { event.preventDefault(); if (!busy && isValidAccessCode(code)) void onAccess(code); }}>
     <div className="login-card-intro"><span className="login-icon"><ShieldCheck size={23}/></span><Badge>시연용 워크스페이스</Badge></div>
-    <h2>접근 코드 확인</h2><p className="login-description">안내받은 접근 코드를 입력하면 시연할 역할을 선택할 수 있습니다.</p>
-    <label className="field"><span>접근 코드</span><input name="accessCode" type="password" autoComplete="off" autoFocus required minLength={16} maxLength={1024} value={code} onChange={event => setCode(event.target.value)} aria-describedby={error ? 'access-code-error' : undefined}/></label>
+    <h2>접근 코드 확인</h2><p id="access-code-hint" className="login-description">안내받은 숫자 8자리 접근 코드를 입력하면 시연할 역할을 선택할 수 있습니다.</p>
+    <label className="field"><span>접근 코드</span><input name="accessCode" type="password" inputMode="numeric" pattern={ACCESS_CODE_PATTERN} autoComplete="off" autoFocus required minLength={ACCESS_CODE_LENGTH} maxLength={ACCESS_CODE_LENGTH} placeholder="숫자 8자리" value={code} onChange={event => setCode(event.target.value)} aria-describedby={error ? 'access-code-hint access-code-error' : 'access-code-hint'}/></label>
     {error && <p id="access-code-error" role="alert" className="form-error">{error}</p>}
-    <Button type="submit" className="login-submit" disabled={busy || code.length < 16}>{busy ? <><LoaderCircle className="spin" size={18}/><span>확인 중</span></> : <><span>접근 코드 확인</span><ArrowRight size={18}/></>}</Button>
+    <Button type="submit" className="login-submit" disabled={busy || !isValidAccessCode(code)}>{busy ? <><LoaderCircle className="spin" size={18}/><span>확인 중</span></> : <><span>접근 코드 확인</span><ArrowRight size={18}/></>}</Button>
     <p className="login-footnote">접근 권한은 12시간 유지됩니다. 로그아웃하면 다시 입력해야 합니다.</p>
   </form>;
 }

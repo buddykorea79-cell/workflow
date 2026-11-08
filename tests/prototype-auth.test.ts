@@ -7,15 +7,22 @@ import { DELETE as logout, GET as directory, POST as login } from '../src/app/ap
 import { createSeed } from '../src/lib/seed';
 import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import path from 'node:path';
+import { ACCESS_CODE_LENGTH, ACCESS_CODE_PATTERN, isValidAccessCode } from '../src/lib/access-code';
 
 const keys = ['VERCEL', 'NEON_AUTH_BASE_URL', 'IEUM_PROTOTYPE_MODE', 'IEUM_SESSION_SECRET', 'IEUM_APP_ORIGIN', 'IEUM_PROTOTYPE_ACCESS_CODE', 'DATABASE_URL', 'IEUM_DATA_DIR', 'IEUM_STORE'] as const;
-const configured = { IEUM_PROTOTYPE_MODE: 'true', IEUM_SESSION_SECRET: 'synthetic-prototype-session-secret-at-least-32-characters', IEUM_PROTOTYPE_ACCESS_CODE: 'synthetic-access-code-for-tests' };
+const configured = { IEUM_PROTOTYPE_MODE: 'true', IEUM_SESSION_SECRET: 'synthetic-prototype-session-secret-at-least-32-characters', IEUM_PROTOTYPE_ACCESS_CODE: '00123456' };
 async function environment(settings: Record<string, string>, check: () => void | Promise<void>) {
   const previous = Object.fromEntries(keys.map(key => [key, process.env[key]]));
   keys.forEach(key => { delete process.env[key]; });
   Object.assign(process.env, settings);
   try { await check(); } finally { keys.forEach(key => { if (previous[key] === undefined) delete process.env[key]; else process.env[key] = previous[key]; }); }
 }
+
+test('access codes preserve leading zeroes and accept exactly eight ASCII digits without normalization', () => {
+  assert.equal(ACCESS_CODE_LENGTH, 8); assert.equal(ACCESS_CODE_PATTERN, '[0-9]{8}');
+  for (const value of ['00123456', '00000000', '12345678']) assert.equal(isValidAccessCode(value), true);
+  for (const value of [undefined, null, 12345678, '', '1234567', '123456789', '1234567a', '１２３４５６７８', '١٢٣٤٥٦٧٨', ' 12345678', '12345678 ', '12345678\n', '1234 678', '+1234567', '1e234567']) assert.equal(isValidAccessCode(value), false, JSON.stringify(value));
+});
 
 test('local role login stays available; hosted role login requires explicit prototype configuration', async () => {
   await environment({}, () => {
@@ -25,9 +32,11 @@ test('local role login stays available; hosted role login requires explicit prot
   await environment({ VERCEL: '1', IEUM_PROTOTYPE_MODE: 'true' }, () => {
     assert.throws(() => isDemoSession(new NextRequest('https://example.vercel.app')), /IEUM_SESSION_SECRET/);
   });
-  for (const code of ['', 'short']) await environment({ ...configured, IEUM_PROTOTYPE_ACCESS_CODE: code }, async () => {
+  for (const code of ['', '1234567', '123456789', '1234567a', '１２３４５６７８', ' 12345678', '12345678 ', '12345678\n']) await environment({ ...configured, IEUM_PROTOTYPE_ACCESS_CODE: code }, async () => {
     const response = await directory(new NextRequest('https://prototype.example/api/session'));
-    assert.equal(response.status, 503); assert.equal((await response.json()).code, 'PROTOTYPE_ACCESS_CODE_REQUIRED');
+    const body = await response.json();
+    assert.equal(response.status, 503); assert.equal(body.code, 'PROTOTYPE_ACCESS_CODE_REQUIRED'); assert.match(body.error, /숫자 8자리/);
+    assert.equal(matchesAccessCode(code), false);
     assert.equal(isDemoSession(new NextRequest('http://localhost:3000')), true);
   });
 });
@@ -56,9 +65,12 @@ test('access signature expires at twelve hours, rejects tampering and is revoked
     assert.equal(verifyAccess('v1.NaN.' + 'a'.repeat(64), now), false);
     assert.equal(verifyAccess('v1.9999999999999.' + '한'.repeat(64), now), false);
     assert.equal(matchesAccessCode(configured.IEUM_PROTOTYPE_ACCESS_CODE), true);
-    assert.equal(matchesAccessCode('wrong'), false);
-    process.env.IEUM_PROTOTYPE_ACCESS_CODE = 'synthetic-rotated-access-code';
+    assert.equal(matchesAccessCode('99999999'), false);
+    assert.equal(matchesAccessCode('123456'), false);
+    assert.equal(matchesAccessCode('00123456 '), false);
+    process.env.IEUM_PROTOTYPE_ACCESS_CODE = '87654321';
     assert.equal(verifyAccess(value, now), false);
+    assert.equal(matchesAccessCode('00123456'), false); assert.equal(matchesAccessCode('87654321'), true);
   });
 });
 
@@ -78,7 +90,7 @@ test('remote directory and role login require access even for existing role sess
         assert.equal(deniedLogin.status, 401); assert.equal((await deniedLogin.json()).code, 'ACCESS_REQUIRED');
         await assert.rejects(currentUserId(request('workspace', 'GET', undefined, cookie)), { code: 'ACCESS_REQUIRED' });
       }
-      const wrong = await access(request('session/access', 'POST', { code: 'incorrect-access-code' }));
+      const wrong = await access(request('session/access', 'POST', { code: '99999999' }));
       assert.equal(wrong.status, 401); assert.equal((await wrong.json()).code, 'ACCESS_CODE_INVALID');
       assert.equal(wrong.cookies.has(accessCookie), false);
       const accepted = await access(request('session/access', 'POST', { code: configured.IEUM_PROTOTYPE_ACCESS_CODE }));
@@ -108,9 +120,21 @@ test('remote directory and role login require access even for existing role sess
   }
 });
 
+test('remote access rejects malformed codes with 422 and does not issue access cookies', async () => {
+  await environment({ ...configured, VERCEL: '1' }, async () => {
+    const invalid = [undefined, null, 12345678, '', '1234567', '123456789', '1234567a', '１２３４５６７８', ' 12345678', '12345678 ', '12345678\n'];
+    for (const [index, code] of invalid.entries()) {
+      const response = await access(new NextRequest('https://prototype.example/api/session/access', { method: 'POST', headers: { origin: 'https://prototype.example', 'Content-Type': 'application/json', 'x-vercel-forwarded-for': `192.0.2.${20 + index}` }, body: JSON.stringify({ code }) }));
+      assert.equal(response.status, 422, JSON.stringify(code));
+      assert.deepEqual(await response.json(), { error: '접근 코드는 숫자 8자리로 입력해 주세요.', code: 'ACCESS_CODE_REQUIRED' });
+      assert.equal(response.cookies.has(accessCookie), false);
+    }
+  });
+});
+
 test('remote access attempts are capped per trusted IP and preserve origin checks', async () => {
   await environment({ ...configured, VERCEL: '1' }, async () => {
-    const request = (ip: string, origin = 'https://prototype.example', code = 'wrong-access-code') => new NextRequest('https://prototype.example/api/session/access', { method: 'POST', headers: { origin, 'Content-Type': 'application/json', 'x-vercel-forwarded-for': ip }, body: JSON.stringify({ code }) });
+    const request = (ip: string, origin = 'https://prototype.example', code = '99999999') => new NextRequest('https://prototype.example/api/session/access', { method: 'POST', headers: { origin, 'Content-Type': 'application/json', 'x-vercel-forwarded-for': ip }, body: JSON.stringify({ code }) });
     assert.equal((await access(request('192.0.2.10', 'https://other.example'))).status, 403);
     for (let attempt = 0; attempt < 5; attempt++) assert.equal((await access(request('192.0.2.10'))).status, 401);
     const limited = await access(request('192.0.2.10', undefined, configured.IEUM_PROTOTYPE_ACCESS_CODE));

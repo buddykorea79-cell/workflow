@@ -83,7 +83,7 @@ DATABASE_URL="복사한 postgresql:// 연결 문자열"
 IEUM_WORKSPACE_ID=development
 IEUM_PROTOTYPE_MODE=true
 IEUM_SESSION_SECRET="직접 생성한 32자 이상의 임의 문자열"
-IEUM_PROTOTYPE_ACCESS_CODE="시연 참여자에게만 전달할 16자 이상의 임의 접근 코드"
+IEUM_PROTOTYPE_ACCESS_CODE="시연 참여자에게만 전달할 숫자 8자리 접근 코드"
 IEUM_API_RATE_LIMIT_PER_MINUTE=10
 
 # 첨부파일: Neon → Object storage에서 만든 버킷
@@ -208,7 +208,7 @@ WHERE id = 'development';
 | `IEUM_WORKSPACE_ID` | `development` |
 | `IEUM_PROTOTYPE_MODE` | `true` |
 | `IEUM_SESSION_SECRET` | 위에서 만든 임의 문자열 |
-| `IEUM_PROTOTYPE_ACCESS_CODE` | 시연 참여자에게만 전달할 16자 이상의 임의 접근 코드 |
+| `IEUM_PROTOTYPE_ACCESS_CODE` | 시연 참여자에게만 전달할 숫자 8자리 접근 코드 |
 | `IEUM_API_RATE_LIMIT_PER_MINUTE` | 사용자별 분당 호출 상한. 기본 `10` |
 | `IEUM_APP_ORIGIN` | `https://on-ieum.vercel.app` |
 | `IEUM_STORAGE_PROVIDER` | `neon` |
@@ -221,7 +221,7 @@ WHERE id = 'development';
 
 ### 원격 프로토타입 접근 보호
 
-2026-11-07부터 원격 프로토타입은 `IEUM_SESSION_SECRET` 32자 이상과 `IEUM_PROTOTYPE_ACCESS_CODE` 16자 이상을 모두 요구합니다. 접근 코드가 없거나 짧으면 서버가 503 설정 오류를 반환합니다. **코드 변경을 배포하기 전에 사용할 환경의 접근 코드를 설정한 뒤 재배포**하세요. 실제 비밀값을 Git·화면 캡처·공개 문서에 넣지 않고, 코드가 있는 시연 참여자에게만 별도로 전달합니다.
+2026-11-08 사용자 요청에 따라 원격 프로토타입은 `IEUM_SESSION_SECRET` 32자 이상과 `IEUM_PROTOTYPE_ACCESS_CODE` 숫자 8자리를 모두 요구합니다. 접근 코드는 0~9 숫자만 정확히 8자리이며 앞의 0도 그대로 사용합니다. 공백·문자·전각 숫자는 허용하지 않습니다. 설정이 없거나 형식이 다르면 서버가 503 설정 오류를 반환합니다. **코드 변경을 배포하기 전에 Vercel Production 환경의 접근 코드를 숫자 8자리로 저장한 뒤 새 코드를 배포**하세요. 환경변수 저장만으로 실행 중인 이전 배포의 값이 바뀌지는 않습니다. 이전 16자 이상 버전으로 되돌릴 때에는 해당 버전에 맞는 환경값도 함께 확인해야 합니다. 실제 비밀값을 Git·화면 캡처·공개 문서에 넣지 않고, 코드가 있는 시연 참여자에게만 별도로 전달합니다.
 
 원격 주소에 처음 접속하면 역할 목록 대신 접근 코드 입력란이 표시됩니다. 성공하면 서버가 `HttpOnly`, `Secure`, `SameSite=Lax`인 서명 쿠키 `ieum_access`를 발급하며 유효기간은 12시간입니다. 원격에서는 HTTPS를 사용합니다. 코드 확인 전에는 계정 목록, 역할 로그인 및 기존 역할 세션을 사용하는 업무 API에도 접근할 수 없습니다. 로그아웃은 역할 세션과 접근 쿠키를 함께 지웁니다. 접근 코드나 세션 비밀값을 교체하면 기존 접근 쿠키도 무효가 됩니다. `localhost`·`127.0.0.1`의 로컬 데모는 기존 비밀번호 없는 역할 선택을 유지합니다.
 
@@ -278,7 +278,7 @@ BizRouter 연결과 실제 분석은 `npm run bizrouter:check`로 별도 확인�
 | `InvalidAccessKeyId` | Access Key ID에 `token_id` 전체 값을 넣었는지 확인 |
 | `SignatureDoesNotMatch` | Secret Access Key에 `s3_secret_access_key`를 넣었는지 확인. `api_token`으로 대체하지 않음 |
 | `AccessDenied` | 저장소 자격증명에 쓰기 권한이 있는지, endpoint가 같은 브랜치인지 확인 |
-| Vercel 시연 계정 선택이 막힘 | `IEUM_PROTOTYPE_MODE=true`, 32자 이상 `IEUM_SESSION_SECRET`, 16자 이상 `IEUM_PROTOTYPE_ACCESS_CODE`, 정확한 `IEUM_APP_ORIGIN` 확인. 기관 인증 변수는 비워 두고 Redeploy |
+| Vercel 시연 계정 선택이 막힘 | `IEUM_PROTOTYPE_MODE=true`, 32자 이상 `IEUM_SESSION_SECRET`, 숫자 8자리 `IEUM_PROTOTYPE_ACCESS_CODE`, 정확한 `IEUM_APP_ORIGIN` 확인. 기관 인증 변수는 비워 두고 새 코드 배포 |
 | 접근 코드 또는 분석 요청이 429로 제한됨 | 1분 후 다시 시도. 사용자별 AI·추출·법령 호출은 합산하며 서버별 제한임 |
 | 브라우저에서 파일 전송만 실패함 | 버킷 CORS에 실제 앱의 origin이 허용되어 있는지 확인. DB 연결 성공과 파일 CORS는 별개 |
 | `neon:check`에서 `objectWrites: not-tested` | 읽기 위주 연결 점검의 정상 표시. `neon:files:check -- --origin https://on-ieum.vercel.app`으로 임시 파일 시험을 별도 실행 |

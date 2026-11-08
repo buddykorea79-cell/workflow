@@ -14,7 +14,7 @@ test('the prototype directory supports demo switching without widening the ordin
   const previous = Object.fromEntries(keys.map(key => [key, process.env[key]]));
   process.env.DATABASE_URL = ''; process.env.NEON_AUTH_BASE_URL = ''; process.env.VERCEL = ''; process.env.IEUM_DATA_DIR = directory;
   process.env.IEUM_SESSION_SECRET = 'isolated-session-directory-test-secret'; process.env.IEUM_PROTOTYPE_MODE = 'true';
-  process.env.IEUM_PROTOTYPE_ACCESS_CODE = 'synthetic-directory-access-code';
+  process.env.IEUM_PROTOTYPE_ACCESS_CODE = '00123456';
   try {
     const state = createSeed();
     const sender = state.users.find(user => user.id === 'u-support-member')!;

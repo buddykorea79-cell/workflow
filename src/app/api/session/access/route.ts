@@ -3,12 +3,13 @@ import { accessCookie, accessDurationSeconds, assertSameOrigin, isDemoSession, i
 import { apiError } from '@/lib/api';
 import { DomainError } from '@/lib/domain-error';
 import { assertAccessAttemptLimit } from '@/lib/rate-limit';
+import { isValidAccessCode } from '@/lib/access-code';
 
 export const runtime = 'nodejs';
 
 async function accessCode(request: NextRequest) {
   const reader = request.body?.getReader();
-  if (!reader) throw new DomainError(422, 'ACCESS_CODE_REQUIRED', '접근 코드를 입력해 주세요.');
+  if (!reader) throw new DomainError(422, 'ACCESS_CODE_REQUIRED', '접근 코드는 숫자 8자리로 입력해 주세요.');
   let size = 0; let text = ''; const decoder = new TextDecoder();
   try {
     while (true) {
@@ -18,8 +19,8 @@ async function accessCode(request: NextRequest) {
       text += decoder.decode(chunk.value, { stream: true });
     }
     let body: unknown;
-    try { body = JSON.parse(text + decoder.decode()); } catch { throw new DomainError(422, 'ACCESS_CODE_REQUIRED', '접근 코드를 입력해 주세요.'); }
-    if (!body || typeof body !== 'object' || !('code' in body) || typeof body.code !== 'string' || !body.code || body.code.length > 1024) throw new DomainError(422, 'ACCESS_CODE_REQUIRED', '접근 코드를 입력해 주세요.');
+    try { body = JSON.parse(text + decoder.decode()); } catch { throw new DomainError(422, 'ACCESS_CODE_REQUIRED', '접근 코드는 숫자 8자리로 입력해 주세요.'); }
+    if (!body || typeof body !== 'object' || !('code' in body) || !isValidAccessCode(body.code)) throw new DomainError(422, 'ACCESS_CODE_REQUIRED', '접근 코드는 숫자 8자리로 입력해 주세요.');
     return body.code;
   } finally { reader.releaseLock(); }
 }

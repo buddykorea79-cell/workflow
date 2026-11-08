@@ -39,7 +39,7 @@ test('prototype PDF extraction checks task access and stored bytes before parsin
     keys.forEach(key => { delete process.env[key]; });
     Object.assign(process.env, {
       IEUM_DATA_DIR: directory, IEUM_PROTOTYPE_MODE: 'true', IEUM_SESSION_SECRET: 'mock-prototype-extraction-session-secret-long-enough', IEUM_APP_ORIGIN: 'https://prototype.example',
-      IEUM_PROTOTYPE_ACCESS_CODE: 'synthetic-extraction-access-code',
+      IEUM_PROTOTYPE_ACCESS_CODE: '00123456',
       IEUM_STORAGE_PROVIDER: 'neon', AWS_ENDPOINT_URL_S3: 'https://storage.example.test', AWS_REGION: 'us-east-2', AWS_ACCESS_KEY_ID: 'mock-key', AWS_SECRET_ACCESS_KEY: 'mock-secret', IEUM_STORAGE_BUCKET: 'test-attachments',
     });
     const mockSend = async (command: unknown) => {

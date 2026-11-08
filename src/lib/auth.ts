@@ -1,6 +1,7 @@
 import { createHash, createHmac, timingSafeEqual } from 'node:crypto';
 import type { NextRequest } from 'next/server';
 import { DomainError } from './domain';
+import { isValidAccessCode } from './access-code';
 
 export const sessionCookie = 'ieum_demo_session';
 export const accessCookie = 'ieum_access';
@@ -12,14 +13,14 @@ export function isDemoSession(request: NextRequest) {
   if (isLocalDemo(request)) return true;
   if (process.env.IEUM_PROTOTYPE_MODE !== 'true') return false;
   if ((process.env.IEUM_SESSION_SECRET?.trim().length || 0) < 32) throw new DomainError(503, 'PROTOTYPE_SECRET_REQUIRED', '프로토타입의 IEUM_SESSION_SECRET을 32자 이상으로 설정해 주세요.');
-  if ((process.env.IEUM_PROTOTYPE_ACCESS_CODE?.trim().length || 0) < 16) throw new DomainError(503, 'PROTOTYPE_ACCESS_CODE_REQUIRED', '프로토타입의 IEUM_PROTOTYPE_ACCESS_CODE를 16자 이상으로 설정해 주세요.');
+  if (!isValidAccessCode(process.env.IEUM_PROTOTYPE_ACCESS_CODE)) throw new DomainError(503, 'PROTOTYPE_ACCESS_CODE_REQUIRED', '프로토타입의 IEUM_PROTOTYPE_ACCESS_CODE를 숫자 8자리로 설정해 주세요.');
   return true;
 }
 export function secureSessionCookie(request: NextRequest) { return !!process.env.VERCEL || new URL(request.url).protocol === 'https:'; }
 const secret = () => process.env.IEUM_SESSION_SECRET || 'ieum-local-demonstration-only-not-a-production-secret';
 export function matchesAccessCode(code: string) {
   const configured = process.env.IEUM_PROTOTYPE_ACCESS_CODE;
-  if (!configured || configured.trim().length < 16) return false;
+  if (!isValidAccessCode(configured) || !isValidAccessCode(code)) return false;
   return timingSafeEqual(createHash('sha256').update(code).digest(), createHash('sha256').update(configured).digest());
 }
 // Binding the signature to the current code also revokes access when that code rotates.
