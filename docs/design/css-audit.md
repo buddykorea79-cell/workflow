@@ -12,8 +12,8 @@ node scripts/css-audit.mjs --self-test
 
 `--check`는 현재 소스로 다시 계산한 보고서와 이 파일이 같은지 확인하며 파일을 쓰지 않는다. `--self-test`는 주석·문자열·URL 오인과 import 도달 판정의 고정 사례를 검사하며 파일을 쓰지 않는다. `--json`은 같은 감사 데이터의 전체 빈도표를 표준 출력으로 제공한다. 추가 패키지 설치나 환경 파일 읽기, 네트워크 접속은 필요하지 않다.
 
-- CSS 원본 SHA-256: `503922f37ccd0610f0a23e3c39b9c48fb77fbdabdf5bc9e0822a784145e518b9`
-- 참조 분석에 사용한 src CSS·TS/TSX·JS/JSX 원본 SHA-256: `8b25ee046d2c3b0c04441f890aed99e77ab38395b0958b85d9040e995843c7bb`
+- CSS 원본 SHA-256: `1a6e909d4999397c2afac0c3e4257d6a83a084229ca2abfc29080936ed8fe665`
+- 참조 분석에 사용한 src CSS·TS/TSX·JS/JSX 원본 SHA-256: `3de0afbdc4298ffe87444a51303ba998612c7df07ebf65f2115b9f46776827cb`
 - 파서: PostCSS 8.5.32, TypeScript 5.9.3, `next/dist/compiled/postcss-value-parser`
 - 생성 시각을 출력에 넣지 않아 같은 원본·도구에서는 반복 실행 결과가 같다. 값 빈도가 같으면 문자 코드 순으로 정렬한다.
 
@@ -31,9 +31,9 @@ node scripts/css-audit.mjs --self-test
 | 지표 | 전체 CSS | 참조됨 |
 |---|---:|---:|
 | 파일 | 38 | 37 |
-| UTF-8 바이트 | 365,912 | 359,725 |
-| 규칙 | 4,757 | 4,626 |
-| 선언 | 14,333 | 14,114 |
+| UTF-8 바이트 | 365,699 | 359,512 |
+| 규칙 | 4,756 | 4,625 |
+| 선언 | 14,326 | 14,107 |
 | !important 선언 | 145 | 140 |
 | hex 색 발생 / 종류 | 2,137 / 1,086 | 2,061 / 1,010 |
 | font-size 전체 값 발생 / 종류 | 1,754 / 41 | 1,655 / 39 |
@@ -41,10 +41,10 @@ node scripts/css-audit.mjs --self-test
 | radius 전체 값 발생 / 종류 | 490 / 35 | 488 / 35 |
 | radius 내부 px 발생 / 종류 | 448 / 24 | 446 / 24 |
 | box/text-shadow 발생 / 종류 | 34 / 26 | 34 / 26 |
-| z-index 발생 / 종류 | 16 / 11 | 16 / 11 |
+| z-index 발생 / 종류 | 15 / 10 | 15 / 10 |
 | line-height 발생 / 종류 | 540 / 18 | 540 / 18 |
-| 선언값 내부 전체 px 발생 / 종류 | 7,168 / 187 | 7,041 / 187 |
-| var() 참조 발생 / 종류 | 671 / 28 | 671 / 28 |
+| 선언값 내부 전체 px 발생 / 종류 | 7,166 / 187 | 7,039 / 187 |
+| var() 참조 발생 / 종류 | 669 / 27 | 669 / 27 |
 | 색 함수 발생 / 종류 | 5 / 5 | 5 / 5 |
 
 ### 상위 값 · 각 8개
@@ -57,7 +57,7 @@ node scripts/css-audit.mjs --self-test
 | radius 전체 값 | `12px` × 54 · `10px` × 45 · `14px` × 43 · `16px` × 39 · `9px` × 31 · `50%` × 30 · `13px` × 28 · `20px` × 25 | `12px` × 54 · `10px` × 44 · `14px` × 43 · `16px` × 38 · `9px` × 31 · `50%` × 30 · `13px` × 28 · `20px` × 25 |
 | radius 내부 px | `12px` × 54 · `10px` × 45 · `14px` × 43 · `16px` × 41 · `9px` × 33 · `13px` × 28 · `20px` × 27 · `8px` × 26 | `12px` × 54 · `10px` × 44 · `14px` × 43 · `16px` × 40 · `9px` × 33 · `13px` × 28 · `20px` × 27 · `8px` × 26 |
 | box/text-shadow | `none` × 8 · `0 10px 30px #172b4d14` × 2 · `0 0 0 1px #c64c3c` × 1 · `0 0 0 1px #dce9ff` × 1 · `0 0 0 2px #e7f0ff` × 1 · `0 0 0 2px #fff` × 1 · `0 0 0 3px #d9e9ff` × 1 · `0 0 0 3px #eaf1ff` × 1 | `none` × 8 · `0 10px 30px #172b4d14` × 2 · `0 0 0 1px #c64c3c` × 1 · `0 0 0 1px #dce9ff` × 1 · `0 0 0 2px #e7f0ff` × 1 · `0 0 0 2px #fff` × 1 · `0 0 0 3px #d9e9ff` × 1 · `0 0 0 3px #eaf1ff` × 1 |
-| z-index | `1` × 4 · `32` × 3 · `100` × 1 · `12` × 1 · `130` × 1 · `180` × 1 · `30` × 1 · `31` × 1 | `1` × 4 · `32` × 3 · `100` × 1 · `12` × 1 · `130` × 1 · `180` × 1 · `30` × 1 · `31` × 1 |
+| z-index | `1` × 4 · `32` × 3 · `100` × 1 · `130` × 1 · `180` × 1 · `30` × 1 · `31` × 1 · `39` × 1 | `1` × 4 · `32` × 3 · `100` × 1 · `130` × 1 · `180` × 1 · `30` × 1 · `31` × 1 · `39` × 1 |
 
 ## 참조 경로
 
@@ -105,7 +105,7 @@ node scripts/css-audit.mjs --self-test
 | [src/components/personal-work.css](../../src/components/personal-work.css) | 예 | 54,943 | 353 / 179 | 242 / 15 | 76 / 20 | 5 / 3 | 0 / 0 |
 | [src/components/personnel-handover.css](../../src/components/personnel-handover.css) | 예 | 17,321 | 83 / 73 | 71 / 8 | 18 / 10 | 2 / 2 | 1 / 1 |
 | [src/components/procedure-builder.css](../../src/components/procedure-builder.css) | 예 | 19,204 | 139 / 113 | 77 / 6 | 26 / 13 | 4 / 4 | 0 / 0 |
-| [src/components/procedure-editor.css](../../src/components/procedure-editor.css) | 예 | 5,324 | 37 / 34 | 25 / 6 | 9 / 6 | 2 / 2 | 1 / 1 |
+| [src/components/procedure-editor.css](../../src/components/procedure-editor.css) | 예 | 5,111 | 37 / 34 | 25 / 6 | 9 / 6 | 2 / 2 | 0 / 0 |
 | [src/components/read-field.css](../../src/components/read-field.css) | 예 | 507 | 4 / 3 | 1 / 1 | 1 / 1 | 0 / 0 | 0 / 0 |
 | [src/components/task-budget.css](../../src/components/task-budget.css) | 예 | 6,640 | 56 / 51 | 32 / 9 | 11 / 6 | 0 / 0 | 0 / 0 |
 | [src/components/task-description-files.css](../../src/components/task-description-files.css) | 예 | 2,307 | 21 / 19 | 11 / 4 | 4 / 4 | 0 / 0 | 0 / 0 |
@@ -486,7 +486,7 @@ node scripts/css-audit.mjs --self-test
 
 ### src/components/procedure-editor.css
 
-참조됨: 예 · 규칙 68 · 선언 218 · !important 0
+참조됨: 예 · 규칙 67 · 선언 211 · !important 0
 
 | 지표 | 발생 | 종류 | 상위 값 |
 |---|---:|---:|---|
@@ -496,7 +496,7 @@ node scripts/css-audit.mjs --self-test
 | radius 전체 값 | 9 | 6 | `13px` × 4 · `10px` × 1 · `14px` × 1 · `16px` × 1 · `8px` × 1 · `9px` × 1 |
 | radius 내부 px | 9 | 6 | `13px` × 4 · `10px` × 1 · `14px` × 1 · `16px` × 1 · `8px` × 1 · `9px` × 1 |
 | box/text-shadow | 2 | 2 | `0 0 0 2px #e7f0ff` × 1 · `0 5px 16px #17376112` × 1 |
-| z-index | 1 | 1 | `12` × 1 |
+| z-index | 0 | 0 | 없음 |
 
 ### src/components/read-field.css
 
