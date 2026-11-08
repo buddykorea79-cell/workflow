@@ -224,9 +224,15 @@ export function Modal({ title, description, onClose, children, wide = false, cla
       }
       showCommandError('', issues, ref.current);
     }}
-    onInputCapture={event => {
-      const path = (event.target as HTMLElement).closest<HTMLElement>('[data-field-path]')?.dataset.fieldPath;
-      if (path) setFeedback(current => ({ ...current, fields: current.fields.filter(issue => issue.path !== path) }));
+    onChange={event => {
+      const control = event.target as HTMLElement;
+      if (control.closest(dialogSelector) !== ref.current) return;
+      const path = control.closest<HTMLElement>('[data-field-path]')?.dataset.fieldPath;
+      // Clear errors after the control has accepted its value. Updating context
+      // during input capture can restore the old controlled value before onChange.
+      if (path) setFeedback(current => current.fields.some(issue => issue.path === path)
+        ? { ...current, fields: current.fields.filter(issue => issue.path !== path) }
+        : current);
     }}>
     <header className="modal-heading"><div><h2 id={headingId}>{title}</h2>{description && <p id={descriptionId}>{description}</p>}</div><button type="button" className="icon-btn" aria-label={role === 'alertdialog' ? '확인창 닫고 계속 작성' : '닫기'} onClick={requestClose}><X size={21}/></button></header>
     <div className="modal-content"><FieldErrors.Provider value={feedback.fields}>{children}</FieldErrors.Provider>{errorHost ? createPortal(errorMessage, errorHost) : errorMessage}</div>
