@@ -1,5 +1,6 @@
 import { commonPublished } from './common-approval';
 import { canEditDepartmentDefinitions } from './work-division';
+import { sortUnitsByImportance } from './unit-importance';
 import type { Unit, Workspace } from './types';
 
 type RegistrationWorkspace = Pick<Workspace, 'currentUser' | 'commonTasks' | 'units' | 'departmentWorkPlans' | 'serverTime'>;
@@ -19,7 +20,7 @@ export function commonRegistrationState(workspace: RegistrationWorkspace, common
   const common = workspace.commonTasks.find(item => item.id === commonId);
   const distribution = common?.distributions.find(item => item.id === distributionId);
   const departmentId = distribution?.departmentId || user.departmentId;
-  const units = workspace.units.filter(unit => unit.ownerId === user.id && unit.departmentId === departmentId && !unit.deletedAt);
+  const units = sortUnitsByImportance(workspace.units.filter(unit => unit.ownerId === user.id && unit.departmentId === departmentId && !unit.deletedAt));
   const definitionEditable = canEditDepartmentDefinitions(workspace, user, departmentId);
   let blocked = '';
   if (!user.active || user.endsAt && new Date(user.endsAt) <= new Date(workspace.serverTime)) blocked = '현재 계정의 업무 등록 권한을 확인해 주세요.';

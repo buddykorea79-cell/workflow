@@ -5,6 +5,7 @@ import { createSeed } from './seed';
 import type { WorkspaceData } from './types';
 import { DomainError } from './domain-error';
 import { resolveStoreMode } from './store-mode';
+import { normalizeUnitImportance } from './unit-importance';
 
 export const dataDirectory = () => path.resolve(process.env.IEUM_DATA_DIR || path.join(process.cwd(), '.data'));
 const wait = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
@@ -24,7 +25,7 @@ export async function readState(): Promise<WorkspaceData> {
   const mode = resolveStoreMode();
   logStorageMode(mode);
   if (mode === 'neon') { const { neonReadState } = await import('./neon-store'); return neonReadState(); }
-  try { return JSON.parse(await readFile(path.join(dataDirectory(), 'workspace.json'), 'utf8')) as WorkspaceData; }
+  try { return normalizeUnitImportance(JSON.parse(await readFile(path.join(dataDirectory(), 'workspace.json'), 'utf8')) as WorkspaceData); }
   catch (error) {
     if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw new DomainError(503, 'STORE_READ_ERROR', '저장된 데이터를 읽을 수 없습니다. 원본 파일을 보존하고 복구를 확인해 주세요.');
     // The first read is the only initialization exception: create and persist one
@@ -67,8 +68,12 @@ export async function transaction<T>(callback: (state: WorkspaceData) => T | Pro
   try {
     let state: WorkspaceData; let original = '';
     try { original = await readFile(file, 'utf8'); state = JSON.parse(original); } catch (error) { if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw new DomainError(503, 'STORE_READ_ERROR', '저장된 데이터를 읽을 수 없습니다. 원본 파일을 보존하고 복구를 확인해 주세요.'); state = createSeed(); }
-    const result = await callback(state); const updated = JSON.stringify(state, null, 2);
-    if (updated !== original) { const temporary = path.join(directory, `.workspace-${randomUUID()}.tmp`); const handle = await open(temporary, 'wx'); try { await handle.writeFile(updated, 'utf8'); await handle.sync(); } finally { await handle.close(); } await rename(temporary, file); }
+    normalizeUnitImportance(state);
+    const before = JSON.stringify(state, null, 2);
+    const result = await callback(state); normalizeUnitImportance(state); const updated = JSON.stringify(state, null, 2);
+    // Legacy defaults become durable only with a real mutation (or initial seed).
+    // A read-only callback or idempotent replay must not turn into a migration write.
+    if (!original || updated !== before) { const temporary = path.join(directory, `.workspace-${randomUUID()}.tmp`); const handle = await open(temporary, 'wx'); try { await handle.writeFile(updated, 'utf8'); await handle.sync(); } finally { await handle.close(); } await rename(temporary, file); }
     return result;
   } finally { await lock.close(); await unlink(lockPath).catch(() => undefined); }
 }

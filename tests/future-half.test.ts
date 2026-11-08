@@ -13,10 +13,18 @@ function send(state: WorkspaceData, type: string, payload: Record<string, unknow
   executeCommand(candidate, userId, { type, payload, requestId: randomUUID(), expectedRevision: state.revision, ...(expected ? { expected } : {}) }, when);
   Object.assign(state, candidate);
 }
-const allocations = (state: WorkspaceData) => eligibleScoreUnits(state, actor).map(unit => ({ unitId: unit.id, maxScore: unit.id === state.tasks.find(task => task.id === taskId)!.unitId ? 50 : 0 }));
+const allocations = (state: WorkspaceData) => {
+  const units = eligibleScoreUnits(state, actor);
+  return units.map((unit, index) => ({ unitId: unit.id, maxScore: index === 0 ? 51 - units.length : 1 }));
+};
 function ready(state: WorkspaceData, period: string, when = now) {
   send(state, 'performance.setWeights', { period, allocations: allocations(state) }, when);
   send(state, 'performance.saveHalf', { taskId, period, description: '반기에 수행한 업무 성과' }, when);
+  for (const allocation of allocations(state)) {
+    if (allocation.unitId === state.tasks.find(task => task.id === taskId)!.unitId) continue;
+    send(state, 'task.create', { unitId: allocation.unitId, primaryId: actor, title: '반기 검증 업무', description: '단위업무별 성과', dueDate: '2027-12-31', frequency: 'once' }, when);
+    send(state, 'performance.saveHalf', { taskId: state.tasks[0].id, period, description: '반기에 수행한 단위업무 성과' }, when);
+  }
   return getUnitScorePlan(state, actor, period)!;
 }
 function rejects(code: string, action: () => unknown, message?: string) {

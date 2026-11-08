@@ -16,9 +16,15 @@ function dispatch(state: WorkspaceData, actor: string, type: string, payload: Re
 function rejects(code: string, action: () => void) { assert.throws(action, error => error instanceof DomainError && error.code === code); }
 function weights(state: WorkspaceData, owner = personId) {
   const units = eligibleScoreUnits(state, owner);
-  return units.map((unit, index) => ({ unitId: unit.id, maxScore: index === 0 ? 50 : 0 }));
+  return units.map((unit, index) => ({ unitId: unit.id, maxScore: index === 0 ? 51 - units.length : 1 }));
 }
 function setPlan(state: WorkspaceData, owner = personId) { dispatch(state, owner, 'performance.setWeights', { period, allocations: weights(state, owner) }); return getUnitScorePlan(state, owner, period)!; }
+// Historical zero-weight plans remain valid for submission/evaluation, but cannot be saved anew.
+function legacyPlan(state: WorkspaceData, owner = personId) {
+  const units = eligibleScoreUnits(state, owner);
+  const plan = { id: randomUUID(), personId: owner, departmentId: state.users.find(user => user.id === owner)!.departmentId, period, version: 1, allocations: units.map((unit, index) => ({ unitId: unit.id, unitTitle: unit.title, maxScore: index === 0 ? 50 : 0 })), updatedAt: now.toISOString() };
+  state.unitScorePlans ??= []; state.unitScorePlans.push(plan); return plan;
+}
 function submitPerson(state: WorkspaceData, owner = personId) { dispatch(state, owner, 'performance.submitPerson', { period, planVersion: getUnitScorePlan(state, owner, period)!.version }); }
 function addPerformance(state: WorkspaceData, owner = personId, unitId = eligibleScoreUnits(state, owner)[0].id, extra: Partial<Performance> = {}) {
   const task = state.tasks.find(item => item.primaryId === owner && item.unitId === unitId) ?? state.tasks.find(item => item.primaryId === owner)!;
@@ -28,7 +34,14 @@ function addPerformance(state: WorkspaceData, owner = personId, unitId = eligibl
 }
 function evaluationInput(state: WorkspaceData, owner = personId) {
   const plan = getUnitScorePlan(state, owner, period)!;
-  return { personId: owner, period, planVersion: plan.version, scores: plan.allocations.map(allocation => ({ unitId: allocation.unitId, score: allocation.maxScore ? 42.5 : 0, comment: '성과 근거를 확인했습니다.' })), comment: '반기 업무 수행 결과' };
+  return { personId: owner, period, planVersion: plan.version, scores: plan.allocations.map(allocation => ({ unitId: allocation.unitId, score: Math.min(42.5, allocation.maxScore), comment: '성과 근거를 확인했습니다.' })), comment: '반기 업무 수행 결과' };
+}
+function addMissingPlanPerformances(state: WorkspaceData) {
+  for (const allocation of getUnitScorePlan(state, personId, period)!.allocations) {
+    if (currentPersonPerformances(state, personId, period).some(record => record.unitId === allocation.unitId)) continue;
+    dispatch(state, personId, 'task.create', { unitId: allocation.unitId, primaryId: personId, title: '추가 단위 성과 업무', description: '새 비중에 포함한 업무의 성과', dueDate: '2026-12-31', frequency: 'once' });
+    addPerformance(state, personId, allocation.unitId, { taskId: state.tasks[0].id, status: 'draft' });
+  }
 }
 
 test('unit evaluation: legacy stores remain unchanged on read; employee saves all owned units totaling exactly 50', () => {
@@ -43,7 +56,8 @@ test('unit evaluation: legacy stores remain unchanged on read; employee saves al
 
 test('unit evaluation: invalid totals, duplicates, omitted units, foreign units and nonfinite scores fail atomically', () => {
   const state = createSeed(now); const allocations = weights(state); const before = JSON.stringify(state);
-  rejects('SCORE_TOTAL_REQUIRED', () => dispatch(state, personId, 'performance.setWeights', { period, allocations: allocations.map(entry => ({ ...entry, maxScore: 0 })) }));
+  rejects('SCORE_TOTAL_REQUIRED', () => dispatch(state, personId, 'performance.setWeights', { period, allocations: allocations.map(entry => ({ ...entry, maxScore: 1 })) }));
+  rejects('VALIDATION_ERROR', () => dispatch(state, personId, 'performance.setWeights', { period, allocations: allocations.map(entry => ({ ...entry, maxScore: 0 })) }));
   rejects('DUPLICATE_SCORE_UNIT', () => dispatch(state, personId, 'performance.setWeights', { period, allocations: [allocations[0], allocations[0]] }));
   const foreign = state.units.find(unit => unit.ownerId !== personId && !unit.deletedAt)!;
   rejects('SCORE_OWNER_REQUIRED', () => dispatch(state, personId, 'performance.setWeights', { period, allocations: [{ unitId: foreign.id, maxScore: 50 }] }));
@@ -64,7 +78,7 @@ test('unit evaluation: weights are independent of the department definition lock
 test('unit evaluation: only own department head/admin evaluates, no self approval, plan required and versions checked', () => {
   const state = createSeed(now); addPerformance(state);
   rejects('SCORE_PLAN_REQUIRED', () => dispatch(state, headId, 'performance.evaluatePerson', { personId, period, planVersion: 1, scores: [{ unitId: weights(state)[0].unitId, score: 1 }] }));
-  setPlan(state); const input = evaluationInput(state);
+  legacyPlan(state); const input = evaluationInput(state);
   for (const actor of [personId, 'u-support-lead', 'u-doyun', 'u-head']) rejects('HEAD_EVALUATION_REQUIRED', () => dispatch(state, actor, 'performance.evaluatePerson', input));
   rejects('SCORE_PLAN_CHANGED', () => dispatch(state, headId, 'performance.evaluatePerson', { ...input, planVersion: 999 }));
   rejects('PERFORMANCE_NOT_SUBMITTED', () => dispatch(state, headId, 'performance.evaluatePerson', input));
@@ -76,7 +90,7 @@ test('unit evaluation: only own department head/admin evaluates, no self approva
 });
 
 test('unit evaluation: bounded per-unit scores, complete score set and submitted evidence are required', () => {
-  const state = createSeed(now); const plan = setPlan(state); const input = evaluationInput(state);
+  const state = createSeed(now); const plan = legacyPlan(state); const input = evaluationInput(state);
   rejects('PERFORMANCE_REQUIRED', () => submitPerson(state));
   const record = addPerformance(state);
   submitPerson(state);
@@ -88,21 +102,21 @@ test('unit evaluation: bounded per-unit scores, complete score set and submitted
   const emptyUnit = plan.allocations.find(allocation => allocation.unitId !== record.unitId);
   if (emptyUnit) {
     dispatch(state, personId, 'performance.withdrawSubmission', { period });
-    const reweighted = plan.allocations.map(allocation => ({ unitId: allocation.unitId, maxScore: allocation.unitId === record.unitId ? 25 : allocation.unitId === emptyUnit.unitId ? 25 : 0 }));
+    const reweighted = weights(state);
     dispatch(state, personId, 'performance.setWeights', { period, allocations: reweighted });
     rejects('UNIT_PERFORMANCE_REQUIRED', () => submitPerson(state));
   }
 });
 
 test('unit evaluation: submitted allocations survive later unit composition changes', () => {
-  const state = createSeed(now); setPlan(state); addPerformance(state); submitPerson(state); const input = evaluationInput(state);
+  const state = createSeed(now); legacyPlan(state); addPerformance(state); submitPerson(state); const input = evaluationInput(state);
   state.units.push({ ...eligibleScoreUnits(state, personId)[0], id: 'new-unit', title: '새로 추가된 업무' });
   dispatch(state, headId, 'performance.evaluatePerson', input);
   assert.equal(getUnitEvaluation(state, personId, period)?.totalScore, 42.5);
 });
 
 test('unit evaluation: confirmed total and evidence snapshot survive later record or task changes; writes are frozen', () => {
-  const state = createSeed(now); setPlan(state); const record = addPerformance(state); submitPerson(state); const input = evaluationInput(state);
+  const state = createSeed(now); legacyPlan(state); const record = addPerformance(state); submitPerson(state); const input = evaluationInput(state);
   dispatch(state, headId, 'performance.evaluatePerson', input);
   const evaluation = getUnitEvaluation(state, personId, period)!; assert.equal(evaluation.totalScore, 42.5);
   assert.equal(state.performances.find(performance => performance.id === record.id)?.status, 'confirmed');
@@ -129,7 +143,7 @@ test('unit evaluation: one current record per task, correction chains and other 
 });
 
 test('unit evaluation: employee and manager only read their own plans/evaluations, head owns department and admin sees all', () => {
-  const state = createSeed(now); setPlan(state); addPerformance(state); submitPerson(state); dispatch(state, headId, 'performance.evaluatePerson', evaluationInput(state));
+  const state = createSeed(now); legacyPlan(state); addPerformance(state); submitPerson(state); dispatch(state, headId, 'performance.evaluatePerson', evaluationInput(state));
   const plan = getUnitScorePlan(state, personId, period)!; const evaluation = getUnitEvaluation(state, personId, period)!;
   state.unitScorePlans!.push({ ...plan, id: 'foreign-plan', personId: 'u-member', departmentId: 'dept-policy' });
   state.unitEvaluations!.push({ ...evaluation, id: 'foreign-evaluation', personId: 'u-member', departmentId: 'dept-policy' });
@@ -169,7 +183,7 @@ test('unit evaluation: a previous author keeps their submitted evidence after ha
 
 test('unit evaluation: old unit evidence stays visible as unscored reference after evaluation', () => {
   const state = createSeed(now); state.performances = [];
-  setPlan(state); addPerformance(state);
+  legacyPlan(state); addPerformance(state);
   const otherTask = state.tasks.find(task => task.primaryId === personId && task.id !== state.performances[0].taskId)!;
   assert.ok(otherTask);
   const old = addPerformance(state, personId, 'old-deleted-unit', { taskId: otherTask.id, id: 'previous-unit-evidence', description: '이전 단위업무 성과' });
@@ -220,7 +234,7 @@ test('unit submission: task drafts can be corrected repeatedly without requestin
 });
 
 test('unit submission: explicit submission locks drafts and weights, withdrawal reopens, evaluation locks permanently', () => {
-  const state = createSeed(now); state.performances = []; setPlan(state);
+  const state = createSeed(now); state.performances = []; legacyPlan(state);
   const record = addPerformance(state, personId, undefined, { status: 'draft' });
   const input = { taskId: record.taskId, period, title: record.title, description: record.description, evidence: record.evidence };
   const before = state.notifications.length;
@@ -239,15 +253,15 @@ test('unit submission: explicit submission locks drafts and weights, withdrawal 
   assert.equal(getUnitScorePlan(state, personId, period)?.submittedAt, undefined);
   assert.equal(state.performances[0].status, 'draft');
   dispatch(state, personId, 'performance.saveHalf', { ...input, description: '수정된 최종 성과' });
-  setPlan(state); submitPerson(state);
+  setPlan(state); addMissingPlanPerformances(state); submitPerson(state);
   dispatch(state, headId, 'performance.evaluatePerson', evaluationInput(state));
   assert.equal(personUnitPerformanceSummary(state, personId, period).status, 'evaluated');
   rejects('EVALUATION_CONFIRMED', () => dispatch(state, personId, 'performance.withdrawSubmission', { period }));
-  assert.equal(getUnitEvaluation(state, personId, period)?.performanceSnapshot[0].description, '수정된 최종 성과');
+  assert.equal(getUnitEvaluation(state, personId, period)?.performanceSnapshot.find(item => item.id === record.id)?.description, '수정된 최종 성과');
 });
 
 test('unit submission: ownership, plan version, missing content and invalid saved plans are rejected atomically', () => {
-  const state = createSeed(now); state.performances = []; setPlan(state);
+  const state = createSeed(now); state.performances = []; legacyPlan(state);
   rejects('PERFORMANCE_DENIED', () => dispatch(state, 'u-doyun', 'performance.submitPerson', { personId, period, planVersion: 1 }));
   rejects('PERFORMANCE_DENIED', () => dispatch(state, headId, 'performance.submitPerson', { period, planVersion: 1 }));
   rejects('PERFORMANCE_DENIED', () => dispatch(state, 'u-doyun', 'performance.withdrawSubmission', { personId, period }));
@@ -263,7 +277,7 @@ test('unit submission: ownership, plan version, missing content and invalid save
 });
 
 test('unit submission: managers see same-department status metadata without private drafts, scores or evaluation audit', () => {
-  const state = createSeed(now); state.performances = []; setPlan(state); const record = addPerformance(state, personId, undefined, { status: 'draft' });
+  const state = createSeed(now); state.performances = []; legacyPlan(state); const record = addPerformance(state, personId, undefined, { status: 'draft' });
   const managerId = 'u-doyun';
   let workspace = getWorkspace(state, managerId, now);
   assert.equal(workspace.performanceSubmissionStatuses?.find(item => item.personId === personId && item.period === period)?.status, 'not_submitted');
@@ -285,14 +299,14 @@ test('unit submission: managers see same-department status metadata without priv
 });
 
 test('unit submission: employee can elect to include new units by withdrawing and resubmitting a fresh plan', () => {
-  const state = createSeed(now); state.performances = []; setPlan(state); addPerformance(state, personId, undefined, { status: 'draft' }); submitPerson(state);
+  const state = createSeed(now); state.performances = []; legacyPlan(state); addPerformance(state, personId, undefined, { status: 'draft' }); submitPerson(state);
   dispatch(state, personId, 'unit.create', { title: '제출 후 추가한 단위업무', description: '다음 수행을 위한 새 단위업무' });
   assert.ok(!getUnitScorePlan(state, personId, period)!.allocations.some(unit => unit.unitTitle === '제출 후 추가한 단위업무'));
   rejects('PERFORMANCE_SUBMITTED', () => setPlan(state));
   dispatch(state, personId, 'performance.withdrawSubmission', { period });
-  setPlan(state); submitPerson(state);
+  setPlan(state); addMissingPlanPerformances(state); submitPerson(state);
   dispatch(state, headId, 'performance.evaluatePerson', evaluationInput(state));
   const evaluation = getUnitEvaluation(state, personId, period)!;
-  assert.equal(evaluation.totalScore, 42.5);
-  assert.equal(evaluation.scores.find(item => item.unitTitle === '제출 후 추가한 단위업무')?.maxScore, 0);
+  assert.equal(evaluation.totalScore, evaluation.scores.reduce((sum, item) => sum + Math.min(42.5, item.maxScore), 0));
+  assert.equal(evaluation.scores.find(item => item.unitTitle === '제출 후 추가한 단위업무')?.maxScore, 1);
 });

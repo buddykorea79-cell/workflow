@@ -12,7 +12,7 @@ const labels: ValidationLabels = {
   primaryId: '담당자', supportIds: '지원 담당자', reviewerId: '검토 담당자',
   departmentId: '부서', departmentIds: '대상 부서', ownerId: '담당자', fromId: '인계자', toId: '새 담당자',
   reason: '사유', comment: '의견', content: '내용', evidence: '근거', url: '주소',
-  period: '평가 기간', month: '실적 월', frequency: '반복 주기', priority: '우선순위',
+  period: '평가 기간', month: '실적 월', frequency: '반복 주기', priority: '우선순위', importance: '중요도',
   workflow: '절차', steps: '절차 일정', requiredSteps: '공통 필수 절차', role: '역할', roleIds: '변경할 역할',
   output: '결과물', checklist: '확인 항목', dependsOn: '선행 절차', required: '필수 여부',
   scheduleDetails: '일정 내용', completionCriteria: '완료 기준', attachmentIds: '첨부파일',

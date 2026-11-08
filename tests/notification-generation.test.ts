@@ -94,8 +94,14 @@ test('legacy handover acceptance and transfer request, completion, emergency and
 
 test('half-year submission and evaluation preserve person/period destinations while old per-run reviews target their performance record', () => {
   const state = createSeed(now), owner = 'u-support-member', period = '2026-H2';
-  send(state, owner, 'performance.setWeights', { period, allocations: eligibleScoreUnits(state, owner).map((unit, index) => ({ unitId: unit.id, maxScore: index === 0 ? 50 : 0 })) });
+  const units = eligibleScoreUnits(state, owner);
+  send(state, owner, 'performance.setWeights', { period, allocations: units.map((unit, index) => ({ unitId: unit.id, maxScore: index === 0 ? 51 - units.length : 1 })) });
   send(state, owner, 'performance.saveHalf', { taskId: 'task-data', period, description: '성과 평가 알림 근거' });
+  for (const unit of units) {
+    if (unit.id === state.tasks.find(task => task.id === 'task-data')!.unitId) continue;
+    send(state, owner, 'task.create', { unitId: unit.id, primaryId: owner, title: '알림 검증 업무', description: '단위업무별 성과', dueDate: '2026-12-31', frequency: 'once' });
+    send(state, owner, 'performance.saveHalf', { taskId: state.tasks[0].id, period, description: '추가 단위업무 성과' });
+  }
   const plan = state.unitScorePlans!.find(item => item.personId === owner && item.period === period)!;
   const submitted = send(state, owner, 'performance.submitPerson', { period, planVersion: plan.version }, ['performance']);
   for (const notice of submitted) assert.deepEqual(notice.destination, { view: 'performance', personId: owner, period });

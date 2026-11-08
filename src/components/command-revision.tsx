@@ -13,7 +13,7 @@ type RevisionWorkspace = Workspace & { budgetCatalog?: BudgetCatalog };
 function latestContent(workspace: RevisionWorkspace, target: CommandTarget) {
   const value = targetEntity(workspace, target);
   const records = Array.isArray(value) ? value : value ? [value] : [];
-  const labels: Record<string, string> = { title: '이름', name: '이름', description: '내용', summary: '요약', dueDate: '업무 또는 회차 마감', startDate: '회차 시작', scheduleDetails: '일정 메모', period: '기간', reason: '사유', comment: '평가 의견', score: '점수', instructedOn: '지시일', projectName: '사업명', confirmedAmountWon: '확정 예산', team: '팀', email: '이메일', phone: '전화번호' };
+  const labels: Record<string, string> = { title: '이름', name: '이름', description: '내용', importance: '중요도', summary: '요약', dueDate: '업무 또는 회차 마감', startDate: '회차 시작', scheduleDetails: '일정 메모', period: '기간', reason: '사유', comment: '평가 의견', score: '점수', instructedOn: '지시일', projectName: '사업명', confirmedAmountWon: '확정 예산', team: '팀', email: '이메일', phone: '전화번호' };
   const rows: { label: string; content: string }[] = [];
   for (const record of records) {
     if (!record || typeof record !== 'object') continue;

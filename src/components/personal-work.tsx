@@ -14,7 +14,8 @@ import './personal-work.css';
 import { canEditDepartmentDefinitions, isDepartmentConfirmed } from '@/lib/work-division';
 import { createLazyScreen } from './lazy-screen';
 import { CommonRegistrationModal } from './common-registration-modal';
-import { UnitFormFields } from './unit-form-fields';
+import { UnitFormFields, validateUnitImportance } from './unit-form-fields';
+import { sortUnitsByImportance, unitImportance } from '@/lib/unit-importance';
 import { AiWorkRegistrationDialog } from './ai-work-registration-dialog';
 import { directiveIssuerLabels } from '@/lib/directives';
 import { referencesForSave } from '@/lib/task-references';
@@ -70,8 +71,8 @@ export function PersonalWork({ workspace: w, command, onOpenTask, onWorkspace, f
   const delegatedIds = new Set(delegatedTasks.map(task => task.id));
   const mine = [...ownedTasks, ...delegatedTasks];
   const taskUnitId = (task: Task) => delegatedIds.has(task.id) ? DELEGATED_UNIT_ID : task.unitId;
-  const ownUnits = w.units.filter(unit => unit.ownerId === w.currentUser.id && !unit.deletedAt);
-  const units: Unit[] = [...w.units.filter(unit => canSelectPersonalUnit(w, unit)), ...(delegatedTasks.length ? [{ id: DELEGATED_UNIT_ID, title: '업무대행', description: '승인된 기간에 원담당자의 업무를 대신 수행합니다. 원본 업무와 기록을 함께 사용합니다.', ownerId: w.currentUser.id, departmentId: w.currentUser.departmentId, color: 'blue', icon: 'folder' }] : [])];
+  const ownUnits = sortUnitsByImportance(w.units.filter(unit => unit.ownerId === w.currentUser.id && !unit.deletedAt));
+  const units: Unit[] = [...sortUnitsByImportance(w.units.filter(unit => canSelectPersonalUnit(w, unit))), ...(delegatedTasks.length ? [{ id: DELEGATED_UNIT_ID, title: '업무대행', description: '승인된 기간에 원담당자의 업무를 대신 수행합니다. 원본 업무와 기록을 함께 사용합니다.', ownerId: w.currentUser.id, departmentId: w.currentUser.departmentId, color: 'blue', icon: 'folder' }] : [])];
   const trashUnits = w.units.filter(unit => unit.ownerId === w.currentUser.id && !!unit.deletedAt);
   const trashTasks = w.tasks.filter(task => task.primaryId === w.currentUser.id && !!task.deletedAt);
   const [unitId, setUnitId] = useState('all');
@@ -146,7 +147,7 @@ export function PersonalWork({ workspace: w, command, onOpenTask, onWorkspace, f
       <aside className="pw-unit-rail">
         <div className="pw-rail-heading"><span>단위업무 · 업무 묶음</span><button className="pw-icon-button" aria-label="단위업무 추가" disabled={!definitionEditable} onClick={() => setCreate('unit')}><Plus size={17} /></button></div>
         <button className={`pw-unit-button ${unitId === 'all' ? 'active' : ''}`} aria-current={unitId === 'all' ? 'page' : undefined} onClick={() => setUnitId('all')}><Layers3 size={18} /><span>전체 업무</span><b>{mine.length}</b></button>
-        <div className="pw-unit-list">{units.map(unit => <button key={unit.id} className={`pw-unit-button ${unitId === unit.id ? 'active' : ''}`} aria-current={unitId === unit.id ? 'page' : undefined} onClick={() => setUnitId(unit.id)}><Folder size={18} /><span>{unit.title}{unit.ownerId !== w.currentUser.id && <small>공유 단위 · {w.users.find(user => user.id === unit.ownerId)?.name || '다른 담당자'}</small>}</span><b>{mine.filter(task => taskUnitId(task) === unit.id).length}</b></button>)}</div>
+        <div className="pw-unit-list">{units.map(unit => <button key={unit.id} className={`pw-unit-button ${unitId === unit.id ? 'active' : ''}`} aria-current={unitId === unit.id ? 'page' : undefined} onClick={() => setUnitId(unit.id)}><Folder size={18} /><span>{unit.title}{unit.id !== DELEGATED_UNIT_ID && <small>중요도 {unitImportance(unit)}</small>}{unit.ownerId !== w.currentUser.id && <small>공유 단위 · {w.users.find(user => user.id === unit.ownerId)?.name || '다른 담당자'}</small>}</span><b>{mine.filter(task => taskUnitId(task) === unit.id).length}</b></button>)}</div>
         <button className="pw-add-unit" disabled={!definitionEditable} onClick={() => setCreate('unit')}><FolderPlus size={17} />단위업무 추가</button>
         <button className={`pw-unit-button pw-trash-nav ${inTrash ? 'active' : ''}`} aria-current={inTrash ? 'page' : undefined} onClick={() => setUnitId('trash')}><Trash2 size={17} /><span>휴지통</span><b>{trashUnits.length + trashTasks.length}</b></button>
         <div className="pw-rail-note"><span className="pw-rail-number">{complete}<span> / {mine.length}</span></span><p>완료한 세부업무</p><Progress value={mine.length ? complete / mine.length * 100 : 0} /></div>
@@ -155,7 +156,7 @@ export function PersonalWork({ workspace: w, command, onOpenTask, onWorkspace, f
       <section className="pw-work-area">
         <nav className="pw-hierarchy-breadcrumb" aria-label="개인업무 위치"><button onClick={() => setUnitId('all')}>개인업무</button><ChevronRight size={14} /><span>{inTrash ? '휴지통' : selectedUnit ? selectedUnit.title : '전체 단위업무'}</span>{selectedUnit && <><ChevronRight size={14} /><span>세부업무</span></>}</nav>
         {inTrash ? <PersonalTrash workspace={w} command={command} /> : <>
-          <div className="pw-unit-header"><div>{selectedUnit && <p className="pw-unit-kind"><Folder size={14} />단위업무 · 업무 묶음</p>}<h2>{selectedUnit?.title || '전체 업무'} <span>{visible.length}</span></h2><p>{selectedUnit?.description || '단위업무를 펼쳐 세부업무를 확인하고, 업무 이름을 눌러 상세 내용을 엽니다.'}</p></div>{selectedUnit ? <div className="pw-unit-actions">{selectedUnit.id === DELEGATED_UNIT_ID ? <Badge tone='info'>원본 업무 연결 · 수행 권한</Badge> : selectedUnit.ownerId === w.currentUser.id ? <><Button variant="secondary" disabled={!definitionEditable} onClick={() => setEditingUnitId(selectedUnit.id)}><Pencil size={14} />단위 수정</Button><Button variant="secondary" disabled={!definitionEditable} onClick={() => setDeleting({ kind: 'unit', id: selectedUnit.id, title: selectedUnit.title })}><Trash2 size={14} />단위 삭제</Button></> : <Badge tone="outline">공유 단위 · {w.users.find(user => user.id === selectedUnit.ownerId)?.name || '다른 담당자'} 소유</Badge>}</div> : <span className="pw-view-symbol"><Layers3 size={24} /></span>}</div>
+          <div className="pw-unit-header"><div>{selectedUnit && <p className="pw-unit-kind"><Folder size={14} />단위업무 · 업무 묶음{selectedUnit.id !== DELEGATED_UNIT_ID && <> · 중요도 {unitImportance(selectedUnit)}</>}</p>}<h2>{selectedUnit?.title || '전체 업무'} <span>{visible.length}</span></h2><p>{selectedUnit?.description || '단위업무를 펼쳐 세부업무를 확인하고, 업무 이름을 눌러 상세 내용을 엽니다.'}</p></div>{selectedUnit ? <div className="pw-unit-actions">{selectedUnit.id === DELEGATED_UNIT_ID ? <Badge tone='info'>원본 업무 연결 · 수행 권한</Badge> : selectedUnit.ownerId === w.currentUser.id ? <><Button variant="secondary" disabled={!definitionEditable} onClick={() => setEditingUnitId(selectedUnit.id)}><Pencil size={14} />단위 수정</Button><Button variant="secondary" disabled={!definitionEditable} onClick={() => setDeleting({ kind: 'unit', id: selectedUnit.id, title: selectedUnit.title })}><Trash2 size={14} />단위 삭제</Button></> : <Badge tone="outline">공유 단위 · {w.users.find(user => user.id === selectedUnit.ownerId)?.name || '다른 담당자'} 소유</Badge>}</div> : <span className="pw-view-symbol"><Layers3 size={24} /></span>}</div>
           {selectedUnit && selectedUnit.ownerId !== w.currentUser.id && <p className="pw-legacy-note">기존에 연결된 나의 세부업무입니다. 세부업무의 ‘수정’에서 내가 만든 단위업무로 옮길 수 있습니다.</p>}
           <div className="pw-toolbar"><div className="tabs pw-filter-tabs" aria-label="업무 구분">{([['all', '전체'], ['personal', '개인업무'], ['common', '공통업무']] as const).map(([value, label]) => <button key={value} type="button" className={filter === value ? 'active' : ''} aria-pressed={filter === value} onClick={() => { setFilter(value); setCollapsedUnits([]); }}>{label}</button>)}</div><label className="pw-search"><Search size={18} /><input aria-label="단위업무와 세부업무 검색" placeholder="단위·세부업무 검색" value={query} onChange={e => { setQuery(e.target.value); setCollapsedUnits([]); }} /></label></div>
           <div className="pw-tree-toolbar"><p><b>{selectedUnit ? '세부업무' : `단위업무 ${grouped.length}개`}</b><span>{selectedUnit ? `${visible.length}건` : `세부업무 ${visible.length}건`}</span>{normalizedQuery && <span>검색 결과</span>}</p>{!selectedUnit && grouped.length > 0 && <div><button type="button" disabled={!grouped.some(({ unit }) => collapsedUnits.includes(unit.id))} onClick={() => setCollapsedUnits([])}><ChevronDown size={16}/>전체 펼치기</button><button type="button" disabled={grouped.every(({ unit }) => collapsedUnits.includes(unit.id))} onClick={() => setCollapsedUnits(grouped.map(({ unit }) => unit.id))}><ChevronRight size={16}/>전체 접기</button></div>}</div>
@@ -169,7 +170,7 @@ export function PersonalWork({ workspace: w, command, onOpenTask, onWorkspace, f
                 {!selectedUnit && <header className="pw-tree-unit-header">
                   <button type="button" className="pw-tree-toggle" aria-expanded={expanded} aria-controls={contentId} aria-label={`${unit.title} 세부업무 ${expanded ? '접기' : '펼치기'}`} onClick={() => toggleUnit(unit.id)}>
                     <span className="pw-tree-chevron">{expanded ? <ChevronDown size={20}/> : <ChevronRight size={20}/>}</span><span className="pw-tree-folder"><Folder size={21}/></span>
-                    <span className="pw-tree-unit-copy">{unit.ownerId !== w.currentUser.id && <span className="pw-tree-unit-kicker">공유 단위업무 · {w.users.find(user => user.id === unit.ownerId)?.name || '다른 담당자'}</span>}<span className="pw-tree-unit-title">{unit.title}<span className="pw-tree-count">{tasks.length === total ? `${total}건` : `${tasks.length} / ${total}건`}</span></span><span className="pw-tree-unit-description" title={unit.description || '이 단위업무에 속한 세부업무를 관리합니다.'}>{unit.description || '이 단위업무에 속한 세부업무를 관리합니다.'}</span></span>
+                    <span className="pw-tree-unit-copy">{unit.ownerId !== w.currentUser.id && <span className="pw-tree-unit-kicker">공유 단위업무 · {w.users.find(user => user.id === unit.ownerId)?.name || '다른 담당자'}</span>}<span className="pw-tree-unit-title">{unit.title}{unit.id !== DELEGATED_UNIT_ID && <Badge tone="info">중요도 {unitImportance(unit)}</Badge>}<span className="pw-tree-count">{tasks.length === total ? `${total}건` : `${tasks.length} / ${total}건`}</span></span><span className="pw-tree-unit-description" title={unit.description || '이 단위업무에 속한 세부업무를 관리합니다.'}>{unit.description || '이 단위업무에 속한 세부업무를 관리합니다.'}</span></span>
                   </button>
                   <div className="pw-tree-unit-actions"><Button variant="ghost" onClick={() => setUnitId(unit.id)} aria-label={`${unit.title} 단위업무 열기`}>단위 열기<ArrowRight size={15}/></Button>{unit.id !== DELEGATED_UNIT_ID && unit.ownerId === w.currentUser.id && <Button variant="secondary" disabled={!definitionEditable} onClick={() => beginTask(unit.id)} aria-label={`${unit.title}에 세부업무 추가`}><Plus size={16}/><span>세부업무 추가</span></Button>}</div>
                 </header>}
@@ -218,13 +219,14 @@ function PersonalTaskRow({ task, workspace: w, onView, onEdit, onDelete }: { tas
 function UnitForm({ workspace: w, unit, command, onClose, onCreated }: { workspace: Workspace; unit?: Unit; command: CommandFn; onClose: () => void; onCreated?: (title: string) => void }) {
   const [title, setTitle] = useState(unit?.title || '');
   const [description, setDescription] = useState(unit?.description || '');
+  const [importance, setImportance] = useState(() => String(unitImportance(unit || {})));
   const [busy, setBusy] = useState(false);
   const mounted = useMountedDraft();
   const [savedId, setSavedId] = useState(unit?.id || '');
   const revision = useRevisionCommand(w, command, savedId ? { kind: 'unit', id: savedId } : null);
   const [created, setCreated] = useState(false);
   const [notice, setNotice] = useState('');
-  const draft = { title, description };
+  const draft = { title, description, importance };
   const latest = useRef(draft); latest.current = draft;
   const [savedDraft, setSavedDraft] = useState(draft);
   useUnsavedChanges(!sameDraft(draft, savedDraft), '단위업무');
@@ -233,10 +235,11 @@ function UnitForm({ workspace: w, unit, command, onClose, onCreated }: { workspa
   async function save(event: React.FormEvent) {
     event.preventDefault(); if (busy || revision.conflicted || created && !savedId) return;
     const submitted = latest.current; const action = savedId ? 'unit.update' : 'unit.create';
+    if (!validateUnitImportance(submitted.importance)) return;
     let nextId = savedId;
     setBusy(true); setNotice('');
     try {
-      if (await revision.command(action, savedId ? { unitId: savedId, ...submitted } : { ...submitted, ownerId: w.currentUser.id }, { onSaved: result => { nextId = savedId || savedCommandTarget(result, action, w.currentUser.id) || ''; } })) {
+      if (await revision.command(action, savedId ? { unitId: savedId, ...submitted, importance: Number(submitted.importance) } : { ...submitted, importance: Number(submitted.importance), ownerId: w.currentUser.id }, { onSaved: result => { nextId = savedId || savedCommandTarget(result, action, w.currentUser.id) || ''; } })) {
         if (!mounted.current) return;
         setSavedId(nextId); setCreated(true); setSavedDraft(submitted);
         if (sameDraft(latest.current, submitted)) { if (!unit) onCreated?.(submitted.title.trim()); onClose(); }
@@ -244,7 +247,7 @@ function UnitForm({ workspace: w, unit, command, onClose, onCreated }: { workspa
       }
     } finally { setBusy(false); }
   }
-  return <Modal title={savedId ? '단위업무 수정' : '단위업무 만들기'} description="단위업무는 여러 세부업무를 담는 나의 업무 묶음입니다." onClose={closeForm}><form className="form-stack" onSubmit={save}><UnitFormFields title={title} description={description} onTitleChange={setTitle} onDescriptionChange={setDescription} autoFocus/><p className="pw-form-note"><Folder size={15} />{w.currentUser.name}님이 관리하는 단위업무입니다.</p>{notice && <p className="pw-form-note" role="status">{notice}</p>}{revision.conflict}<div className="form-actions"><Button type="button" variant="secondary" onClick={closeForm}>취소</Button><Button type="submit" disabled={busy || revision.conflicted || created && !savedId}>{busy ? '저장 중…' : savedId ? '수정사항 저장' : '단위업무 만들기'}</Button></div></form></Modal>;
+  return <Modal title={savedId ? '단위업무 수정' : '단위업무 만들기'} description="단위업무는 여러 세부업무를 담는 나의 업무 묶음입니다." onClose={closeForm}><form className="form-stack" onSubmit={save}><UnitFormFields title={title} description={description} importance={importance} onTitleChange={setTitle} onDescriptionChange={setDescription} onImportanceChange={setImportance} autoFocus/><p className="pw-form-note"><Folder size={15} />{w.currentUser.name}님이 관리하는 단위업무입니다.</p>{notice && <p className="pw-form-note" role="status">{notice}</p>}{revision.conflict}<div className="form-actions"><Button type="button" variant="secondary" onClick={closeForm}>취소</Button><Button type="submit" disabled={busy || revision.conflicted || created && !savedId}>{busy ? '저장 중…' : savedId ? '수정사항 저장' : '단위업무 만들기'}</Button></div></form></Modal>;
 }
 
 function DeleteWorkConfirm({ target, workspace: w, command, onClose, onInspectUnit }: { target: { kind: 'unit' | 'task'; id: string; title: string }; workspace: Workspace; command: CommandFn; onClose: () => void; onInspectUnit: (id: string) => void }) {
@@ -256,7 +259,7 @@ function DeleteWorkConfirm({ target, workspace: w, command, onClose, onInspectUn
 
 function PersonalTrash({ workspace: w, command }: { workspace: Workspace; command: CommandFn }) {
   const definitionEditable = canEditDepartmentDefinitions(w, w.currentUser, w.currentUser.departmentId);
-  const units = w.units.filter(unit => unit.ownerId === w.currentUser.id && !!unit.deletedAt);
+  const units = sortUnitsByImportance(w.units.filter(unit => unit.ownerId === w.currentUser.id && !!unit.deletedAt));
   const tasks = w.tasks.filter(task => task.primaryId === w.currentUser.id && !!task.deletedAt);
   const [restoringTaskId, setRestoringTaskId] = useState<string | null>(null);
   const [busyId, setBusyId] = useState('');
@@ -266,8 +269,8 @@ function PersonalTrash({ workspace: w, command }: { workspace: Workspace; comman
 
 function RestoreTask({ task, workspace: w, command, onClose }: { task: Task; workspace: Workspace; command: CommandFn; onClose: () => void }) {
   const original = w.units.find(unit => unit.id === task.unitId);
-  const ownUnits = w.units.filter(unit => unit.ownerId === w.currentUser.id && !unit.deletedAt);
-  const options = original && !original.deletedAt && !ownUnits.some(unit => unit.id === original.id) ? [original, ...ownUnits] : ownUnits;
+  const ownUnits = sortUnitsByImportance(w.units.filter(unit => unit.ownerId === w.currentUser.id && !unit.deletedAt));
+  const options = original && !original.deletedAt && !ownUnits.some(unit => unit.id === original.id) ? sortUnitsByImportance([original, ...ownUnits]) : ownUnits;
   const [unitId, setUnitId] = useState(original && !original.deletedAt ? original.id : ownUnits[0]?.id || '');
   const [busy, setBusy] = useState(false);
   const [parentBusy, setParentBusy] = useState(false);
@@ -275,7 +278,7 @@ function RestoreTask({ task, workspace: w, command, onClose }: { task: Task; wor
   const latestUnit = useRef(unitId); latestUnit.current = unitId;
   const [restored, setRestored] = useState(false);
   const [notice, setNotice] = useState('');
-  return <Modal title="세부업무 복원" description="복원할 업무의 소속 단위업무를 확인해 주세요." onClose={onClose}><form className="form-stack" onSubmit={async event => { event.preventDefault(); if (busy || restored) return; const submitted = unitId; setBusy(true); try { if (await command('task.restore', { taskId: task.id, ...(submitted !== task.unitId ? { unitId: submitted } : {}) }) && mounted.current) { setRestored(true); if (latestUnit.current === submitted) onClose(); else setNotice('선택했던 단위업무로 복원했습니다. 복원 중 바꾼 선택은 반영하지 않았습니다. 업무 수정 화면에서 소속을 변경해 주세요.'); } } finally { setBusy(false); } }}><div className="pw-soft-block"><Badge tone="info">복원할 세부업무</Badge><h3>{task.title}</h3></div>{original?.deletedAt && <div className="pw-restore-parent"><p>원래 단위업무 ‘{original.title}’도 삭제되어 있습니다. 아래에서 다른 업무 묶음을 선택하거나 원래 단위업무를 먼저 복원하세요.</p>{original.ownerId === w.currentUser.id && <Button variant="secondary" disabled={busy || parentBusy} onClick={async () => { const submitted = unitId; setParentBusy(true); try { if (await command('unit.restore', { unitId: original.id }) && mounted.current && latestUnit.current === submitted) setUnitId(original.id); } finally { setParentBusy(false); } }}><RotateCcw size={14} />{parentBusy ? '복원 중…' : '원래 단위업무 복원'}</Button>}</div>}<Field name="unitId" label="소속 단위업무"><select required value={unitId} onChange={e => setUnitId(e.target.value)}><option value="">단위업무 선택</option>{options.map(unit => <option key={unit.id} value={unit.id}>{unit.title}{unit.ownerId !== w.currentUser.id ? ' · 기존 연결' : ''}</option>)}</select></Field>{!options.length && <p className="pw-form-note">사용할 단위업무가 없습니다. 원래 단위업무를 복원하거나 새 단위업무를 먼저 만들어 주세요.</p>}{task.deletedFromStatus === 'archived' && <p className="pw-form-note">삭제 전 ‘보관’ 상태로 복원됩니다. 현재 진행 중인 개인업무 목록에는 표시되지 않습니다.</p>}{notice && <p className="pw-form-note" role="status">{notice}</p>}<div className="form-actions"><Button variant="secondary" onClick={onClose}>취소</Button><Button type="submit" disabled={busy || parentBusy || restored || !options.some(unit => unit.id === unitId)}><RotateCcw size={15} />{busy ? '복원 중…' : '세부업무 복원'}</Button></div></form></Modal>;
+  return <Modal title="세부업무 복원" description="복원할 업무의 소속 단위업무를 확인해 주세요." onClose={onClose}><form className="form-stack" onSubmit={async event => { event.preventDefault(); if (busy || restored) return; const submitted = unitId; setBusy(true); try { if (await command('task.restore', { taskId: task.id, ...(submitted !== task.unitId ? { unitId: submitted } : {}) }) && mounted.current) { setRestored(true); if (latestUnit.current === submitted) onClose(); else setNotice('선택했던 단위업무로 복원했습니다. 복원 중 바꾼 선택은 반영하지 않았습니다. 업무 수정 화면에서 소속을 변경해 주세요.'); } } finally { setBusy(false); } }}><div className="pw-soft-block"><Badge tone="info">복원할 세부업무</Badge><h3>{task.title}</h3></div>{original?.deletedAt && <div className="pw-restore-parent"><p>원래 단위업무 ‘{original.title}’도 삭제되어 있습니다. 아래에서 다른 업무 묶음을 선택하거나 원래 단위업무를 먼저 복원하세요.</p>{original.ownerId === w.currentUser.id && <Button variant="secondary" disabled={busy || parentBusy} onClick={async () => { const submitted = unitId; setParentBusy(true); try { if (await command('unit.restore', { unitId: original.id }) && mounted.current && latestUnit.current === submitted) setUnitId(original.id); } finally { setParentBusy(false); } }}><RotateCcw size={14} />{parentBusy ? '복원 중…' : '원래 단위업무 복원'}</Button>}</div>}<Field name="unitId" label="소속 단위업무"><select required value={unitId} onChange={e => setUnitId(e.target.value)}><option value="">단위업무 선택</option>{options.map(unit => <option key={unit.id} value={unit.id}>{unit.title} · 중요도 {unitImportance(unit)}{unit.ownerId !== w.currentUser.id ? ' · 기존 연결' : ''}</option>)}</select></Field>{!options.length && <p className="pw-form-note">사용할 단위업무가 없습니다. 원래 단위업무를 복원하거나 새 단위업무를 먼저 만들어 주세요.</p>}{task.deletedFromStatus === 'archived' && <p className="pw-form-note">삭제 전 ‘보관’ 상태로 복원됩니다. 현재 진행 중인 개인업무 목록에는 표시되지 않습니다.</p>}{notice && <p className="pw-form-note" role="status">{notice}</p>}<div className="form-actions"><Button variant="secondary" onClick={onClose}>취소</Button><Button type="submit" disabled={busy || parentBusy || restored || !options.some(unit => unit.id === unitId)}><RotateCcw size={15} />{busy ? '복원 중…' : '세부업무 복원'}</Button></div></form></Modal>;
 }
 
 function CreateTask({ workspace: w, units, selectedUnitId, command, onClose, onWorkspace }: { workspace: Workspace; units: Workspace['units']; selectedUnitId?: string; command: CommandFn; onClose: () => void; onWorkspace?: (workspace: Workspace) => void }) {
@@ -323,7 +326,7 @@ function CreateTask({ workspace: w, units, selectedUnitId, command, onClose, onW
         }
       } finally { setBusy(false); }
     }}>
-      <div className="form-grid"><Field name="unitId" label="단위업무"><select required value={unitId} onChange={event => setUnitId(event.target.value)}><option value="">단위업무 선택</option>{units.map(unit => <option key={unit.id} value={unit.id}>{unit.title}</option>)}</select></Field><Field label="업무 구분"><input value="개인이 등록하는 세부업무" disabled/></Field><Field name="title" label="세부업무 이름" span><input required maxLength={150} value={title} onChange={event => setTitle(event.target.value)} placeholder="예: 2027년 예산 요구자료 작성" autoFocus/></Field><Field name="description" label="업무 설명" span><textarea required maxLength={20000} rows={4} value={description} onChange={event => setDescription(event.target.value)} placeholder="업무의 목적, 수행 범위, 기대하는 결과를 적어 주세요."/></Field></div>
+      <div className="form-grid"><Field name="unitId" label="단위업무"><select required value={unitId} onChange={event => setUnitId(event.target.value)}><option value="">단위업무 선택</option>{units.map(unit => <option key={unit.id} value={unit.id}>{unit.title} · 중요도 {unitImportance(unit)}</option>)}</select></Field><Field label="업무 구분"><input value="개인이 등록하는 세부업무" disabled/></Field><Field name="title" label="세부업무 이름" span><input required maxLength={150} value={title} onChange={event => setTitle(event.target.value)} placeholder="예: 2027년 예산 요구자료 작성" autoFocus/></Field><Field name="description" label="업무 설명" span><textarea required maxLength={20000} rows={4} value={description} onChange={event => setDescription(event.target.value)} placeholder="업무의 목적, 수행 범위, 기대하는 결과를 적어 주세요."/></Field></div>
       <TaskDescriptionFiles workspace={w} taskId={createdTaskId || undefined} title={title} description={description} attachmentIds={descriptionAttachmentIds} onAttachmentsChange={setDescriptionAttachmentIds} onDescriptionChange={setDescription} onWorkspace={onWorkspace} onBusyChange={setUploadBusy}/>
       <div className="form-grid"><Field name="dueDate" label="업무 마감일"><input required type="date" value={dueDate} onChange={event => setDueDate(event.target.value)}/>{isPastDate(dueDate, w.serverTime) && <small className="muted" role="status">오늘 이전 날짜입니다. 이미 지난 업무를 기록하는 경우에만 사용해 주세요.</small>}</Field><Field name="frequency" label="반복 주기"><select value={frequency} onChange={event => setFrequency(event.target.value as Frequency)}>{Object.entries(frequencyNames).map(([key, label]) => <option key={key} value={key}>{label}</option>)}</select></Field></div>
       <TaskBudgetFields value={budgetDraft} onChange={value => { setBudgetDraft(value); setBudgetMessage(''); }} />
@@ -363,8 +366,9 @@ function TaskEditor({ task, workspace: w, command: executeCommand, onClose, onWo
   const [showBuilder, setShowBuilder] = useState(false);
   const divisionLocked = isDepartmentConfirmed(w, task.departmentId);
   const [unitId, setUnitId] = useState(task.unitId);
-  const ownUnits = w.units.filter(unit => !unit.deletedAt && unit.ownerId === w.currentUser.id);
+  const ownUnits = sortUnitsByImportance(w.units.filter(unit => !unit.deletedAt && unit.ownerId === w.currentUser.id));
   const originalUnit = w.units.find(unit => unit.id === task.unitId);
+  const unitOptions = originalUnit && !ownUnits.some(unit => unit.id === originalUnit.id) ? sortUnitsByImportance([originalUnit, ...ownUnits]) : ownUnits;
   const [title, setTitle] = useState(task.title);
   const [dueDate, setDueDate] = useState(task.dueDate);
   const [frequency, setFrequency] = useState<Frequency>(task.frequency);
@@ -586,7 +590,7 @@ function TaskEditor({ task, workspace: w, command: executeCommand, onClose, onWo
     <div className="pw-detail-body" ref={bodyRef} {...detailTabs.panelAttrs(tab)}>
       {tab === 'overview' && <div className="form-stack">
         <div className="pw-unit-move">
-          {editable && task.primaryId === w.currentUser.id ? <Field name="unitId" label="소속 단위업무 · 상위 업무 묶음"><select value={unitId} onChange={e => { setUnitId(e.target.value); setSaved(false); }}>{!ownUnits.some(unit => unit.id === task.unitId) && <option value={task.unitId}>{originalUnit?.title || '기존 연결 단위업무'}{originalUnit?.ownerId !== task.primaryId ? ' · 공유 단위' : ''}</option>}{ownUnits.map(unit => <option key={unit.id} value={unit.id}>{unit.title}</option>)}</select></Field>
+          {editable && task.primaryId === w.currentUser.id ? <Field name="unitId" label="소속 단위업무 · 상위 업무 묶음"><select value={unitId} onChange={e => { setUnitId(e.target.value); setSaved(false); }}>{!unitOptions.some(unit => unit.id === task.unitId) && <option value={task.unitId}>기존 연결 단위업무</option>}{unitOptions.map(unit => <option key={unit.id} value={unit.id}>{unit.title} · 중요도 {unitImportance(unit)}{unit.ownerId !== task.primaryId ? ' · 공유 단위' : ''}</option>)}</select></Field>
             : <ReadField label="소속 단위업무 · 상위 업무 묶음" value={w.units.find(unit => unit.id === unitId)?.title || '연결 확인 필요'} />}
           <p><Folder size={13} />{!editable || task.primaryId !== w.currentUser.id ? '이 세부업무가 속한 단위업무입니다.' : unitId !== task.unitId ? '변경사항을 저장하면 선택한 단위업무 아래로 이동합니다.' : ownUnits.some(unit => unit.id === task.unitId) ? '내 단위업무를 선택해 이 세부업무를 다른 업무 묶음으로 옮길 수 있습니다.' : '공유 단위에 연결된 업무입니다. 내가 만든 단위업무로 옮길 수 있습니다.'}</p>
           {!ownUnits.length && editable && <p>옮길 단위업무가 없습니다. 개인업무 화면에서 내 단위업무를 먼저 만들어 주세요.</p>}

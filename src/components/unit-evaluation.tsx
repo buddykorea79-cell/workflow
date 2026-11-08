@@ -3,10 +3,10 @@
 import { useEffect, useId, useRef, useState } from 'react';
 import { ArrowRight, ArrowUpRight, CalendarDays, CheckCheck, CheckCircle2, ChevronRight, ClipboardCheck, FileText, FolderOpen, LockKeyhole, Pencil, Plus, Save, Search, Send, ShieldCheck, SlidersHorizontal, Undo2, Users } from 'lucide-react';
 import type { Performance, UnitScorePlan, User, Workspace } from '@/lib/types';
-import { canEvaluateUnitPerformance, currentPersonPerformances, eligibleScoreUnits, scoreUnitsForPeriod, getUnitEvaluation, getUnitScorePlan, hasCompletePerformance, missingPerformanceUnitIds, personUnitPerformanceSummary, validateWeights } from '@/lib/unit-evaluation';
+import { allocateWeightsByImportance, initialWeightValues, canEvaluateUnitPerformance, currentPersonPerformances, eligibleScoreUnits, scoreUnitsForPeriod, getUnitEvaluation, getUnitScorePlan, hasCompletePerformance, missingPerformanceUnitIds, personUnitPerformanceSummary, validateWeights } from '@/lib/unit-evaluation';
 import { currentHalf, halfYearOptions, isFutureHalf } from '@/lib/period';
 import { formatDateFull, formatDateTimeFull as dateText } from '@/lib/date-format';
-import { Badge, Button, EmptyState, Field, HelpButton, HelpCallout, Modal, ReadField, useHelpControls, type CommandFn, type HelpControls } from './ui';
+import { Badge, Button, ConfirmDialog, EmptyState, Field, HelpButton, HelpCallout, Modal, ReadField, useHelpControls, type CommandFn, type HelpControls } from './ui';
 import { TaskFileAttachments } from './task-file-attachments';
 import { useUnsavedChanges, useUnsavedNavigation } from './unsaved-changes';
 import { useRevisionCommand } from './command-revision';
@@ -230,14 +230,18 @@ function PersonPerformance({ workspace: w, command, onOpenTask, person, period, 
   </section>;
 }
 
-function WeightEditor({ workspace: w, command, period, plan, onClose }: { workspace: Workspace; command: CommandFn; period: string; plan?: UnitScorePlan; onClose: () => void }) {
+export function WeightEditor({ workspace: w, command, period, plan, onClose }: { workspace: Workspace; command: CommandFn; period: string; plan?: UnitScorePlan; onClose: () => void }) {
   const mounted = useMountedEditor();
   const errorIdPrefix = useId();
   const saveReasonId = useId();
   const futurePeriod = isFutureHalf(period, new Date(w.serverTime));
   const revision = useRevisionCommand(w, command, { kind: 'plan', id: JSON.stringify([w.currentUser.id, period]) });
   const units = scoreUnitsForPeriod(w, w.currentUser.id, period);
-  const [values, setValues] = useState<Record<string, string>>(() => Object.fromEntries(units.map(unit => [unit.id, String(plan?.allocations.find(item => item.unitId === unit.id)?.maxScore ?? '')])));
+  const tooManyUnits = units.length > 50;
+  const [values, setValues] = useState<Record<string, string>>(() => initialWeightValues(units, plan));
+  const suggested = allocateWeightsByImportance(units);
+  const importanceSignature = JSON.stringify(units.map(unit => [unit.id, unit.importance]));
+  const [redistribution, setRedistribution] = useState<{ values: Record<string, string>; signature: string } | null>(null);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
   const [savedNotice, setSavedNotice] = useState('');
@@ -246,7 +250,7 @@ function WeightEditor({ workspace: w, command, period, plan, onClose }: { worksp
   const draftRef = useRef(weightDraft); draftRef.current = weightDraft;
   const [savedWeightDraft, setSavedWeightDraft] = useState(weightDraft);
   const locked = futurePeriod || !!getUnitEvaluation(w, w.currentUser.id, period) || !!getUnitScorePlan(w, w.currentUser.id, period)?.submittedAt;
-  useUnsavedChanges(weightDraft !== savedWeightDraft, '단위업무 비중');
+  useUnsavedChanges(weightDraft !== savedWeightDraft || saving, '단위업무 비중');
   const closeEditor = () => requestNavigation(onClose);
   const validation = validateWeights(units, values);
   const { total, fieldErrors, validTotal } = validation;
@@ -258,6 +262,7 @@ function WeightEditor({ workspace: w, command, period, plan, onClose }: { worksp
     : revision.conflicted ? '최신 내용을 확인한 뒤 다시 저장해 주세요. 입력값은 보존됩니다.'
     : saving ? '저장 중입니다. 입력값은 계속 수정할 수 있습니다.'
     : !units.length ? '배정할 단위업무를 먼저 등록해 주세요.'
+    : tooManyUnits ? '이 반기의 평가 대상 단위업무가 50개를 초과하여 비중을 새로 배분·저장할 수 없습니다.'
     : fieldErrorCount ? `입력값을 확인해 주세요 (오류 ${fieldErrorCount}개)`
     : !validTotal ? totalMessage : '';
   const submit = async (event: React.FormEvent) => {
@@ -282,17 +287,33 @@ function WeightEditor({ workspace: w, command, period, plan, onClose }: { worksp
     } catch (cause) { if (mounted.current) setError(cause instanceof Error ? cause.message : '업무 비중을 저장하지 못했습니다.'); }
     finally { if (mounted.current) setSaving(false); }
   };
+  const requestRedistribution = () => {
+    if (locked || saving || revision.conflicted || !units.length || tooManyUnits) return;
+    const next = Object.fromEntries(suggested.map(item => [item.unitId, String(item.maxScore)]));
+    if (units.every(unit => values[unit.id] === next[unit.id])) { setSavedNotice('현재 입력값이 중요도 기준 배분과 같습니다.'); return; }
+    setRedistribution({ values: next, signature: importanceSignature });
+  };
+  const applyRedistribution = () => {
+    if (!redistribution) return;
+    setRedistribution(null);
+    if (locked || saving || revision.conflicted || tooManyUnits || redistribution.signature !== importanceSignature) { setError('단위업무나 중요도, 제출 상태가 변경되었습니다. 현재 정보를 확인한 뒤 다시 배분해 주세요.'); return; }
+    setValues(redistribution.values); setError(''); setSavedNotice('중요도에 따라 50점을 다시 배분했습니다. 직접 조정한 뒤 저장할 수 있습니다.');
+  };
   return <Modal title="단위업무별 업무 비중 설정" description={`${periodName(period)} · 내 단위업무의 업무 비중 합계를 50점으로 정합니다.`} onClose={closeEditor}><form className="form-stack" onSubmit={submit}>
     <div className="ue-weight-total" data-valid={validTotal && !fieldErrorCount}><div><span>{fieldErrorCount ? '유효한 입력 합계' : '업무 비중 합계'}</span><strong>{scoreText(total)}<small>/ 50점</small></strong></div><span role="status">{totalMessage}</span></div>
+    <div className="ue-weight-suggestion"><p>{plan ? '저장된 비중을 유지합니다.' : '중요도 비율에 따라 총 50점을 정수로 제안합니다.'} 중요도는 1~10이며, 비중은 직접 조정할 수 있습니다. 중요도를 바꿔도 현재 입력값은 자동으로 바뀌지 않습니다.</p><Button type="button" variant="secondary" disabled={locked || saving || revision.conflicted || !units.length || tooManyUnits} onClick={requestRedistribution}>중요도 기준으로 다시 배분</Button></div>
+    {tooManyUnits && <p className="ue-validation" role="alert">이 반기의 평가 대상 단위업무가 {units.length}개로 50개를 초과하여 비중을 새로 배분·저장할 수 없습니다. {plan ? '기존 계획·성과는 그대로 보관되며 기존 규칙에 따라 제출·평가할 수 있습니다.' : '모든 평가 대상에 최소 1점씩 배정하면 총 50점을 초과합니다. 현재 입력값과 기존 성과는 유지됩니다.'}</p>}
+    {plan?.allocations.some(item => item.maxScore < 1 || !Number.isInteger(item.maxScore)) && <p className="ue-footnote">기존 0점·소수 비중은 그대로 보관됩니다. 새로 저장하려면 모든 단위업무를 1점 이상의 정수로 조정해 주세요.</p>}
     <>{futurePeriod ? <p className="ue-validation" role="status">아직 시작하지 않은 반기입니다. 기존 업무 비중은 조회할 수 있지만 저장·제출은 반기가 시작된 후 가능합니다. 작성 중이던 값은 아래에 보존됩니다.</p> : locked && <p className="ue-validation">제출되었거나 평가가 확정되어 업무 비중을 변경할 수 없습니다. 작성 중이던 값은 아래에 보존됩니다.</p>}</>
     <div className="ue-weight-fields">{units.map((unit, index) => {
       const fieldError = fieldErrors[unit.id];
       const fieldErrorId = `${errorIdPrefix}-${index}`;
-      return <label key={unit.id} data-invalid={!!fieldError}><span><small>단위업무 {index + 1}</small><strong>{unit.title}</strong></span><span className="ue-weight-entry"><span className="ue-weight-input"><input type="number" min="0" max="50" step="0.01" required readOnly={locked} aria-label={`${unit.title} 업무 비중`} aria-invalid={!!fieldError} aria-describedby={fieldError ? fieldErrorId : undefined} value={values[unit.id] ?? ''} onChange={event => { setValues(previous => ({ ...previous, [unit.id]: event.target.value })); setSavedNotice(''); }} placeholder="0" /><small>점</small></span>{fieldError && <small className="ue-weight-error" id={fieldErrorId}>{fieldError}</small>}</span></label>;
+      return <label key={unit.id} data-invalid={!!fieldError}><span><small>단위업무 {index + 1}</small><strong>{unit.title}</strong><small className="ue-weight-importance">중요도 {unit.importance}{suggested[index] && <> · 자동 배분 {suggested[index].maxScore}점</>}</small></span><span className="ue-weight-entry"><span className="ue-weight-input"><input type="number" min="1" max="50" step="1" required readOnly={locked} aria-label={`${unit.title} 업무 비중`} aria-invalid={!!fieldError} aria-describedby={fieldError ? fieldErrorId : undefined} value={values[unit.id] ?? ''} onChange={event => { setValues(previous => ({ ...previous, [unit.id]: event.target.value })); setSavedNotice(''); }} placeholder="1" /><small>점</small></span>{fieldError && <small className="ue-weight-error" id={fieldErrorId}>{fieldError}</small>}</span></label>;
     })}</div>
-    <p className="ue-footnote">업무 비중은 각 단위업무의 최고 점수입니다. 평가 대상이 아닌 단위업무는 0점으로 설정할 수 있습니다. 제출 전까지 수정할 수 있으며, 저장 후에는 성과 · 평가에서 제출하기를 눌러 주세요.</p>
+    <p className="ue-footnote">업무 비중은 각 단위업무의 최고 점수이며 1~50의 정수로 입력합니다. 모든 단위업무에 최소 1점을 배정하고 합계는 50점으로 맞춰 주세요. 제출 전까지 수정할 수 있으며, 저장 후에는 성과 · 평가에서 제출하기를 눌러 주세요.</p>
     {revision.conflict}{error && <p role="alert" className="form-error">{error}</p>}{savedNotice && <p role="status" className="ue-save-success">{savedNotice}</p>}
     <div className="form-actions ue-weight-actions">{saveDisabledReason && <p className="ue-weight-save-reason" id={saveReasonId}>{saveDisabledReason}</p>}<Button variant="secondary" type="button" onClick={closeEditor}>닫기</Button><Button type="submit" disabled={!valid || saving || revision.conflicted} aria-describedby={saveDisabledReason ? saveReasonId : undefined}><Save size={16} />{saving ? '저장 중…' : '업무 비중 저장'}</Button></div>
+    {redistribution && <ConfirmDialog title="중요도 기준으로 다시 배분할까요?" description="현재 입력한 비중을 중요도 비율에 따른 정수 배점으로 바꿉니다. 저장 전 다시 조정할 수 있습니다." cancelLabel="현재 입력 유지" confirmLabel="다시 배분" destructive={false} onCancel={() => setRedistribution(null)} onConfirm={applyRedistribution}/>}
   </form></Modal>;
 }
 

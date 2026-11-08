@@ -21,7 +21,7 @@ export interface DepartmentDivisionReadModel {
   tasks: { id: string; code: string; title: string; unitId: string; primaryId: string; supportIds: string[]; reviewerId: string; frequency: Frequency; status: DefinitionStatus; commonId?: string }[];
   members: { id: string; name: string; team: string }[];
 }
-export interface Unit extends RevisionedEntity { id: string; title: string; departmentId: string; ownerId: string; description: string; color: string; icon: string; deletedAt?: string; transferOriginUnitId?: string }
+export interface Unit extends RevisionedEntity { id: string; title: string; departmentId: string; ownerId: string; description: string; color: string; icon: string; importance?: number; deletedAt?: string; transferOriginUnitId?: string }
 export interface Card { purpose: string; stakeholders: string; evidence: string; responsibility: string; procedure: string; finance: string; documents: string; issues: string; handover: string }
 export interface WorkflowStep { id: string; title: string; role: 'primary' | 'support' | 'reviewer'; description: string; output: string; required: boolean; dependsOn: string[]; checklist: string[]; attachmentIds?: string[]; startDate?: string; dueDate?: string; scheduleDetails?: string; done?: boolean }
 export interface Expense { id: string; date: string; /** Legacy records only; new expenses use the date without a time. */ time?: string; projectName?: string; vendor?: string; description: string; amount: number }

@@ -12,8 +12,8 @@ node scripts/css-audit.mjs --self-test
 
 `--check`는 현재 소스로 다시 계산한 보고서와 이 파일이 같은지 확인하며 파일을 쓰지 않는다. `--self-test`는 주석·문자열·URL 오인과 import 도달 판정의 고정 사례를 검사하며 파일을 쓰지 않는다. `--json`은 같은 감사 데이터의 전체 빈도표를 표준 출력으로 제공한다. 추가 패키지 설치나 환경 파일 읽기, 네트워크 접속은 필요하지 않다.
 
-- CSS 원본 SHA-256: `e17654d38349c675226bd82cded54d731db869963445aabfa5a76211855012c7`
-- 참조 분석에 사용한 src CSS·TS/TSX·JS/JSX 원본 SHA-256: `6a9ff4ec23fb54b1f81142a5580e3672eae29a6b604a4d1f5c8cf1e43f96dd82`
+- CSS 원본 SHA-256: `d679f438fbf99b634bab1b73711eb2133f35040726ead8794d788fca79510f60`
+- 참조 분석에 사용한 src CSS·TS/TSX·JS/JSX 원본 SHA-256: `24aa0ac266fc3979746486da977f8e56971a7362c5eb10a4076389c345874fd0`
 - 파서: PostCSS 8.5.32, TypeScript 5.9.3, `next/dist/compiled/postcss-value-parser`
 - 생성 시각을 출력에 넣지 않아 같은 원본·도구에서는 반복 실행 결과가 같다. 값 빈도가 같으면 문자 코드 순으로 정렬한다.
 
@@ -31,20 +31,20 @@ node scripts/css-audit.mjs --self-test
 | 지표 | 전체 CSS | 참조됨 |
 |---|---:|---:|
 | 파일 | 38 | 37 |
-| UTF-8 바이트 | 361,591 | 355,404 |
-| 규칙 | 4,711 | 4,580 |
-| 선언 | 14,180 | 13,961 |
+| UTF-8 바이트 | 362,239 | 356,052 |
+| 규칙 | 4,720 | 4,589 |
+| 선언 | 14,203 | 13,984 |
 | !important 선언 | 145 | 140 |
 | hex 색 발생 / 종류 | 2,113 / 1,073 | 2,037 / 997 |
-| font-size 전체 값 발생 / 종류 | 1,742 / 41 | 1,643 / 39 |
-| font-size 내부 px 발생 / 종류 | 1,749 / 36 | 1,650 / 34 |
+| font-size 전체 값 발생 / 종류 | 1,744 / 41 | 1,645 / 39 |
+| font-size 내부 px 발생 / 종류 | 1,751 / 36 | 1,652 / 34 |
 | radius 전체 값 발생 / 종류 | 485 / 35 | 483 / 35 |
 | radius 내부 px 발생 / 종류 | 443 / 24 | 441 / 24 |
 | box/text-shadow 발생 / 종류 | 33 / 25 | 33 / 25 |
 | z-index 발생 / 종류 | 16 / 11 | 16 / 11 |
-| line-height 발생 / 종류 | 536 / 18 | 536 / 18 |
-| 선언값 내부 전체 px 발생 / 종류 | 7,084 / 186 | 6,957 / 186 |
-| var() 참조 발생 / 종류 | 667 / 27 | 667 / 27 |
+| line-height 발생 / 종류 | 538 / 18 | 538 / 18 |
+| 선언값 내부 전체 px 발생 / 종류 | 7,091 / 186 | 6,964 / 186 |
+| var() 참조 발생 / 종류 | 669 / 27 | 669 / 27 |
 | 색 함수 발생 / 종류 | 5 / 5 | 5 / 5 |
 
 ### 상위 값 · 각 8개
@@ -52,8 +52,8 @@ node scripts/css-audit.mjs --self-test
 | 지표 | 전체 CSS | 참조됨 |
 |---|---|---|
 | hex 색 | `#ffffff` × 163 · `#52637a` × 157 · `#1863dc` × 65 · `#707070` × 37 · `#dce4ee` × 33 · `#172b4d` × 28 · `#141414` × 25 · `#f1f5ff` × 22 | `#ffffff` × 163 · `#52637a` × 157 · `#1863dc` × 65 · `#707070` × 37 · `#dce4ee` × 33 · `#172b4d` × 28 · `#141414` × 25 · `#f1f5ff` × 22 |
-| font-size 전체 값 | `14px` × 686 · `15px` × 592 · `13px` × 74 · `16px` × 65 · `12px` × 54 · `18px` × 35 · `17px` × 33 · `11px` × 29 | `14px` × 683 · `15px` × 591 · `13px` × 68 · `16px` × 63 · `18px` × 35 · `17px` × 33 · `12px` × 25 · `21px` × 15 |
-| font-size 내부 px | `14px` × 686 · `15px` × 592 · `13px` × 74 · `16px` × 65 · `12px` × 54 · `18px` × 35 · `17px` × 33 · `11px` × 29 | `14px` × 683 · `15px` × 591 · `13px` × 68 · `16px` × 63 · `18px` × 35 · `17px` × 33 · `12px` × 25 · `21px` × 16 |
+| font-size 전체 값 | `14px` × 687 · `15px` × 592 · `13px` × 75 · `16px` × 65 · `12px` × 54 · `18px` × 35 · `17px` × 33 · `11px` × 29 | `14px` × 684 · `15px` × 591 · `13px` × 69 · `16px` × 63 · `18px` × 35 · `17px` × 33 · `12px` × 25 · `21px` × 15 |
+| font-size 내부 px | `14px` × 687 · `15px` × 592 · `13px` × 75 · `16px` × 65 · `12px` × 54 · `18px` × 35 · `17px` × 33 · `11px` × 29 | `14px` × 684 · `15px` × 591 · `13px` × 69 · `16px` × 63 · `18px` × 35 · `17px` × 33 · `12px` × 25 · `21px` × 16 |
 | radius 전체 값 | `12px` × 55 · `10px` × 44 · `14px` × 41 · `16px` × 39 · `9px` × 31 · `50%` × 30 · `13px` × 27 · `20px` × 25 | `12px` × 55 · `10px` × 43 · `14px` × 41 · `16px` × 38 · `9px` × 31 · `50%` × 30 · `13px` × 27 · `20px` × 25 |
 | radius 내부 px | `12px` × 55 · `10px` × 44 · `14px` × 41 · `16px` × 41 · `9px` × 33 · `13px` × 27 · `20px` × 27 · `8px` × 25 | `12px` × 55 · `10px` × 43 · `14px` × 41 · `16px` × 40 · `9px` × 33 · `13px` × 27 · `20px` × 27 · `8px` × 25 |
 | box/text-shadow | `none` × 8 · `0 10px 30px #172b4d14` × 2 · `0 0 0 100vmax #15243b80` × 1 · `0 0 0 1px #c64c3c` × 1 · `0 0 0 1px #dce9ff` × 1 · `0 0 0 2px #fff` × 1 · `0 0 0 3px #d9e9ff` × 1 · `0 0 0 3px #eaf1ff` × 1 | `none` × 8 · `0 10px 30px #172b4d14` × 2 · `0 0 0 100vmax #15243b80` × 1 · `0 0 0 1px #c64c3c` × 1 · `0 0 0 1px #dce9ff` × 1 · `0 0 0 2px #fff` × 1 · `0 0 0 3px #d9e9ff` × 1 · `0 0 0 3px #eaf1ff` × 1 |
@@ -80,7 +80,7 @@ node scripts/css-audit.mjs --self-test
 | 파일 | 참조됨 | 바이트 | hex 발생/종류 | font-size 발생/종류 | radius 발생/종류 | shadow 발생/종류 | z-index 발생/종류 |
 |---|---|---:|---:|---:|---:|---:|---:|
 | [src/app/color-theme.css](../../src/app/color-theme.css) | 예 | 16,642 | 118 / 64 | 43 / 12 | 18 / 9 | 7 / 7 | 0 / 0 |
-| [src/app/globals.css](../../src/app/globals.css) | 예 | 35,410 | 110 / 46 | 182 / 25 | 55 / 17 | 3 / 3 | 10 / 9 |
+| [src/app/globals.css](../../src/app/globals.css) | 예 | 35,538 | 110 / 46 | 182 / 25 | 55 / 17 | 3 / 3 | 10 / 9 |
 | [src/app/readability.css](../../src/app/readability.css) | 아니요 | 6,187 | 76 / 76 | 99 / 9 | 2 / 2 | 0 / 0 | 0 / 0 |
 | [src/components/accessible-tabs.css](../../src/components/accessible-tabs.css) | 예 | 385 | 2 / 1 | 0 / 0 | 0 / 0 | 0 / 0 | 0 / 0 |
 | [src/components/admin-budget-catalog.css](../../src/components/admin-budget-catalog.css) | 예 | 3,289 | 25 / 21 | 16 / 7 | 4 / 1 | 0 / 0 | 0 / 0 |
@@ -112,7 +112,7 @@ node scripts/css-audit.mjs --self-test
 | [src/components/task-detail-actions.css](../../src/components/task-detail-actions.css) | 예 | 553 | 11 / 8 | 0 / 0 | 0 / 0 | 2 / 2 | 0 / 0 |
 | [src/components/task-file-attachments.css](../../src/components/task-file-attachments.css) | 예 | 2,328 | 17 / 17 | 14 / 4 | 4 / 4 | 0 / 0 | 0 / 0 |
 | [src/components/task-performance.css](../../src/components/task-performance.css) | 예 | 2,130 | 19 / 18 | 11 / 4 | 7 / 5 | 0 / 0 | 0 / 0 |
-| [src/components/unit-evaluation.css](../../src/components/unit-evaluation.css) | 예 | 25,625 | 132 / 106 | 169 / 20 | 33 / 13 | 0 / 0 | 0 / 0 |
+| [src/components/unit-evaluation.css](../../src/components/unit-evaluation.css) | 예 | 26,145 | 132 / 106 | 171 / 20 | 33 / 13 | 0 / 0 | 0 / 0 |
 | [src/components/usage-guide.css](../../src/components/usage-guide.css) | 예 | 12,078 | 83 / 53 | 48 / 9 | 17 / 11 | 1 / 1 | 0 / 0 |
 | [src/components/work-cycles.css](../../src/components/work-cycles.css) | 예 | 19,090 | 86 / 61 | 104 / 11 | 28 / 15 | 1 / 1 | 0 / 0 |
 | [src/components/workspace-directory.css](../../src/components/workspace-directory.css) | 예 | 833 | 3 / 3 | 3 / 2 | 1 / 1 | 0 / 0 | 0 / 0 |
@@ -136,7 +136,7 @@ node scripts/css-audit.mjs --self-test
 
 ### src/app/globals.css
 
-참조됨: 예 · 규칙 546 · 선언 1,516 · !important 14
+참조됨: 예 · 규칙 548 · 선언 1,519 · !important 14
 
 | 지표 | 발생 | 종류 | 상위 값 |
 |---|---:|---:|---|
@@ -584,13 +584,13 @@ node scripts/css-audit.mjs --self-test
 
 ### src/components/unit-evaluation.css
 
-참조됨: 예 · 규칙 343 · 선언 1,064 · !important 21
+참조됨: 예 · 규칙 350 · 선언 1,084 · !important 21
 
 | 지표 | 발생 | 종류 | 상위 값 |
 |---|---:|---:|---|
 | hex 색 | 132 | 106 | `#ffffff` × 12 · `#edf0f5` × 7 · `#397a70` × 2 · `#5b83e4` × 2 · `#b42318` × 2 · `#e4eaf3` × 2 · `#e5ebf3` × 2 · `#e7ebf2` × 2 |
-| font-size 전체 값 | 169 | 20 | `14px` × 83 · `15px` × 50 · `13px` × 4 · `16px` × 4 · `17px` × 4 · `22px` × 3 · `26px` × 3 · `29px` × 3 |
-| font-size 내부 px | 170 | 20 | `14px` × 83 · `15px` × 50 · `13px` × 4 · `16px` × 4 · `17px` × 4 · `29px` × 4 · `22px` × 3 · `26px` × 3 |
+| font-size 전체 값 | 171 | 20 | `14px` × 84 · `15px` × 50 · `13px` × 5 · `16px` × 4 · `17px` × 4 · `22px` × 3 · `26px` × 3 · `29px` × 3 |
+| font-size 내부 px | 172 | 20 | `14px` × 84 · `15px` × 50 · `13px` × 5 · `16px` × 4 · `17px` × 4 · `29px` × 4 · `22px` × 3 · `26px` × 3 |
 | radius 전체 값 | 33 | 13 | `12px` × 7 · `22px` × 6 · `10px` × 3 · `13px` × 3 · `11px` × 2 · `14px` × 2 · `18px` × 2 · `19px` × 2 |
 | radius 내부 px | 32 | 12 | `12px` × 7 · `22px` × 6 · `10px` × 3 · `13px` × 3 · `11px` × 2 · `14px` × 2 · `18px` × 2 · `19px` × 2 |
 | box/text-shadow | 0 | 0 | 없음 |

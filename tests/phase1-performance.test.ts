@@ -17,9 +17,17 @@ function dispatch(state: WorkspaceData, actor: string, type: string, payload: Re
 }
 function reject(code: string, action: () => void) { assert.throws(action, cause => cause instanceof DomainError && cause.code === code); }
 function transfer(state: WorkspaceData) { dispatch(state, manager, 'transfer.emergency', { departmentId: 'dept-support', fromId: author, toId: manager, reason: '인사발령으로 잔여 업무 보관' }); }
-function weights(state: WorkspaceData) {
+function weights(state: WorkspaceData, existingLegacyPlan = true) {
   const recordUnit = state.performances.find(record => record.authorId === author)!.unitId;
-  dispatch(state, author, 'performance.setWeights', { period, allocations: scoreUnitsForPeriod(state, author, period).map(unit => ({ unitId: unit.id, maxScore: unit.id === recordUnit ? 50 : 0 })) });
+  const units = scoreUnitsForPeriod(state, author, period);
+  if (existingLegacyPlan) {
+    // The transfer/evaluation scenarios start with a plan saved under the former zero-point rule.
+    state.unitScorePlans ??= [];
+    state.unitScorePlans.push({ id: randomUUID(), personId: author, departmentId: units[0].departmentId, period, version: 1, allocations: units.map(unit => ({ unitId: unit.id, unitTitle: unit.title, maxScore: unit.id === recordUnit ? 50 : 0 })), updatedAt: now.toISOString() });
+  } else {
+    assert.equal(units.length, 1, 'after all work transfers, only the historical evidence unit is eligible');
+    dispatch(state, author, 'performance.setWeights', { period, allocations: [{ unitId: units[0].id, maxScore: 50 }] });
+  }
 }
 function submit(state: WorkspaceData) { dispatch(state, author, 'performance.submitPerson', { period, planVersion: getUnitScorePlan(state, author, period)!.version }); }
 function evaluation(state: WorkspaceData) {
@@ -64,7 +72,7 @@ test('phase1 performance: old draft can be weighted and submitted after transfer
   const projected = getWorkspace(state, author, now);
   assert.ok(!projected.tasks.some(task => task.id === input.taskId));
   assert.deepEqual(scoreUnitsForPeriod(projected, author, period).map(unit => unit.id), scoreUnitsForPeriod(state, author, period).map(unit => unit.id));
-  weights(state); submit(state);
+  weights(state, false); submit(state);
   assert.equal(getUnitScorePlan(state, author, period)?.departmentId, 'dept-support');
   assert.ok(state.notifications.some(notification => notification.userId === head && notification.title === '개인별 반기 성과 평가 요청'));
   dispatch(state, head, 'performance.evaluatePerson', evaluation(state));

@@ -38,7 +38,9 @@ function manifest(performanceId: string): UploadManifest {
 }
 function submit(state: WorkspaceData) {
   const record = state.performances[0];
-  send(state, owner, 'performance.setWeights', { period, allocations: scoreUnitsForPeriod(state, owner, period).map(unit => ({ unitId: unit.id, maxScore: unit.id === record.unitId ? 50 : 0 })) });
+  // Historical evidence belongs to an existing plan, including former zero-weight units.
+  state.unitScorePlans ??= [];
+  state.unitScorePlans.push({ id: randomUUID(), personId: owner, departmentId: record.departmentId, period, version: 1, allocations: scoreUnitsForPeriod(state, owner, period).map(unit => ({ unitId: unit.id, unitTitle: unit.title, maxScore: unit.id === record.unitId ? 50 : 0 })), updatedAt: now.toISOString() });
   send(state, owner, 'performance.submitPerson', { period, planVersion: getUnitScorePlan(state, owner, period)!.version });
 }
 

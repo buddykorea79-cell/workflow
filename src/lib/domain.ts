@@ -1,5 +1,6 @@
 import { normalizePeriod, currentPeriod } from './schedule';
 import { isFutureHalf } from './period';
+import { DEFAULT_UNIT_IMPORTANCE, unitImportance } from './unit-importance';
 import { executeBudgetCommand, getBudgetCatalog, resolveTaskBudget, validateTaskMoney } from './budget-catalog';
 import { nextCycleWorkflow, runWorkflow, taskCycleState } from './work-cycles';
 import { procedureScheduleConflicts } from './procedure-schedule';
@@ -45,6 +46,8 @@ const money = z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER);
 const budgetFields = { budget: money.optional(), budgetMode: z.enum(['manual', 'catalog', 'none']).optional(), budgetItemId: z.string().trim().min(1).max(200).nullable().optional() };
 const halfYear = z.string().regex(/^20\d{2}-H[12]$/, '예: 2026-H1 또는 2026-H2');
 const unitScore = z.number().finite().min(0).max(UNIT_SCORE_TOTAL).refine(value => Math.abs(value * 100 - Math.round(value * 100)) < 0.000001, '점수는 소수 둘째 자리까지 입력해 주세요.');
+const unitWeight = z.number().finite().int('업무 비중은 정수로 입력해 주세요.').min(1).max(UNIT_SCORE_TOTAL);
+const importanceInput = z.number().finite().int('중요도는 정수로 입력해 주세요.').min(1).max(10);
 // Optional time is retained only for compatibility with previously stored expense records.
 const expenseInput = z.array(z.object({ id: text, date, time: z.string().regex(/^(?:[01]\d|2[0-3]):[0-5]\d$/).optional(), projectName: text.max(200).optional(), vendor: text.max(200).optional(), description: text.max(500), amount: money })).max(500);
 const referenceInput = z.array(z.object({ id: text, type: z.enum(['law', 'guideline', 'national_agenda', 'directive', 'document', 'other']), title: text.max(300), content: z.string().max(200000), url: z.union([z.literal(''), z.url().refine(v => /^https?:\/\//i.test(v), 'HTTP(S) 주소만 입력할 수 있습니다.')]).optional(), attachmentId: text.optional() })).max(100);
@@ -52,7 +55,7 @@ const workflowInput = z.array(z.object({ id: text, title: text.max(150), role: z
 const cycleScheduleInput = z.object({ title: text.max(150).optional(), startDate: date, dueDate: date, scheduleDetails: z.string().trim().max(5000).optional(), steps: z.array(z.object({ stepId: text, startDate: date.optional(), dueDate: date.optional(), scheduleDetails: z.string().trim().max(5000).optional() })).min(1).max(50) });
 const legacyTaskInput = z.object({ title: text.max(150), description: taskDescription, unitId: text, primaryId: text, supportIds: z.array(text).max(30).default([]), reviewerId: text, dueDate: date, frequency: z.enum(['once', 'monthly', 'quarterly', 'half_yearly', 'yearly']), priority: z.enum(['high', 'medium', 'low']).default('medium'), completionCriteria: text.default('필수 체크와 결과물 확인 및 총괄 검토 완료'), card: z.object({ purpose: z.string(), stakeholders: z.string(), evidence: z.string(), responsibility: z.string(), procedure: z.string(), finance: z.string(), documents: z.string(), issues: z.string(), handover: z.string() }).optional(), workflow: z.array(z.object({ id: text, title: text.max(150), role: z.enum(['primary', 'support', 'reviewer']), description: z.string().max(5000), output: z.string().max(1000), required: z.boolean(), dependsOn: z.array(text), checklist: z.array(text).max(50) })).min(1).max(50).optional(), sourceIds: z.array(text).max(50).default([]) });
 const taskInput = legacyTaskInput.extend({ reviewerId: text.optional(), descriptionAttachmentIds: z.array(text).max(10).optional(), ...budgetFields, expenses: expenseInput.optional(), references: referenceInput.optional(), workflow: workflowInput.optional() });
-const unitInput = z.object({ title: text.max(100), description: text, departmentId: z.string().optional(), ownerId: z.string().optional() });
+const unitInput = z.object({ title: text.max(100), description: text, importance: importanceInput.optional(), departmentId: z.string().optional(), ownerId: z.string().optional() });
 function required(payload: Record<string, unknown>, key: string): string { return parseInput(text, payload[key], { path: key }); }
 function validateDirectiveDate(common: Pick<CommonTask, 'dueDate' | 'distributions'>, instructedOn: string, now: Date) {
   if (instructedOn > koreaDate(now) || instructedOn > common.dueDate) fail(422, 'DIRECTIVE_DATE_RANGE', '지시일자는 오늘과 업무 마감일 이후로 지정할 수 없습니다.');
@@ -204,7 +207,7 @@ function buildUnitForCreate(state: WorkspaceData, user: User, input: z.infer<typ
   if (!state.departments.some(department => department.id === deptId)) fail(422, 'DEPARTMENT_MISSING', '유효한 소유 부서를 선택해 주세요.');
   const owner = activeUser(state, input.ownerId ?? user.id, now);
   if (owner.departmentId !== deptId) fail(422, 'ASSIGNMENT_SCOPE', '소유 부서의 담당자를 선택해 주세요.');
-  const unit: Unit = { id: id('unit'), title: input.title, description: input.description, departmentId: deptId, ownerId: owner.id, color: 'stone', icon: 'folder' };
+  const unit: Unit = { id: id('unit'), title: input.title, description: input.description, importance: input.importance ?? DEFAULT_UNIT_IMPORTANCE, departmentId: deptId, ownerId: owner.id, color: 'stone', icon: 'folder' };
   uniqueUnitTitle(state, unit);
   return unit;
 }
@@ -315,7 +318,7 @@ function createDirectiveTask(state: WorkspaceData, common: CommonTask, distribut
   const head = state.users.find(u => u.departmentId === distribution.departmentId && u.role === 'head' && u.active && (!u.endsAt || new Date(u.endsAt) > now));
   if (!manager || !head) fail(422, 'DEPARTMENT_STAFF_REQUIRED', '지시사항을 받을 부서의 담당자와 부서장을 먼저 등록해 주세요.');
   let unit = state.units.find(u => u.departmentId === distribution.departmentId && u.title === '지시사항 접수' && u.ownerId === manager.id && !u.deletedAt);
-  if (!unit) { unit = { id: id('unit'), title: '지시사항 접수', description: '부서에 도착한 지시사항을 개인 배정 전까지 보관합니다.', departmentId: distribution.departmentId, ownerId: manager.id, color: 'stone', icon: 'folder' }; state.units.push(unit); }
+  if (!unit) { unit = { id: id('unit'), title: '지시사항 접수', description: '부서에 도착한 지시사항을 개인 배정 전까지 보관합니다.', departmentId: distribution.departmentId, ownerId: manager.id, importance: DEFAULT_UNIT_IMPORTANCE, color: 'stone', icon: 'folder' }; state.units.push(unit); }
   const task = makeCommonTask(state, common, distribution.departmentId, unit.id, manager.id, head.id, now); state.tasks.unshift(task); distribution.taskId = task.id;
 }
 function notifyAssignment(state: WorkspaceData, userId: string, common: CommonTask, description: string, now: Date, distribution?: CommonDistribution) {
@@ -455,7 +458,7 @@ export function getWorkspace(state: WorkspaceData, userId: string, now = new Dat
     const plan = getUnitScorePlan(state, item.personId, item.period), evaluation = getUnitEvaluation(state, item.personId, item.period);
     return { ...item, status: evaluation ? 'evaluated' : plan?.submittedAt ? 'submitted' : 'not_submitted', submittedAt: plan?.submittedAt, evaluatedAt: evaluation?.evaluatedAt };
   });
-  return { revision: state.revision, currentUser: user, users: state.users.filter(member => deptIds.has(member.departmentId)), departments: state.departments.filter(department => deptIds.has(department.id)), identities: state.users.filter(member => identityIds.has(member.id)).map(userIdentity), departmentDirectory: state.departments.filter(department => canManageCommon(user, now) || isDirectiveCoordinator(state, user, now) || directoryIds.has(department.id)), departmentWorkPlans, departmentDivision: departmentDivisionReadModel(state, user.departmentId, now), organizationDivision: organizationDivisionForUser(state, user, now), delegatedTaskIds: tasks.filter(task => canActAsDeputy(state, user, task, undefined, now)).map(task => task.id), units: state.units.filter(u => deptIds.has(u.departmentId)), tasks, runs,
+  return { revision: state.revision, currentUser: user, users: state.users.filter(member => deptIds.has(member.departmentId)), departments: state.departments.filter(department => deptIds.has(department.id)), identities: state.users.filter(member => identityIds.has(member.id)).map(userIdentity), departmentDirectory: state.departments.filter(department => canManageCommon(user, now) || isDirectiveCoordinator(state, user, now) || directoryIds.has(department.id)), departmentWorkPlans, departmentDivision: departmentDivisionReadModel(state, user.departmentId, now), organizationDivision: organizationDivisionForUser(state, user, now), delegatedTaskIds: tasks.filter(task => canActAsDeputy(state, user, task, undefined, now)).map(task => task.id), units: state.units.filter(u => deptIds.has(u.departmentId)).map(unit => ({ ...unit, importance: unitImportance(unit) })), tasks, runs,
     handovers, workTransfers, commonTasks,
     sources: state.sources.filter(s => canReadSource(state, user, s, now)), performances: state.performances.filter(p => p.authorId === user.id || user.role === 'admin' || (user.role === 'head' ? p.departmentId === user.departmentId : !p.period && taskIds.has(p.taskId))), delegations: state.delegations.filter(d => [d.fromId, d.toId, d.requestedBy].includes(user.id) || manageDepartment(user, d.departmentId ?? state.tasks.find(task => task.id === d.taskId)?.departmentId ?? '')), audit, performanceSubmissionStatuses,
     notifications: state.notifications.filter(n => n.userId === user.id), attachments: state.attachments.filter(a => canReadAttachment(state, user, a, now)).map(a => ({ ...a, storageKey: '' })), releases: state.releases ?? [], unitScorePlans: (state.unitScorePlans ?? []).filter(canReadEvaluation), unitEvaluations: (state.unitEvaluations ?? []).filter(canReadEvaluation),
@@ -562,8 +565,8 @@ export function executeCommand(state: WorkspaceData, userId: string, raw: unknow
       break;
     }
     case 'unit.update': {
-      const unit = ownedUnit(state, user, required(p, 'unitId')); const input = parse(z.object({ title: text.max(100), description: text }), p);
-      uniqueUnitTitle(state, { ...unit, ...input }); Object.assign(unit, input);
+      const unit = ownedUnit(state, user, required(p, 'unitId')); const input = parse(z.object({ title: text.max(100), description: text, importance: importanceInput.optional() }), p);
+      uniqueUnitTitle(state, { ...unit, ...input }); Object.assign(unit, input, { importance: input.importance ?? unitImportance(unit) });
       targetId = unit.id; departmentId = unit.departmentId; detail = unit.title; title = '개인 단위업무 수정'; break;
     }
     case 'unit.delete': {
@@ -1003,16 +1006,17 @@ export function executeCommand(state: WorkspaceData, userId: string, raw: unknow
     }
     case 'performance.setWeights': {
       if (user.role === 'head') fail(403, 'SCORE_OWNER_REQUIRED', '단위업무 배점은 업무 담당자가 설정합니다.');
-      const input = parse(z.object({ period: halfYear, allocations: z.array(z.object({ unitId: text, maxScore: unitScore })).min(1).max(100) }), p);
+      const input = parse(z.object({ period: halfYear, allocations: z.array(z.object({ unitId: text, maxScore: unitWeight })).min(1).max(UNIT_SCORE_TOTAL, '단위업무가 50개를 넘으면 최소 1점씩 배분할 수 없습니다.') }), p);
       if (typeof p.personId === 'string' && p.personId !== user.id) fail(403, 'SCORE_OWNER_REQUIRED', '본인의 단위업무 배점만 설정할 수 있습니다.');
       if (getUnitEvaluation(state, user.id, input.period)) fail(409, 'EVALUATION_CONFIRMED', '평가가 확정된 반기의 배점은 변경할 수 없습니다.');
       if (getUnitScorePlan(state, user.id, input.period)?.submittedAt) fail(409, 'PERFORMANCE_SUBMITTED', '제출한 성과의 업무 비중은 변경할 수 없습니다. 평가 전 제출을 취소한 뒤 수정해 주세요.');
       const units = scoreUnitsForPeriod(state, user.id, input.period);
+      if (units.length > UNIT_SCORE_TOTAL) fail(422, 'SCORE_UNIT_LIMIT', '이 반기의 평가 대상 단위업무가 50개를 초과하여 비중을 새로 배분·저장할 수 없습니다. 기존 계획·성과는 그대로 보관되며, 기존 계획이 있다면 기존 규칙에 따라 제출·평가할 수 있습니다.');
       const unitIds = new Set(input.allocations.map(allocation => allocation.unitId));
       if (unitIds.size !== input.allocations.length) fail(422, 'DUPLICATE_SCORE_UNIT', '같은 단위업무를 중복해서 배점할 수 없습니다.');
       if (input.allocations.some(allocation => !units.some(unit => unit.id === allocation.unitId))) fail(403, 'SCORE_OWNER_REQUIRED', '현재 담당 업무 또는 본인의 기존 배점·성과에 연결된 단위업무만 배점할 수 있습니다.');
       assertNotFutureHalf(input.period, now, '업무 비중');
-      if (units.length !== unitIds.size) fail(422, 'SCORE_UNITS_REQUIRED', '모든 활성 단위업무의 배점을 설정해 주세요. 평가 대상이 아닌 단위업무는 0점으로 입력할 수 있습니다.');
+      if (units.length !== unitIds.size) fail(422, 'SCORE_UNITS_REQUIRED', '모든 활성 단위업무의 배점을 최소 1점씩 설정해 주세요.');
       if (input.allocations.reduce((sum, allocation) => sum + Math.round(allocation.maxScore * 100), 0) !== UNIT_SCORE_TOTAL * 100) fail(422, 'SCORE_TOTAL_REQUIRED', '단위업무 배점의 합계는 50점이어야 합니다.');
       const existing = getUnitScorePlan(state, user.id, input.period);
       const plan = { id: existing?.id ?? id('score-plan'), personId: user.id, departmentId: existing?.departmentId ?? units[0].departmentId, period: input.period, version: (existing?.version ?? 0) + 1, allocations: units.map(unit => ({ unitId: unit.id, unitTitle: unit.title, maxScore: input.allocations.find(allocation => allocation.unitId === unit.id)!.maxScore })), updatedAt: now.toISOString() };
@@ -1035,7 +1039,7 @@ export function executeCommand(state: WorkspaceData, userId: string, raw: unknow
       if (records.some(performance => performance.status === 'changes_requested')) fail(409, 'PERFORMANCE_CHANGES_PENDING', '보완 요청된 성과를 저장한 뒤 제출해 주세요.');
       if (records.some(performance => !hasCompletePerformance(performance))) fail(422, 'PERFORMANCE_INCOMPLETE', '모든 성과의 내용을 입력해 주세요.');
       if (!records.some(performance => plan.allocations.some(allocation => allocation.maxScore > 0 && allocation.unitId === performanceUnitId(state, performance)))) fail(409, 'PERFORMANCE_REQUIRED', '업무 비중을 배정한 단위업무에 세부업무 성과를 먼저 입력해 주세요.');
-      if (missingPerformanceUnitIds(state, plan.allocations, records, plan.departmentId).length) fail(409, 'UNIT_PERFORMANCE_REQUIRED', '업무 비중이 있는 모든 단위업무에 세부업무 성과를 입력해 주세요. 성과가 없는 단위업무는 비중을 0점으로 설정할 수 있습니다.');
+      if (missingPerformanceUnitIds(state, plan.allocations, records, plan.departmentId).length) fail(409, 'UNIT_PERFORMANCE_REQUIRED', '업무 비중이 있는 모든 단위업무에 세부업무 성과를 입력해 주세요.');
       plan.submittedAt = now.toISOString(); plan.submittedBy = user.id;
       for (const performance of records) if (performance.status === 'draft') performance.status = 'review';
       for (const head of state.users.filter(member => member.departmentId === plan.departmentId && member.role === 'head' && member.active)) state.notifications.unshift({ id: id('notification'), title: '개인별 반기 성과 평가 요청', description: `${user.name} · ${input.period} · 업무 비중 50점`, type: 'task', targetType: 'performance', targetId: records[0].id, createdAt: now.toISOString(), destination: { view: 'performance', personId: user.id, period: input.period }, read: false, userId: head.id });

@@ -4,6 +4,7 @@ import { createRun, defaultCard, defaultWorkflow, koreaDate, offsetDate, snapsho
 import { applyBudgetDemo } from './budget-demo';
 import { applyOrganizationDemo } from './organization-demo';
 import { applyStatisticsDemo } from './statistics-demo';
+import { normalizeUnitImportance } from './unit-importance';
 export { createRun, commonWorkflow, defaultCard, defaultWorkflow, koreaDate, offsetDate, snapshot } from './seed-helpers';
 export function createSeed(now = new Date()): WorkspaceData {
   const iso = now.toISOString(); const today = koreaDate(now); const year = today.slice(0, 4); const month = today.slice(5, 7); const period = `${year}년 ${Math.ceil(Number(month) / 3)}분기`;
@@ -109,5 +110,5 @@ export function createSeed(now = new Date()): WorkspaceData {
   applyBudgetDemo(state, now);
   applyOrganizationDemo(state, now);
   applyStatisticsDemo(state, now);
-  return state;
+  return normalizeUnitImportance(state);
 }

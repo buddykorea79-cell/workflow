@@ -4,6 +4,7 @@ import { parseInput } from './validation';
 import type { Run, Task, Unit, User, WorkTransfer, WorkTransferEvent, WorkspaceData } from './types';
 import { residualTransferRoles, transferRoleRecipientError } from './transfer-roles';
 import { canCancelTransfer, canReviewTransfer } from './transfer-permissions';
+import { unitImportance } from './unit-importance';
 
 type Fail = (status: number, code: string, message: string) => never;
 type Result = { targetId: string; departmentId: string; title: string; detail: string };
@@ -168,6 +169,7 @@ function apply(state: WorkspaceData, transfer: WorkTransfer, user: User, now: Da
   for (const unit of units) {
     unit.title = uniqueTitle(state, unit.title, target.id, transfer.departmentId, unit.id);
     unit.ownerId = target.id;
+    unit.importance = unitImportance(unit);
     mappings.set(unit.id, unit);
   }
   for (const task of tasks) {
@@ -176,9 +178,10 @@ function apply(state: WorkspaceData, transfer: WorkTransfer, user: User, now: Da
       const original = state.units.find(unit => unit.id === oldUnitId)!;
       let targetUnit = state.units.find(unit => !unit.deletedAt && unit.departmentId === transfer.departmentId && unit.ownerId === target.id && (unit.id === oldUnitId || unit.transferOriginUnitId === oldUnitId));
       if (!targetUnit) {
-        targetUnit = { ...structuredClone(original), id: id('unit'), ownerId: target.id, title: uniqueTitle(state, original.title, target.id, transfer.departmentId), transferOriginUnitId: oldUnitId };
+        targetUnit = { ...structuredClone(original), id: id('unit'), ownerId: target.id, importance: unitImportance(original), title: uniqueTitle(state, original.title, target.id, transfer.departmentId), transferOriginUnitId: oldUnitId };
         state.units.push(targetUnit);
       }
+      targetUnit.importance = unitImportance(targetUnit);
       mappings.set(oldUnitId, targetUnit);
     }
     task.unitId = mappings.get(oldUnitId)!.id;

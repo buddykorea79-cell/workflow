@@ -1,31 +1,58 @@
-import type { Performance, UnitPerformanceSnapshot, UnitScoreAllocation, User, WorkspaceData } from './types';
+import type { Performance, UnitPerformanceSnapshot, UnitScoreAllocation, UnitScorePlan, User, WorkspaceData } from './types';
+import { unitImportance } from './unit-importance';
 
 type EvaluationState = Pick<WorkspaceData, 'users' | 'units' | 'tasks' | 'performances' | 'unitScorePlans' | 'unitEvaluations'>;
 
 export const UNIT_SCORE_TOTAL = 50;
 
+type WeightedUnit = { id: string; importance?: number };
+
+/** Clamp sub-one quotas, then use integer remainders. Ties keep the caller's unit order. */
+export function allocateWeightsByImportance(units: readonly WeightedUnit[]): { unitId: string; maxScore: number }[] {
+  if (!units.length || units.length > UNIT_SCORE_TOTAL) return [];
+  const shares = units.map((unit, index) => ({ unitId: unit.id, importance: unitImportance(unit), maxScore: 0, remainder: 0, index }));
+  let pending = [...shares]; let budget = UNIT_SCORE_TOTAL;
+  while (pending.length) {
+    const importance = pending.reduce((sum, share) => sum + share.importance, 0);
+    const minimum = pending.filter(share => budget * share.importance < importance);
+    if (!minimum.length) break;
+    const fixed = new Set(minimum);
+    for (const share of minimum) { share.maxScore = 1; budget--; }
+    pending = pending.filter(share => !fixed.has(share));
+  }
+  const importance = pending.reduce((sum, share) => sum + share.importance, 0);
+  for (const share of pending) {
+    const numerator = budget * share.importance;
+    share.maxScore = Math.floor(numerator / importance); share.remainder = numerator % importance;
+  }
+  const remaining = UNIT_SCORE_TOTAL - shares.reduce((sum, share) => sum + share.maxScore, 0);
+  const ranked = [...pending].sort((a, b) => b.remainder - a.remainder || a.index - b.index);
+  for (let index = 0; index < remaining; index++) ranked[index].maxScore++;
+  return shares.map(({ unitId, maxScore }) => ({ unitId, maxScore }));
+}
+
+/** Only a new plan receives suggestions. Existing manual and fractional values remain intact. */
+export function initialWeightValues(units: readonly WeightedUnit[], plan?: Pick<UnitScorePlan, 'allocations'>): Record<string, string> {
+  const allocations = plan ? plan.allocations : allocateWeightsByImportance(units);
+  return Object.fromEntries(units.map(unit => [unit.id, String(allocations.find(allocation => allocation.unitId === unit.id)?.maxScore ?? '')]));
+}
+
 /** Validate the editable values without replacing incomplete input or counting invalid scores. */
 export function validateWeights(units: readonly { id: string }[], values: Readonly<Record<string, string | number | null | undefined>>) {
   const fieldErrors: Record<string, string> = {};
-  let totalHundredths = 0;
+  let total = 0;
   for (const unit of units) {
     const raw = String(values[unit.id] ?? '').trim();
     const score = Number(raw);
     if (!raw) fieldErrors[unit.id] = '점수를 입력해 주세요.';
     else if (!/^[+-]?(?:\d+(?:\.\d*)?|\.\d+)(?:e[+-]?\d+)?$/i.test(raw) || !Number.isFinite(score)) fieldErrors[unit.id] = '숫자로 입력해 주세요.';
-    else if (score < 0) fieldErrors[unit.id] = '0점 이상이어야 합니다.';
+    else if (score < 1) fieldErrors[unit.id] = '1점 이상이어야 합니다.';
     else if (score > UNIT_SCORE_TOTAL) fieldErrors[unit.id] = '50점 이하여야 합니다.';
-    else {
-      // Use the numeric value's precision: trailing zeros and scientific notation are equivalent.
-      const [significand, exponent = '0'] = String(score).split('e');
-      const decimalPlaces = (significand.split('.')[1]?.length ?? 0) - Number(exponent);
-      if (decimalPlaces > 2) fieldErrors[unit.id] = '소수 둘째 자리까지 입력할 수 있습니다.';
-      else totalHundredths += Math.round(score * 100);
-    }
+    else if (!Number.isInteger(score)) fieldErrors[unit.id] = '정수로 입력해 주세요.';
+    else total += score;
   }
-  const total = totalHundredths / 100;
-  const validTotal = totalHundredths === UNIT_SCORE_TOTAL * 100;
-  return { fieldErrors, total, validTotal, canSave: units.length > 0 && !Object.keys(fieldErrors).length && validTotal };
+  const validTotal = total === UNIT_SCORE_TOTAL;
+  return { fieldErrors, total, validTotal, canSave: units.length > 0 && units.length <= UNIT_SCORE_TOTAL && !Object.keys(fieldErrors).length && validTotal };
 }
 
 export const getUnitScorePlan = (state: Pick<WorkspaceData, 'unitScorePlans'>, personId: string, period: string) => state.unitScorePlans?.find(plan => plan.personId === personId && plan.period === period);
@@ -43,13 +70,13 @@ export function scoreUnitsForPeriod(state: EvaluationState, personId: string, pe
   const records = currentPersonPerformances(state, personId, period);
   const person = state.users.find(user => user.id === personId);
   const departmentId = plan?.departmentId ?? records[0]?.departmentId ?? person?.departmentId;
-  const units = new Map<string, { id: string; title: string; departmentId: string }>();
-  for (const allocation of plan?.allocations ?? []) units.set(allocation.unitId, { id: allocation.unitId, title: allocation.unitTitle, departmentId: plan!.departmentId });
-  for (const unit of eligibleScoreUnits(state, personId).filter(unit => unit.departmentId === departmentId)) units.set(unit.id, { id: unit.id, title: unit.title, departmentId: unit.departmentId });
+  const units = new Map<string, { id: string; title: string; departmentId: string; importance: number }>();
+  for (const allocation of plan?.allocations ?? []) units.set(allocation.unitId, { id: allocation.unitId, title: allocation.unitTitle, departmentId: plan!.departmentId, importance: unitImportance(state.units.find(unit => unit.id === allocation.unitId) ?? {}) });
+  for (const unit of eligibleScoreUnits(state, personId).filter(unit => unit.departmentId === departmentId)) units.set(unit.id, { id: unit.id, title: unit.title, departmentId: unit.departmentId, importance: unitImportance(unit) });
   for (const record of records.filter(record => record.departmentId === departmentId)) {
     const unitId = performanceUnitId(state, record);
     const unit = state.units.find(unit => unit.id === unitId);
-    if (unitId && (unit || !plan) && !units.has(unitId)) units.set(unitId, { id: unitId, title: unit?.title || '이전 단위업무', departmentId: record.departmentId });
+    if (unitId && (unit || !plan) && !units.has(unitId)) units.set(unitId, { id: unitId, title: unit?.title || '이전 단위업무', departmentId: record.departmentId, importance: unitImportance(unit ?? {}) });
   }
   return [...units.values()];
 }

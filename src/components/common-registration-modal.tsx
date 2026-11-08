@@ -4,9 +4,10 @@ import { useEffect, useId, useRef, useState, type FormEvent } from 'react';
 import { ArrowRight, FileText, FolderPlus, Pencil } from 'lucide-react';
 import { commonRegistrationState, registrationUnitTitle, savedRegistrationUnit } from '@/lib/common-registration';
 import { sameDraft } from '@/lib/pending-draft';
+import { unitImportance } from '@/lib/unit-importance';
 import type { Unit, Workspace } from '@/lib/types';
 import { useRevisionCommand } from './command-revision';
-import { UnitFormFields } from './unit-form-fields';
+import { UnitFormFields, validateUnitImportance } from './unit-form-fields';
 import { useUnsavedChanges, useUnsavedNavigation } from './unsaved-changes';
 import { Button, Field, Modal, type CommandFn } from './ui';
 import './common-registration-modal.css';
@@ -30,7 +31,7 @@ export function CommonRegistrationModal({ workspace: w, command, commonId, distr
   const state = commonRegistrationState(localWorkspace, commonId, distributionId);
   const [unitId, setUnitId] = useState(() => state.units.find(unit => unit.id === initialUnitId)?.id || state.units[0]?.id || '');
   const [savedSelection, setSavedSelection] = useState(unitId);
-  const [unitDraft, setUnitDraft] = useState(() => ({ title: registrationUnitTitle(state.common?.projectName), description: '' }));
+  const [unitDraft, setUnitDraft] = useState(() => ({ title: registrationUnitTitle(state.common?.projectName), description: '', importance: '5' }));
   const [savedUnitDraft, setSavedUnitDraft] = useState(unitDraft);
   const [unitOpen, setUnitOpen] = useState(!state.units.length);
   const [createdUnitId, setCreatedUnitId] = useState('');
@@ -49,7 +50,7 @@ export function CommonRegistrationModal({ workspace: w, command, commonId, distr
   const unitRevision = useRevisionCommand(localWorkspace, command, createdUnitId ? { kind: 'unit', id: createdUnitId } : null);
   const unitDirty = !sameDraft(unitDraft, savedUnitDraft);
   const selectionDraftId = useUnsavedChanges(unitId !== savedSelection, '공통업무 등록 단위업무');
-  const unitDraftId = useUnsavedChanges(unitDirty, '새 단위업무 이름과 업무 범위');
+  const unitDraftId = useUnsavedChanges(unitDirty, '새 단위업무 내용');
   const { requestNavigation, clearDraft, clearDrafts } = useUnsavedNavigation();
   const draftIds = [selectionDraftId, unitDraftId];
   const close = () => requestNavigation(() => { clearDrafts(draftIds); onClose(); });
@@ -60,7 +61,7 @@ export function CommonRegistrationModal({ workspace: w, command, commonId, distr
   const missingCreatedId = creationConfirmed && !createdUnitId;
 
   const changeUnit = (value: string) => { latest.current = { ...latest.current, unitId: value }; setUnitId(value); };
-  const changeDraft = (field: 'title' | 'description', value: string) => {
+  const changeDraft = (field: 'title' | 'description' | 'importance', value: string) => {
     const next = { ...latest.current.unitDraft, [field]: value };
     latest.current = { ...latest.current, unitDraft: next }; setUnitDraft(next);
   };
@@ -69,6 +70,7 @@ export function CommonRegistrationModal({ workspace: w, command, commonId, distr
     event.preventDefault();
     if (busyRef.current || !unitWritable || missingCreatedId || unitRevision.conflicted) return;
     const submitted = { ...latest.current.unitDraft };
+    if (!validateUnitImportance(submitted.importance)) return;
     const selectedAtSubmit = latest.current.unitId;
     const action = createdUnitId ? 'unit.update' : 'unit.create';
     const previousUnitIds = w.units.map(unit => unit.id);
@@ -77,8 +79,8 @@ export function CommonRegistrationModal({ workspace: w, command, commonId, distr
     busyRef.current = true; setBusy('unit'); setUnitNotice('');
     try {
       const success = await unitRevision.command(action, createdUnitId
-        ? { unitId: createdUnitId, ...submitted }
-        : { ...submitted, ownerId: w.currentUser.id }, {
+        ? { unitId: createdUnitId, ...submitted, importance: Number(submitted.importance) }
+        : { ...submitted, importance: Number(submitted.importance), ownerId: w.currentUser.id }, {
         onSaved: result => {
           saved = savedRegistrationUnit(result, { ownerId: w.currentUser.id, departmentId, previousUnitIds, title: submitted.title, unitId: createdUnitId || undefined });
           if (saved && mounted.current) setSavedUnitResult({ unit: saved, revision: result.revision });
@@ -153,7 +155,7 @@ export function CommonRegistrationModal({ workspace: w, command, commonId, distr
         <Field name="unitId" label="소속 단위업무 · 내가 만든 업무 묶음">
           <select name="unitId" required value={unitId} onChange={event => changeUnit(event.target.value)}>
             <option value="">단위업무 선택</option>
-            {state.units.map(unit => <option key={unit.id} value={unit.id}>{unit.title}</option>)}
+            {state.units.map(unit => <option key={unit.id} value={unit.id}>{unit.title} · 중요도 {unitImportance(unit)}</option>)}
           </select>
         </Field>
       </form>
@@ -165,7 +167,7 @@ export function CommonRegistrationModal({ workspace: w, command, commonId, distr
           <h3>{createdUnitId ? '만든 단위업무 수정' : '새 단위업무 만들기'}</h3>
           {!state.units.length && <p className="muted">단위업무가 없습니다. 이름과 업무 범위를 적어 첫 업무 묶음을 만들어 주세요.</p>}
           {!creationConfirmed && (state.common?.projectName?.length || 0) > 100 && <p className="muted">사업명이 길어 단위업무 이름은 앞부분 100자 이내로 제안했습니다. 필요한 이름으로 바꿔 주세요.</p>}
-          <UnitFormFields title={unitDraft.title} description={unitDraft.description} onTitleChange={value => changeDraft('title', value)} onDescriptionChange={value => changeDraft('description', value)} />
+          <UnitFormFields title={unitDraft.title} description={unitDraft.description} importance={unitDraft.importance} onTitleChange={value => changeDraft('title', value)} onDescriptionChange={value => changeDraft('description', value)} onImportanceChange={value => changeDraft('importance', value)} />
           {unitRevision.conflict}
           <div className="form-actions"><Button variant="ghost" disabled={busy === 'unit'} onClick={discardUnitDraft}>입력 취소</Button><Button type="submit" variant="secondary" disabled={!!busy || !unitWritable || unitRevision.conflicted || missingCreatedId || !!createdUnitId && !unitDirty}>{busy === 'unit' ? '저장 중…' : createdUnitId ? '단위업무 수정사항 저장' : '단위업무 만들기'}</Button></div>
         </form>

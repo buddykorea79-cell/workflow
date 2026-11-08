@@ -84,7 +84,7 @@ function DemoLogin({ users, departments, busy, error, onLogin }: { users: User[]
 
 function AccessCodeForm({ busy, error, onAccess }: { busy: boolean; error: string; onAccess: (code: string) => Promise<void> }) {
   const [code, setCode] = useState('');
-  return <form className="login-card" id="login" onSubmit={event => { event.preventDefault(); if (!busy && isValidAccessCode(code)) void onAccess(code); }}>
+  return <form className="login-card access-code-card" id="login" onSubmit={event => { event.preventDefault(); if (!busy && isValidAccessCode(code)) void onAccess(code); }}>
     <div className="login-card-intro"><span className="login-icon"><ShieldCheck size={23}/></span><Badge>시연용 워크스페이스</Badge></div>
     <h2>접근 코드 확인</h2><p id="access-code-hint" className="login-description">안내받은 숫자 8자리 접근 코드를 입력하면 시연할 역할을 선택할 수 있습니다.</p>
     <label className="field"><span>접근 코드</span><input name="accessCode" type="password" inputMode="numeric" pattern={ACCESS_CODE_PATTERN} autoComplete="off" autoFocus required minLength={ACCESS_CODE_LENGTH} maxLength={ACCESS_CODE_LENGTH} placeholder="숫자 8자리" value={code} onChange={event => setCode(event.target.value)} aria-describedby={error ? 'access-code-hint access-code-error' : 'access-code-hint'}/></label>

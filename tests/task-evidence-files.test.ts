@@ -31,7 +31,9 @@ function rejectsUnchanged(state: WorkspaceData, code: string, action: () => void
 }
 function submit(state: WorkspaceData) {
   const task = state.tasks.find(task => task.id === taskId)!;
-  dispatch(state, owner, 'performance.setWeights', { period, allocations: scoreUnitsForPeriod(state, owner, period).map(unit => ({ unitId: unit.id, maxScore: unit.id === task.unitId ? 50 : 0 })) });
+  // Existing zero-weight plans must keep their content/file submission and snapshot behavior.
+  state.unitScorePlans ??= [];
+  state.unitScorePlans.push({ id: randomUUID(), personId: owner, departmentId: task.departmentId, period, version: 1, allocations: scoreUnitsForPeriod(state, owner, period).map(unit => ({ unitId: unit.id, unitTitle: unit.title, maxScore: unit.id === task.unitId ? 50 : 0 })), updatedAt: now.toISOString() });
   dispatch(state, owner, 'performance.submitPerson', { period, planVersion: getUnitScorePlan(state, owner, period)!.version });
 }
 

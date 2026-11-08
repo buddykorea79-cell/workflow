@@ -109,7 +109,14 @@ test('work division: scheduled handovers cannot silently change a confirmed divi
 });
 
 test('work division: execution checks, notes, new occurrences and performance evaluation remain available while definitions are locked', () => {
-  const state = createSeed(now); confirmData(state);
+  const state = createSeed(now);
+  const units = state.units.filter(unit => unit.ownerId === 'u-support-member' && !unit.deletedAt);
+  const additionalTaskIds: string[] = [];
+  for (const unit of units.filter(unit => unit.id !== dataUnitId)) {
+    dispatch(state, 'u-support-member', 'task.create', { unitId: unit.id, primaryId: 'u-support-member', title: '분장 확정 전 성과 업무', description: '단위업무별 수행 기록', dueDate: '2026-12-31', frequency: 'once' });
+    additionalTaskIds.push(state.tasks[0].id);
+  }
+  confirmData(state);
   const task = state.tasks.find(task => task.id === dataTaskId)!; const nextStep = task.workflow.find(step => !step.done)!;
   dispatch(state, 'u-support-head', 'task.setProgress', { taskId: task.id, stepId: nextStep.id, done: true });
   const run = state.runs.find(run => run.taskId === task.id)!;
@@ -117,10 +124,11 @@ test('work division: execution checks, notes, new occurrences and performance ev
   assert.equal(state.runs.find(item => item.id === run.id)?.notes.at(-1)?.body, '분장 확정 후 정상 수행 기록');
   dispatch(state, 'u-support-member', 'run.create', { taskId: task.id, period: '2027-01' });
   dispatch(state, 'u-support-member', 'performance.submitHalf', { taskId: task.id, period: '2026-H2', title: '하반기 집행 관리', description: '확정된 업무분장에 따른 수행', evidence: '시범 증빙' });
-  const allocations = state.units.filter(unit => unit.ownerId === 'u-support-member' && !unit.deletedAt).map(unit => ({ unitId: unit.id, maxScore: unit.id === task.unitId ? 50 : 0 }));
+  for (const taskId of additionalTaskIds) dispatch(state, 'u-support-member', 'performance.saveHalf', { taskId, period: '2026-H2', description: '확정된 업무분장에 따른 추가 수행' });
+  const allocations = units.map(unit => ({ unitId: unit.id, maxScore: unit.id === task.unitId ? 51 - units.length : 1 }));
   dispatch(state, 'u-support-member', 'performance.setWeights', { period: '2026-H2', allocations });
   dispatch(state, 'u-support-member', 'performance.submitPerson', { period: '2026-H2', planVersion: 1 });
-  dispatch(state, 'u-support-head', 'performance.evaluatePerson', { personId: 'u-support-member', period: '2026-H2', planVersion: 1, scores: allocations.map(allocation => ({ unitId: allocation.unitId, score: allocation.maxScore ? 45 : 0 })), comment: '정상 수행 확인' });
+  dispatch(state, 'u-support-head', 'performance.evaluatePerson', { personId: 'u-support-member', period: '2026-H2', planVersion: 1, scores: allocations.map(allocation => ({ unitId: allocation.unitId, score: Math.min(45, allocation.maxScore) })), comment: '정상 수행 확인' });
   assert.equal(state.performances[0].status, 'confirmed'); assert.equal(isDepartmentConfirmed(state, 'dept-support'), true);
 });
 

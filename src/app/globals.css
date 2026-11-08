@@ -37,3 +37,6 @@
 .search-popover .popover-heading,.notification-popover .popover-heading{position:sticky;top:0;background:var(--field);z-index:1}.notification-row>span:last-child{min-width:0;overflow-wrap:anywhere}.notification-time{color:var(--muted);font-size:13px;line-height:1.4}
 
 @media(max-width:1080px){.topbar-actions .session-button>span{display:none}}
+
+.access-code-card .login-submit { margin-top: 20px; }
+.access-code-card .form-error { margin-top: 12px; margin-bottom: 0; }

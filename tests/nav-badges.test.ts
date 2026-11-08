@@ -80,8 +80,9 @@ test('one actual pending transfer is counted only for its approving department h
 
 function submittedPerformance() {
   const state = fixture(), owner = 'u-support-member';
-  const allocations = eligibleScoreUnits(state, owner).map((unit, index) => ({ unitId: unit.id, maxScore: index === 0 ? 50 : 0 }));
-  send(state, owner, 'performance.setWeights', { period, allocations });
+  const allocations = eligibleScoreUnits(state, owner).map((unit, index) => ({ unitId: unit.id, unitTitle: unit.title, maxScore: index === 0 ? 50 : 0 }));
+  // Already-saved zero-weight plans retain the same review/readiness rules.
+  state.unitScorePlans = [{ id: randomUUID(), personId: owner, departmentId: 'dept-support', period, version: 1, allocations, updatedAt: now.toISOString() }];
   send(state, owner, 'performance.saveHalf', { taskId: 'task-data', period, description: '반기 제출 근거' });
   send(state, owner, 'performance.submitPerson', { period, planVersion: state.unitScorePlans![0].version });
   return { state, owner, plan: state.unitScorePlans![0] };
