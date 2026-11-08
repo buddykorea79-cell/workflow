@@ -1,8 +1,9 @@
 import { createHash, randomUUID } from 'node:crypto';
 import { z } from 'zod';
+import { parseInput } from './validation';
 import type { Run, Task, Unit, User, WorkTransfer, WorkTransferEvent, WorkspaceData } from './types';
 import { residualTransferRoles, transferRoleRecipientError } from './transfer-roles';
-import { canCancelTransfer } from './transfer-permissions';
+import { canCancelTransfer, canReviewTransfer } from './transfer-permissions';
 
 type Fail = (status: number, code: string, message: string) => never;
 type Result = { targetId: string; departmentId: string; title: string; detail: string };
@@ -41,9 +42,7 @@ function definitionFingerprint(task: Task): string {
 }
 
 function parse<T>(schema: z.ZodType<T>, input: unknown, fail: Fail): T {
-  const result = schema.safeParse(input);
-  if (!result.success) return fail(422, 'VALIDATION_ERROR', result.error.issues.map(issue => `${issue.path.join('.') || '입력값'}: ${issue.message}`).join('\n'));
-  return result.data;
+  return parseInput(schema, input, { labels: { reason: '인수인계 사유' } });
 }
 
 function recipient(state: WorkspaceData, toId: string, departmentId: string, now: Date, emergency: boolean, fail: Fail) {
@@ -58,8 +57,8 @@ function event(transfer: WorkTransfer, user: User, action: WorkTransferEvent['ac
   transfer.events.push({ id: id('transfer-event'), action, actorId: user.id, actorName: user.name, at: now.toISOString(), note });
 }
 
-function notify(state: WorkspaceData, userIds: string[], transfer: WorkTransfer, title: string) {
-  for (const userId of new Set(userIds)) state.notifications.unshift({ id: id('notification'), userId, title, description: transfer.kind === 'roles' ? `${transfer.fromName} → ${transfer.toName} · 남은 역할 ${transfer.roles?.length ?? 0}건` : `${transfer.fromName} → ${transfer.toName} · 단위 ${transfer.unitIds.length}개 / 세부 ${transfer.taskIds.length}건 / 진행 ${transfer.runIds.length}회차`, type: 'handover', targetId: transfer.id, read: false });
+function notify(state: WorkspaceData, userIds: string[], transfer: WorkTransfer, title: string, now: Date) {
+  for (const userId of new Set(userIds)) state.notifications.unshift({ id: id('notification'), userId, title, description: transfer.kind === 'roles' ? `${transfer.fromName} → ${transfer.toName} · 남은 역할 ${transfer.roles?.length ?? 0}건` : `${transfer.fromName} → ${transfer.toName} · 단위 ${transfer.unitIds.length}개 / 세부 ${transfer.taskIds.length}건 / 진행 ${transfer.runIds.length}회차`, type: 'handover', targetType: 'transfer', targetId: transfer.id, createdAt: now.toISOString(), read: false });
 }
 
 function audit(state: WorkspaceData, user: User, transfer: WorkTransfer, action: string, title: string, detail: string, now: Date) {
@@ -287,7 +286,7 @@ function requestRoles(state: WorkspaceData, user: User, payload: Record<string, 
   const transfer: WorkTransfer = { id: id('transfer'), kind: 'roles', status: 'pending', departmentId: input.departmentId, fromId: source!.id, fromName: source!.name, toId: target!.id, toName: target!.name, requestedBy: user.id, requestedByName: user.name, reason: input.reason, createdAt: now.toISOString(), unitIds: [], taskIds, units: [], tasks: tasks.map(task => ({ taskId: task.id, code: task.code, title: task.title, unitId: task.unitId, unitTitle: state.units.find(unit => unit.id === task.unitId)?.title ?? '기존 업무', primaryId: task.primaryId, version: task.version, updatedAt: task.updatedAt })), runIds: [...new Set(runIds)], roles, events: [] };
   event(transfer, user, 'requested', `${input.reason} · 남은 역할 ${roles.length}건`, now);
   (state.workTransfers ??= []).unshift(transfer);
-  notify(state, heads.map(head => head.id), transfer, '남은 역할 정리 승인 요청');
+  notify(state, heads.map(head => head.id), transfer, '남은 역할 정리 승인 요청', now);
   return { targetId: transfer.id, departmentId: transfer.departmentId, title: '남은 역할 정리 승인 요청', detail: `${source!.name} → ${target!.name} · 역할 ${roles.length}건 · ${input.reason}` };
 }
 
@@ -297,7 +296,7 @@ function cancelOverlapping(state: WorkspaceData, transfer: WorkTransfer, user: U
   for (const pending of (state.workTransfers ?? []).filter(item => item.status === 'pending' && overlaps(item, transfer.unitIds, transfer.taskIds, tasks, transfer.runIds))) {
     pending.status = 'cancelled'; pending.resolvedBy = user.id; pending.resolvedAt = now.toISOString(); pending.resolutionReason = note;
     event(pending, user, 'cancelled', note, now); audit(state, user, pending, 'transfer.cancel', '긴급 이관에 따른 기존 인수인계 취소', note, now);
-    notify(state, [pending.requestedBy, pending.fromId, pending.toId], pending, '기존 인수인계 요청이 긴급 이관으로 취소되었습니다');
+    notify(state, [pending.requestedBy, pending.fromId, pending.toId], pending, '기존 인수인계 요청이 긴급 이관으로 취소되었습니다', now);
   }
   for (const legacy of state.handovers.filter(item => !['completed', 'cancelled'].includes(item.status) && (item.taskIds.some(taskId => transfer.taskIds.includes(taskId)) || item.runIds.some(runId => transfer.runIds.includes(runId))))) {
     legacy.status = 'cancelled'; legacy.feedback = note;
@@ -329,12 +328,12 @@ function execute(state: WorkspaceData, user: User, type: string, payload: Record
       cancelOverlapping(state, transfer, user, now);
       apply(state, transfer, user, now, fail);
       event(transfer, user, 'emergency', `${input.reason}${transfer.executionOnly?.length ? ` · 기존 담당자가 남아 있던 진행 회차 ${transfer.executionOnly.length}건도 이관` : ''}${transfer.reviewerChanges?.length ? ` · 수행·검토 역할 중복을 방지하기 위해 검토 ${transfer.reviewerChanges.length}건을 부서장에게 연결` : ''}`, now);
-      notify(state, [transfer.fromId, transfer.toId, ...heads], transfer, '인사이동 업무가 부서 담당자에게 긴급 이관되었습니다');
+      notify(state, [transfer.fromId, transfer.toId, ...heads], transfer, '인사이동 업무가 부서 담당자에게 긴급 이관되었습니다', now);
     } else {
       if (!heads.length) fail(409, 'TRANSFER_APPROVER_REQUIRED', '소속 부서에 승인 가능한 부서장이 없습니다. 부서장 계정을 확인해 주세요.');
       if ((state.workTransfers ?? []).some(item => item.status === 'pending' && overlaps(item, unitIds, transfer.taskIds, tasks, transfer.runIds)) || state.handovers.some(item => !['completed', 'cancelled'].includes(item.status) && (item.taskIds.some(taskId => transfer.taskIds.includes(taskId)) || item.runIds.some(runId => transfer.runIds.includes(runId))))) fail(409, 'DUPLICATE_HANDOVER', '선택한 업무에 진행 중인 인수인계가 있습니다. 기존 요청을 먼저 처리해 주세요.');
       event(transfer, user, 'requested', input.reason, now);
-      notify(state, heads, transfer, '인수인계 배정 승인 요청이 도착했습니다');
+      notify(state, heads, transfer, '인수인계 배정 승인 요청이 도착했습니다', now);
     }
     (state.workTransfers ??= []).unshift(transfer);
     return { targetId: transfer.id, departmentId: transfer.departmentId, title: emergency ? '인사이동 업무 긴급 이관' : '인수인계 배정 승인 요청', detail: `${transfer.fromName} → ${transfer.toName} · 단위 ${transfer.unitIds.length}개 / 세부 ${transfer.taskIds.length}건 / 진행 ${transfer.runIds.length}회차 · ${transfer.reason}` };
@@ -345,7 +344,7 @@ function execute(state: WorkspaceData, user: User, type: string, payload: Record
   if (transfer.status !== 'pending') fail(409, 'TRANSFER_FINISHED', '이미 처리한 인수인계 요청입니다.');
   let title = '';
   if (type === 'transfer.approve' || type === 'transfer.reject') {
-    if (!departmentHead(user, transfer.departmentId)) fail(403, 'TRANSFER_HEAD_REQUIRED', '업무 소속 부서의 부서장만 승인하거나 반려할 수 있습니다.');
+    if (!canReviewTransfer(user, transfer, now)) fail(403, 'TRANSFER_HEAD_REQUIRED', '업무 소속 부서의 부서장만 승인하거나 반려할 수 있습니다.');
     if (type === 'transfer.approve') {
       if (state.handovers.some(item => !['completed', 'cancelled'].includes(item.status) && (item.taskIds.some(taskId => transfer.taskIds.includes(taskId)) || item.runIds.some(runId => transfer.runIds.includes(runId))))) fail(409, 'DUPLICATE_HANDOVER', '새로 생성된 다른 인수인계 요청을 먼저 정리해 주세요.');
       apply(state, transfer, user, now, fail);
@@ -361,7 +360,7 @@ function execute(state: WorkspaceData, user: User, type: string, payload: Record
     transfer.status = 'cancelled'; transfer.resolvedBy = user.id; transfer.resolvedAt = now.toISOString(); transfer.resolutionReason = input.reason ?? '요청 취소';
     event(transfer, user, 'cancelled', transfer.resolutionReason, now); title = '인수인계 요청 취소';
   } else return fail(422, 'UNKNOWN_COMMAND', '지원하지 않는 인수인계 작업입니다.');
-  notify(state, [transfer.requestedBy, transfer.fromId, transfer.toId], transfer, title);
+  notify(state, [transfer.requestedBy, transfer.fromId, transfer.toId], transfer, title, now);
   return { targetId: transfer.id, departmentId: transfer.departmentId, title, detail: `${transfer.fromName} → ${transfer.toName} · ${transfer.kind === 'roles' ? `역할 ${transfer.roles?.length ?? 0}건` : `단위 ${transfer.unitIds.length}개 / 세부 ${transfer.taskIds.length}건 / 진행 ${transfer.runIds.length}회차`}${transfer.resolutionReason ? ` · ${transfer.resolutionReason}` : ''}` };
 }
 

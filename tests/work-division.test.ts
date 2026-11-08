@@ -152,7 +152,7 @@ test('work division: confirmation/reopening keep optimistic concurrency, idempot
   dispatch(state, 'u-support-head', 'department.confirm', {}, 'confirm-once', revision); assert.equal(JSON.stringify(state), after);
   rejects('DEPARTMENT_ALREADY_CONFIRMED', () => dispatch(state, 'u-support-head', 'department.confirm'));
   rejects('VALIDATION_ERROR', () => dispatch(state, 'u-support-head', 'department.reopen', { reason: '  ' }));
-  rejects('VERSION_CONFLICT', () => dispatch(state, 'u-support-head', 'department.reopen', { reason: '이전 화면 변경' }, 'stale', revision));
+  rejects('TARGET_CONFLICT', () => executeCommand(state, 'u-support-head', { type: 'department.reopen', payload: { reason: '이전 화면 변경' }, requestId: 'stale', expectedRevision: revision, expected: { kind: 'departmentPlan', id: 'dept-support', rev: 0 } }, now));
   dispatch(state, 'u-support-head', 'department.reopen', { reason: '구체적인 재작성 사유' });
   assert.equal(departmentWorkPlan(state, 'dept-support').reason, '구체적인 재작성 사유'); assert.equal(departmentWorkPlan(state, 'dept-support').version, 1);
   assert.ok(state.audit.some(event => event.action === 'department.confirm')); assert.ok(state.audit.some(event => event.action === 'department.reopen'));

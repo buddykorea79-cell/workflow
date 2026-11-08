@@ -26,6 +26,7 @@ const taskIn = state => state.tasks.find(task => task.id === taskId);
 await Promise.all([employee, head, peer, foreign].map(login));
 let state = await workspace(employee);
 assert.ok(taskIn(state));
+const taskDeadline = taskIn(state).dueDate;
 function nextPayload(state) {
   return { taskId, previousRunId: latest(state)?.id, title: '12월 업무 수행', startDate: '2026-12-01', dueDate: '2026-12-10', steps: taskIn(state).workflow.map((step, index) => ({ stepId: step.id, startDate: `2026-12-${String(index + 1).padStart(2, '0')}`, dueDate: `2026-12-${String(index + 1).padStart(2, '0')}` })) };
 }
@@ -62,10 +63,13 @@ if (process.env.QA_LEAVE_CYCLE_READY === '1') {
   for (const key of ['steps', 'notes', 'dueDate', 'completedAt', 'startedAt']) assert.deepEqual(archived[key], previous[key]);
   assert.ok(archived.workflowSnapshot?.length);
   pass('Completed dates, outputs, checklists and procedure history are preserved');
-  assert.equal(taskIn(state).dueDate, payload.dueDate);
+  assert.equal(taskIn(state).dueDate, taskDeadline);
+  assert.equal(taskIn(state).cycleStartDate, payload.startDate);
+  assert.equal(taskIn(state).cycleDueDate, payload.dueDate);
+  assert.equal(current.dueDate, payload.dueDate);
   assert.equal(taskIn(state).workflow[0].startDate, payload.steps[0].startDate);
   assert.equal(taskIn(state).workflow[0].dueDate, payload.steps[0].dueDate);
-  pass('The current task and calendar receive the new cycle schedule');
+  pass('The new cycle and procedure dates change while the task deadline stays fixed');
   await command(employee, 'run.nextCycle', payload, 409);
   pass('A duplicate or stale next-cycle request is rejected');
   await login(employee);

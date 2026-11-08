@@ -145,6 +145,36 @@ function upstreamError(status: number): DomainError {
   return new DomainError(502, 'AI_UPSTREAM_FAILED', 'BizRouter 분석 요청을 처리하지 못했습니다. 모델 설정과 서비스 상태를 확인해 주세요.');
 }
 
+/** Shared bounded transport for new structured drafts. No hidden network retries. */
+export async function generateStructuredJson<T>(input: { name: string; schema: z.ZodType; system: string; data: unknown; parse: (value: unknown) => T }, options: BizRouterOptions = {}): Promise<{ value: T; model: string }> {
+  const apiKey = options.apiKey ?? process.env.BIZROUTER_API_KEY;
+  const model = options.model ?? process.env.BIZROUTER_MODEL;
+  if (!apiKey?.trim() || !model?.trim()) throw new DomainError(503, 'AI_NOT_CONFIGURED', 'BizRouter API 키와 분석 모델을 설정해 주세요.');
+  const fetcher = options.fetcher ?? fetch;
+  const signal = AbortSignal.any([AbortSignal.timeout(60_000), ...(options.signal ? [options.signal] : [])]);
+  const headers = { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json' };
+  try {
+    signal.throwIfAborted();
+    const catalogResponse = await fetcher(`${origin}/models`, { headers, signal, cache: 'no-store', redirect: 'error' });
+    if (!catalogResponse.ok) throw upstreamError(catalogResponse.status);
+    const catalog = z.object({ models: z.array(z.object({ id: z.string(), response_format_modes: z.array(z.string()).optional() })) }).safeParse(await readJson(catalogResponse, 'catalog'));
+    if (!catalog.success || !catalog.data.models.some(item => item.id === model && item.response_format_modes?.includes('json_schema'))) throw new DomainError(503, 'AI_MODEL_UNAVAILABLE', '설정한 BizRouter 모델의 접근 권한과 구조화 응답 지원을 확인해 주세요.');
+    signal.throwIfAborted();
+    const response = await fetcher(`${origin}/chat/completions`, { method: 'POST', headers, signal, cache: 'no-store', redirect: 'error', body: JSON.stringify({ model, stream: false, max_tokens: 12_000, response_format: { type: 'json_schema', json_schema: { name: input.name, strict: true, schema: z.toJSONSchema(input.schema, { target: 'draft-7' }) } }, messages: [{ role: 'system', content: input.system }, { role: 'user', content: JSON.stringify(input.data) }] }) });
+    if (!response.ok) throw upstreamError(response.status);
+    const envelope = z.object({ model: z.string().optional(), choices: z.array(z.object({ finish_reason: z.string(), message: z.object({ content: z.string().nullable() }) })).min(1) }).safeParse(await readJson(response, 'completion'));
+    signal.throwIfAborted();
+    if (!envelope.success || envelope.data.choices[0].finish_reason !== 'stop' || !envelope.data.choices[0].message.content) throw new DomainError(502, 'AI_INCOMPLETE_RESPONSE', 'AI가 업무 초안을 완성하지 못했습니다. 입력 내용은 유지됩니다. 다시 분석해 주세요.');
+    let value: unknown;
+    try { value = JSON.parse(envelope.data.choices[0].message.content); } catch { throw new DomainError(502, 'AI_INVALID_STRUCTURE', 'AI 업무 초안 형식이 올바르지 않습니다. 다시 분석해 주세요.'); }
+    return { value: input.parse(value), model: envelope.data.model || model };
+  } catch (error) {
+    if (error instanceof DomainError) throw error;
+    if (signal.aborted) throw new DomainError(504, 'AI_TIMEOUT', '업무 분석 시간이 초과되었거나 요청이 취소되었습니다. 입력 내용은 유지됩니다.');
+    throw new DomainError(502, 'AI_CONNECTION_FAILED', 'BizRouter에 연결하지 못했습니다. 연결 설정을 확인해 주세요.');
+  }
+}
+
 /** Prioritize the saved overview and extracted task files; supporting references only supplement that scope. */
 export async function generateAiProcedure(input: ProcedureAiInput, options: BizRouterOptions = {}): Promise<{ draft: ProcedureDraft; model: string }> {
   const apiKey = options.apiKey ?? process.env.BIZROUTER_API_KEY;

@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { parseInput } from './validation';
 import initialCatalog from '../../data/budgets/2026-budget.json';
 import { DomainError } from './domain';
 import type { BudgetCatalog, BudgetCatalogItem, BudgetMode, BudgetSearchResult } from './budget-types';
@@ -26,9 +27,7 @@ const catalogSchema = z.object({
 }).passthrough();
 
 function parse<T>(schema: z.ZodType<T>, value: unknown): T {
-  const parsed = schema.safeParse(value);
-  if (!parsed.success) throw new DomainError(422, 'BUDGET_INVALID_INPUT', parsed.error.issues.slice(0, 8).map(issue => `${issue.path.join('.') || '예산'}: ${issue.message}`).join('\n'));
-  return parsed.data;
+  return parseInput(schema, value, { code: 'BUDGET_INVALID_INPUT' });
 }
 
 export function parseBudgetCatalog(value: unknown): BudgetCatalog {
@@ -54,7 +53,7 @@ export function searchBudgets(state: WorkspaceData, input: { query?: string; yea
   const available = catalog.items.filter(item => input.includeInactive || item.active !== false);
   const filtered = available.filter(item => (!input.year || item.year === input.year) && tokens.every(token => searchable([item.account, item.field, item.sector, item.program, item.unitProject, item.projectName, item.projectCode, item.programCode].filter(Boolean).join(' ')).includes(token)));
   const page = input.page ?? 1; const pageSize = 20;
-  return { items: filtered.slice((page - 1) * pageSize, page * pageSize), total: filtered.length, page, pageSize, source: catalog.source, years: [...new Set(available.map(item => item.year))].sort((a, b) => b - a), revision: state.revision };
+  return { items: filtered.slice((page - 1) * pageSize, page * pageSize), total: filtered.length, page, pageSize, source: catalog.source, years: [...new Set(available.map(item => item.year))].sort((a, b) => b - a), revision: state.revision, catalogRev: catalog.rev ?? 0 };
 }
 
 export function executeBudgetCommand(state: WorkspaceData, user: User, type: string, payload: Record<string, unknown>, now: Date) {

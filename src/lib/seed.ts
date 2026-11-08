@@ -91,7 +91,7 @@ export function createSeed(now = new Date()): WorkspaceData {
       { id: 'audit-2', actorId: 'u-minseo', action: 'run.note', targetType: 'run', targetId: runs[0].id, title: '수행 기록 추가', detail: '분기 예산 집행 현황 보고', departmentId: 'dept-plan', createdAt: iso },
       { id: 'audit-3', actorId: 'u-head', action: 'task.confirm', targetType: 'task', targetId: 'task-budget', title: '업무 기준 확정', detail: '분기 예산 집행 현황 보고 · v1', departmentId: 'dept-plan', createdAt: iso },
     ],
-    notifications: [{ id: 'notification-1', title: '인수 확인이 필요해요', description: '박주무관님이 주간 간부회의 운영을 인계했습니다.', type: 'handover', targetId: 'handover-meeting', read: false, userId: 'u-minseo' }, { id: 'notification-2', title: '새 공통업무가 도착했어요', description: '하반기 정보보안 점검의 담당자를 배정해 주세요.', type: 'common', targetId: 'common-security', read: false, userId: 'u-minseo' }],
+    notifications: [{ id: 'notification-1', title: '인수 확인이 필요해요', description: '박주무관님이 주간 간부회의 운영을 인계했습니다.', type: 'handover', targetType: 'handover', targetId: 'handover-meeting', createdAt: iso, read: false, userId: 'u-minseo' }, { id: 'notification-2', title: '새 공통업무가 도착했어요', description: '하반기 정보보안 점검의 담당자를 배정해 주세요.', type: 'common', targetType: 'distribution', targetId: 'dist-security-plan', createdAt: iso, read: false, userId: 'u-minseo' }],
     attachments: [], processedRequests: [],
     releases: [
       { id: 'release-070', version: '0.7.0', date: iso, title: '반복 업무 회차와 지난 절차 이력', notes: '세부업무의 모든 절차를 완료하면 새 일정으로 다음 회차를 시작합니다. 지난 회차의 절차·일정·체크리스트·완료자·결과를 보존하고 읽기 전용으로 조회합니다.' },

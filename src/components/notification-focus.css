@@ -1,0 +1,3 @@
+[data-notification-focus-target]{scroll-margin-top:calc(var(--topbar-height) + 16px)}
+[data-notification-focused="true"]{outline:2px solid var(--brand-primary,#205cd5);outline-offset:4px}
+@media(prefers-reduced-motion:reduce){[data-notification-focus-target]{scroll-behavior:auto}}

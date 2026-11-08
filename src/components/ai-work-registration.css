@@ -1,0 +1,14 @@
+.ai-registration{display:flex;flex-direction:column;gap:24px;color:var(--ink)}
+.air-context,.air-pending,.air-success{padding:16px;border:1px solid var(--line);border-radius:14px;background:var(--canvas)}
+.air-context{display:flex;flex-direction:column;gap:4px}.air-context span,.air-context p,.air-hint,.air-section-heading>span,.air-file-actions small{font-size:14px;color:var(--muted)}
+.air-source,.air-preview,.air-unit,.air-task{display:flex;flex-direction:column;gap:12px}
+.air-file-actions,.air-analysis-actions,.air-section-heading,.air-unit>header,.air-task>header,.air-footer{display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap}
+.air-file-actions{justify-content:flex-start}.air-analysis-actions>span{font-size:14px;color:var(--muted)}
+.air-document{padding:12px;border:1px solid var(--line);border-radius:12px}.air-document>summary{display:flex;align-items:center;gap:8px;cursor:pointer}.air-document>summary>span{min-width:0;overflow-wrap:anywhere;flex:1}.air-document small{font-size:13px;color:var(--muted)}.air-document[open]>*+*{margin-top:10px}
+.air-unit{padding:18px;border:1px solid var(--line);border-radius:16px}.air-unit>header>strong{font-size:16px}.air-task{padding:16px;border-radius:12px;background:var(--canvas)}
+.air-task .form-grid{grid-template-columns:repeat(3,minmax(0,1fr))}.air-task small{font-size:13px;color:var(--muted)}
+.air-error{padding:12px 14px;border:1px solid var(--line);border-left:3px solid var(--blue);border-radius:10px;background:var(--canvas);overflow-wrap:anywhere}.air-notice{font-size:14px;color:var(--muted)}
+.air-pending>p{margin:6px 0 12px;font-size:14px}.air-success{display:flex;gap:10px;align-items:flex-start}.air-success p{font-size:14px;margin-top:4px}.air-success>svg{color:var(--blue)}
+.air-pending details{margin-bottom:12px}.air-pending summary{cursor:pointer}.air-pending article{padding:12px 0;border-bottom:1px solid var(--line)}.air-pending article p{white-space:pre-wrap;overflow-wrap:anywhere;font-size:14px}.air-pending article>div{margin-top:10px;padding-left:12px}
+.air-footer{padding-top:16px;border-top:1px solid var(--line);justify-content:flex-end}.air-footer>.btn:first-child{margin-right:auto}
+@media(max-width:600px){.air-task .form-grid{grid-template-columns:1fr}.air-unit{padding:14px}.air-task{padding:12px}.air-footer>.btn{flex:1 1 auto}.air-file-actions>.btn,.air-analysis-actions>.btn{width:100%}.air-section-heading{align-items:flex-start;flex-direction:column}.air-document>summary{flex-wrap:wrap}}

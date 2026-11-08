@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
+import { currentHalf } from './helpers/http-period.mjs';
 
 const base = process.argv[2] || 'http://127.0.0.1:3001';
 const origin = new URL(base);
@@ -23,10 +24,11 @@ async function command(user, type, payload, expected = 200) {
 const employee = 'u-support-member', head = 'u-support-head', colleague = 'u-doyun', admin = 'u-support-admin', foreignHead = 'u-head';
 await Promise.all([employee, head, colleague, admin, foreignHead].map(login));
 let state = await workspace(employee);
-const period = process.argv[3] || '2026-H2';
+const period = process.argv[3] || currentHalf(state.serverTime);
 const units = state.units.filter(unit => unit.ownerId === employee && !unit.deletedAt);
-assert.equal(units.length, 3, 'QA begins with a fresh copy of the existing workspace.');
-const allocations = units.map((unit, index) => ({ unitId: unit.id, maxScore: index === units.length - 1 ? 20 : 15 }));
+assert.ok(units.length >= 3, 'QA requires the seeded employee with multiple unit assignments.');
+const equalShare = Math.floor(50 / units.length);
+const allocations = units.map((unit, index) => ({ unitId: unit.id, maxScore: index === units.length - 1 ? 50 - equalShare * index : equalShare }));
 await command(employee, 'performance.setWeights', { period, allocations: allocations.map((item, index) => ({ ...item, maxScore: item.maxScore - (index === 0 ? 1 : 0) })) }, 422);
 pass('Incomplete 50-point allocation is rejected by the server');
 state = await command(employee, 'performance.setWeights', { period, allocations });
@@ -45,7 +47,8 @@ for (let index = 0; index < tasks.length; index++) {
 }
 assert.ok(state.performances.filter(item => item.authorId === employee && item.period === period).every(item => item.status === 'draft'));
 pass('Per-task performance saves as an editable draft and retains unit membership');
-const scores = allocations.map(item => ({ unitId: item.unitId, score: item.maxScore - 2, comment: '제출 실적과 근거를 확인했습니다. 후속 개선 계획을 계속 관리해 주세요.' }));
+const scores = allocations.map(item => ({ unitId: item.unitId, score: Math.max(0, item.maxScore - 2), comment: '제출 실적과 근거를 확인했습니다. 후속 개선 계획을 계속 관리해 주세요.' }));
+const expectedTotal = scores.reduce((sum, item) => sum + item.score, 0);
 const payload = { personId: employee, period, planVersion: plan.version, scores, comment: '단위업무별 목표 달성과 실적 근거를 종합하여 평가했습니다.' };
 await command(colleague, 'performance.evaluatePerson', payload, 403);
 await command(foreignHead, 'performance.evaluatePerson', payload, 403);
@@ -69,15 +72,15 @@ if (process.env.QA_LEAVE_EVALUATION_OPEN === '1') {
 } else {
   state = await command(head, 'performance.evaluatePerson', payload);
   const evaluation = state.unitEvaluations.find(item => item.personId === employee && item.period === period);
-  assert.equal(evaluation.totalScore, 44);
-  assert.equal(evaluation.scores.length, 3);
+  assert.equal(evaluation.totalScore, expectedTotal);
+  assert.equal(evaluation.scores.length, units.length);
   assert.equal(evaluation.planVersion, plan.version);
-  pass('Head confirms a durable per-person result of 44 out of 50');
+  pass(`Head confirms a durable result of ${expectedTotal} out of 50 across every assigned unit`);
   await command(employee, 'performance.setWeights', { period, allocations }, 409);
   await command(head, 'performance.evaluatePerson', payload, 409);
   pass('Final evaluation and its weights are protected against overwriting');
   const own = await workspace(employee);
-  assert.equal(own.unitEvaluations.find(item => item.id === evaluation.id).totalScore, 44);
+  assert.equal(own.unitEvaluations.find(item => item.id === evaluation.id).totalScore, expectedTotal);
   assert.equal((await workspace(colleague)).unitEvaluations.some(item => item.id === evaluation.id), false);
   assert.equal((await workspace(foreignHead)).unitEvaluations.some(item => item.id === evaluation.id), false);
   assert.equal((await workspace(colleague)).performanceSubmissionStatuses.find(item => item.personId === employee && item.period === period)?.status, 'evaluated');

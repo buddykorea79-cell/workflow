@@ -4,6 +4,7 @@ import path from 'node:path';
 import { z } from 'zod';
 import { DomainError } from './domain';
 import { dataDirectory } from './store';
+import { resolveAttachmentStoreMode, resolveStoreMode } from './store-mode';
 import { createNeonDownloadUrl, createNeonUploadUrl, deleteNeonFile, getNeonStorageConfig, readNeonFile, uploadNeonFile } from './attachment-storage';
 import type { DiagnosticCheck, DiagnosticResult, IntegrationService, IntegrationStatus, IntegrationVariable, PreparedStorageProbe } from './admin-integration-types';
 
@@ -16,10 +17,12 @@ export type DiagnosticFileManifest = z.infer<typeof manifestSchema>;
 
 function variables(env: Environment, definitions: [string, boolean, string][]): IntegrationVariable[] { return definitions.map(([name, required, purpose]) => ({ name, required, purpose, configured: !!env[name]?.trim() })); }
 export function integrationStatus(env: Environment = process.env): IntegrationStatus {
+  const databaseMode = resolveStoreMode(env);
+  const storageMode = resolveAttachmentStoreMode(env);
   const ai = variables(env, [['BIZROUTER_API_KEY', true, 'AI API 인증'], ['BIZROUTER_MODEL', true, '분석 모델 ID']]);
-  const database = variables(env, [['DATABASE_URL', true, 'Neon PostgreSQL 연결 문자열'], ['IEUM_WORKSPACE_ID', false, '기본값 development']]);
+  const database = variables(env, [['IEUM_STORE', false, 'local: 로컬 강제 · neon: DB 필수 · 미설정: 자동 선택'], ['DATABASE_URL', true, 'Neon PostgreSQL 연결 문자열'], ['IEUM_WORKSPACE_ID', false, '기본값 development']]);
   const storage = variables(env, [['IEUM_STORAGE_PROVIDER', true, 'Neon 사용 시 neon'], ['AWS_ENDPOINT_URL_S3', true, 'Neon Storage endpoint'], ['AWS_REGION', true, '저장소 리전'], ['AWS_ACCESS_KEY_ID', true, '저장소 접근 키'], ['AWS_SECRET_ACCESS_KEY', true, '저장소 비밀 키'], ['IEUM_STORAGE_BUCKET', false, '기본값 ieum-attachments'], ['IEUM_SESSION_SECRET', true, '서명된 업로드 확인용 · 32자 이상']]);
-  return { checkedAt: new Date().toISOString(), ai: { configured: ai.every(item => item.configured), variables: ai }, database: { configured: !!env.DATABASE_URL?.trim(), mode: env.DATABASE_URL?.trim() ? 'neon' : 'local', variables: database }, storage: { configured: env.IEUM_STORAGE_PROVIDER === 'neon' && storage.filter(item => item.required).every(item => item.configured) && (env.IEUM_SESSION_SECRET?.trim().length || 0) >= 32, mode: env.IEUM_STORAGE_PROVIDER === 'neon' ? 'neon' : 'local', variables: storage } };
+  return { checkedAt: new Date().toISOString(), ai: { configured: ai.every(item => item.configured), variables: ai }, database: { configured: databaseMode === 'neon', mode: databaseMode, variables: database }, storage: { configured: storageMode === 'neon' && storage.filter(item => item.required).every(item => item.configured) && (env.IEUM_SESSION_SECRET?.trim().length || 0) >= 32, mode: storageMode, variables: storage } };
 }
 function finish(service: IntegrationService, started: number, checks: DiagnosticCheck[], message: string): DiagnosticResult { return { service, ok: checks.length > 0 && checks.every(check => check.ok), checkedAt: new Date().toISOString(), durationMs: Date.now() - started, checks, message }; }
 function aiFailure(status: number): never {
@@ -58,7 +61,7 @@ export interface ProbeDatabasePool { connect: () => Promise<ProbeDatabaseClient>
 export async function testDatabaseConnection(options: { env?: Environment; poolFactory?: () => ProbeDatabasePool } = {}): Promise<DiagnosticResult> {
   const started = Date.now(); const checks: DiagnosticCheck[] = []; const env = options.env ?? process.env; let pool: ProbeDatabasePool | undefined; let client: ProbeDatabaseClient | undefined; let began = false; let stage = 'DB 환경변수';
   try {
-    if (!env.DATABASE_URL?.trim()) throw new DomainError(503, 'DATABASE_NOT_CONFIGURED', '현재 로컬 저장을 사용합니다. Neon을 시험하려면 DATABASE_URL을 설정해 주세요.');
+    if (resolveStoreMode(env) === 'local') throw new DomainError(503, 'DATABASE_NOT_CONFIGURED', '현재 로컬 저장을 사용합니다. Neon을 시험하려면 IEUM_STORE=neon과 DATABASE_URL을 설정해 주세요.');
     checks.push({ label: stage, ok: true }); stage = 'DB 연결·조회';
     if (options.poolFactory) pool = options.poolFactory();
     else { const { Pool, neonConfig } = await import('@neondatabase/serverless'); const { default: ws } = await import('ws'); neonConfig.webSocketConstructor = ws; pool = new Pool({ connectionString: env.DATABASE_URL, max: 1, connectionTimeoutMillis: 15_000, query_timeout: 10_000 }) as unknown as ProbeDatabasePool; }
@@ -76,7 +79,7 @@ export async function testDatabaseConnection(options: { env?: Environment; poolF
   finally { if (client && began) await client.query('ROLLBACK').catch(() => undefined); client?.release(); await pool?.end().catch(() => undefined); }
 }
 
-function probeSecret(env: Environment = process.env) { const secret = env.IEUM_SESSION_SECRET; if (secret && secret.length >= 32) return secret; if (!env.VERCEL && !env.DATABASE_URL) return 'ieum-local-diagnostic-files-only-secret'; throw new DomainError(503, 'DIAGNOSTIC_SIGNING_REQUIRED', 'IEUM_SESSION_SECRET을 32자 이상으로 설정해 주세요.'); }
+function probeSecret(env: Environment = process.env) { const secret = env.IEUM_SESSION_SECRET; if (secret && secret.length >= 32) return secret; if (resolveStoreMode(env) === 'local') return 'ieum-local-diagnostic-files-only-secret'; throw new DomainError(503, 'DIAGNOSTIC_SIGNING_REQUIRED', 'IEUM_SESSION_SECRET을 32자 이상으로 설정해 주세요.'); }
 export function signDiagnosticManifest(manifest: DiagnosticFileManifest) { const body = Buffer.from(JSON.stringify(manifest)).toString('base64url'); return `${body}.${createHmac('sha256', probeSecret()).update(`admin-diagnostic:${body}`).digest('hex')}`; }
 export function verifyDiagnosticManifest(token: unknown, userId: string, cleanup = false, now = Date.now()): DiagnosticFileManifest {
   if (typeof token !== 'string' || token.length > 5000) throw new DomainError(422, 'DIAGNOSTIC_TOKEN_INVALID', '파일 시험을 다시 시작해 주세요.');

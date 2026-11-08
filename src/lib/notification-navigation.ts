@@ -9,6 +9,17 @@ export type NotificationDestination =
 /** Old notifications remain useful; new ones carry the exact approval target. */
 export function notificationDestination(notification: Notification, workspace: Pick<Workspace, 'delegations' | 'performances' | 'tasks'>): NotificationDestination {
   if (notification.destination) return notification.destination;
+  if (notification.targetType === 'delegation') {
+    const record = workspace.delegations.find(item => item.id === notification.targetId || item.batchId === notification.targetId);
+    return { view: 'delegation', delegationId: record?.id };
+  }
+  if (notification.targetType === 'performance') {
+    const record = workspace.performances.find(item => item.id === notification.targetId);
+    return { view: 'performance', personId: record?.authorId, period: record?.period };
+  }
+  if (notification.targetType === 'handover' || notification.targetType === 'transfer') return { view: 'handover' };
+  if (notification.targetType === 'common' || notification.targetType === 'distribution') return { view: 'common' };
+  if (notification.targetType === 'task') return workspace.tasks.some(task => task.id === notification.targetId) ? { view: 'task', taskId: notification.targetId } : { view: 'common' };
   if (notification.type === 'handover') return { view: 'handover' };
   if (notification.type === 'common') return { view: 'common' };
   if (notification.title.includes('업무대행')) {

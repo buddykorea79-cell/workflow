@@ -1,6 +1,7 @@
 import { DeleteObjectCommand, GetObjectCommand, HeadObjectCommand, PutObjectCommand, S3Client } from '@aws-sdk/client-s3';
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
-import { DomainError } from './domain';
+import { DomainError } from './domain-error';
+import { resolveAttachmentStoreMode } from './store-mode';
 
 export interface NeonStorageConfig {
   endpoint: string;
@@ -13,9 +14,8 @@ export interface NeonStorageConfig {
 export const ATTACHMENT_SIZE_LIMIT = 10 * 1024 * 1024;
 
 export function getNeonStorageConfig(env: Record<string, string | undefined> = process.env): NeonStorageConfig | undefined {
-  const provider = env.IEUM_STORAGE_PROVIDER?.trim() || 'local';
+  const provider = resolveAttachmentStoreMode(env);
   if (provider === 'local') return undefined;
-  if (provider !== 'neon') throw new DomainError(503, 'STORAGE_CONFIG_INVALID', 'IEUM_STORAGE_PROVIDER는 local 또는 neon으로 설정해 주세요.');
   const names = ['AWS_ENDPOINT_URL_S3', 'AWS_REGION', 'AWS_ACCESS_KEY_ID', 'AWS_SECRET_ACCESS_KEY'] as const;
   const missing = names.filter(name => !env[name]?.trim());
   if (missing.length) throw new DomainError(503, 'STORAGE_NOT_CONFIGURED', `Neon 파일 저장 설정이 필요합니다: ${missing.join(', ')}`);

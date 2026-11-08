@@ -1,12 +1,13 @@
 'use client';
 
 import { useId, useState } from 'react';
-import { ArrowRight, ArrowUpRight, BookOpen, Building2, CircleHelp, GitBranch, Lightbulb, ListChecks, Settings2, ShieldCheck, UserRound, Users } from 'lucide-react';
+import { ArrowRight, BookOpen, Building2, CircleHelp, GitBranch, Lightbulb, ListChecks, Settings2, ShieldCheck, UserRound, Users } from 'lucide-react';
 import { guideRoles, type GuideRole } from '@/lib/usage-guide';
-import { Button, Modal } from './ui';
+import { Button } from './ui';
+import type { GuideSection } from '@/lib/guide-role-summaries';
 import './usage-guide.css';
 
-export type GuideSection = 'start' | 'roles' | 'task' | 'faq';
+export type { GuideSection } from '@/lib/guide-role-summaries';
 const roleIcons = { member: UserRound, lead: Users, manager: Building2, head: ShieldCheck, admin: Settings2 };
 const sections = [
   { id: 'start', label: '처음 시작하기', icon: BookOpen },
@@ -96,18 +97,14 @@ function Steps({ items }: { items: { title: string; description: string }[] }) {
   return <ol className="guide-steps">{items.map((step, index) => <li key={step.title}><span aria-hidden="true">{String(index + 1).padStart(2, '0')}</span><div><strong>{step.title}</strong><p>{step.description}</p></div></li>)}</ol>;
 }
 
-export function LandingGuide({ onOpen }: { onOpen: (section: GuideSection, role?: GuideRole) => void }) {
-  return <section className="guide-landing" aria-labelledby="landing-guide-title"><header className="guide-landing-heading"><div><p className="guide-kicker"><BookOpen size={16}/>온이음 사용 안내</p><h2 id="landing-guide-title">내 역할에 맞는 시작을 찾아보세요.</h2><p>로그인 전에도 역할별 메뉴와 업무 처리 순서를 확인할 수 있습니다.</p></div><Button variant="secondary" onClick={() => onOpen('start')}>전체 사용 안내<ArrowRight size={16}/></Button></header><div className="guide-role-cards">{guideRoles.map(role => { const Icon = roleIcons[role.id]; return <button key={role.id} type="button" className="guide-role-card" aria-label={`${role.title} 역할과 메뉴 안내`} onClick={() => onOpen('roles', role.id)}><Icon size={23}/><span><strong>{role.title}</strong><small>{role.summary}</small></span><ArrowUpRight size={17}/></button>; })}</div></section>;
-}
-
-export function UsageGuide({ onClose, initialRole = 'member', initialSection = 'start' }: { onClose: () => void; initialRole?: GuideRole; initialSection?: GuideSection }) {
+export function UsageGuideContent({ onClose, initialRole = 'member', initialSection = 'start' }: { onClose: () => void; initialRole?: GuideRole; initialSection?: GuideSection }) {
   const [section, setSection] = useState<GuideSection>(initialSection);
   const [roleId, setRoleId] = useState<GuideRole>(initialRole);
   const [taskTab, setTaskTab] = useState(0);
   const contentId = useId();
   const role = guideRoles.find(role => role.id === roleId) || guideRoles[0];
   const detail = taskTabs[taskTab];
-  return <Modal title="온이음 사용 안내" description="처음 시작하는 방법부터 권한별 메뉴, 업무 수행과 성과 제출까지 확인하세요." onClose={onClose} wide><div className="usage-guide">
+  return <div className="usage-guide">
     <nav className="guide-nav" aria-label="사용 안내 항목">{sections.map(item => { const Icon = item.icon; return <button key={item.id} type="button" aria-pressed={section === item.id} aria-controls={contentId} onClick={() => setSection(item.id)}><Icon size={16}/>{item.label}</button>; })}</nav>
     <div id={contentId}>
       {section === 'start' && <section className="guide-section"><header><h3>업무를 정리하고, 실행하고, 성과로 남깁니다.</h3><p>온이음은 업무의 기준과 실제 수행 기록을 함께 관리하는 공간입니다. 먼저 세 가지 개념을 익히고 내 역할의 메뉴를 확인하세요.</p></header><div className="guide-term-grid">{[
@@ -131,5 +128,5 @@ export function UsageGuide({ onClose, initialRole = 'member', initialSection = '
       {section === 'faq' && <section className="guide-section"><header><h3>막히는 단계에서 확인하세요.</h3><p>질문을 펼치면 필요한 확인 사항과 다음 행동을 볼 수 있습니다.</p></header>{questions.map(question => <details className="guide-faq" key={question.title}><summary tabIndex={0}>{question.title}</summary><p>{question.answer}</p></details>)}</section>}
     </div>
     <footer className="guide-footer"><p><BookOpen size={15}/>초기화면과 로그인 후 왼쪽 메뉴에서 언제든 다시 열 수 있습니다.</p><Button variant="secondary" onClick={onClose}>안내 닫기</Button></footer>
-  </div></Modal>;
+  </div>;
 }

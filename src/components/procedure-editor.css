@@ -3,6 +3,7 @@
 .pe-steps{display:flex;flex-direction:column;gap:18px}
 .pe-step{border:1px solid #e1e7ee;border-radius:16px;padding:22px;background:#fff;min-width:0}
 .pe-step.is-done{background:#fcfdfd}
+.pe-participant-warning{display:flex;align-items:center;gap:16px;margin:0 0 18px;padding:13px 15px;border:1px solid #dce6f2;border-radius:10px;background:#f6f9fd}.pe-participant-warning p{flex:1;min-width:0;margin:0;font-size:13px;line-height:1.7;color:#536880;overflow-wrap:anywhere}.pe-participant-warning .btn{flex-shrink:0;font-size:13px}
 .pe-step-heading{display:flex;align-items:center;gap:10px;margin-bottom:20px;min-width:0}
 .pe-step-heading h4{font-size:16px;line-height:1.6;font-weight:650;margin:0;flex:1;min-width:0;overflow-wrap:anywhere}
 .pe-step-heading .badge{font-size:12px;white-space:nowrap}
@@ -27,3 +28,4 @@
 .pw-task-route{display:flex;gap:12px;align-items:center;justify-content:space-between;padding:18px 20px;border-radius:13px;background:#f5f8fc}.pw-task-route p{margin:0;font-size:14px;line-height:1.7;color:#62758d}.pw-task-route .btn{flex-shrink:0;font-size:14px}
 .pw-procedure-helper{border:1px solid #e7ecf3;border-radius:13px;padding:16px 18px}.pw-procedure-helper>div{display:flex;align-items:center;justify-content:space-between;gap:18px}.pw-procedure-helper h3{font-size:14px;font-weight:600;margin:0 0 5px;color:#405774}.pw-procedure-helper p{font-size:13px;color:#6b7e95;line-height:1.7;margin:0}.pw-procedure-helper .btn{flex-shrink:0;font-size:13px;min-height:36px}
 @media(max-width:760px){.pe-step{padding:17px}.pe-essential-fields{grid-template-columns:minmax(0,1fr)}.pe-step-heading{gap:8px;flex-wrap:wrap}.pe-step-heading h4{font-size:15px}.pe-disclosure>summary small{display:none}.pe-essential-readonly>div{grid-template-columns:45px minmax(0,1fr);gap:10px}.pw-procedure-helper>div,.pw-task-route,.pe-apply-bar{flex-direction:column;align-items:stretch}.pe-editor .pw-section-intro{flex-wrap:wrap}.pe-editor .pw-section-intro>.btn{width:auto}.pe-step-heading .pw-icon-button{width:30px;height:30px}.pe-step-controls{flex-basis:100%;justify-content:flex-end}.pe-move-buttons .btn{min-height:36px;padding:0 12px;font-size:13px}}
+@media(max-width:760px){.pe-participant-warning{flex-direction:column;align-items:stretch}.pe-participant-warning .btn{align-self:flex-start}}

@@ -154,6 +154,7 @@ test('personal metadata can be corrected with history while common metadata rema
   assert.equal(updated.versions.at(-1)?.dueDate, '2026-12-18');
   assert.deepEqual(updated.versions[0], original);
   const activeRun = data.runs.find(run => run.taskId === updated.id && run.status !== 'completed')!;
+  assert.equal(activeRun.cycleManaged, undefined);
   assert.equal(activeRun.dueDate, '2026-12-18');
   assert.ok(activeRun.title.startsWith('주요업무 추진계획 보완'));
   for (const change of [{ title: '공통 기준 우회' }, { dueDate: '2027-01-01' }, { frequency: 'once' }]) {
@@ -162,4 +163,21 @@ test('personal metadata can be corrected with history while common metadata rema
   const common = findTask(data, 'task-budget');
   dispatch(data, 'u-minseo', 'task.configure', { taskId: common.id, title: common.title, dueDate: common.dueDate, frequency: common.frequency, description: '공통 기준을 유지하며 부서 설명을 보완합니다.' });
   assert.equal(findTask(data, common.id).title, common.title);
+});
+
+test('personal deadline changes preserve a separately managed cycle schedule and its read model', () => {
+  const data = createSeed(now); const task = findTask(data, 'task-plan');
+  const run = data.runs.find(item => item.taskId === task.id && item.status !== 'completed')!;
+  dispatch(data, task.primaryId, 'run.schedule', {
+    taskId: task.id, runId: run.id, startDate: '2026-11-01', dueDate: '2026-12-01',
+    steps: run.steps.map(step => ({ stepId: step.stepId })),
+  });
+  const workflow = structuredClone(data.runs.find(item => item.id === run.id)!.workflowSnapshot);
+  dispatch(data, task.primaryId, 'task.configure', { taskId: task.id, title: '업무 마감과 회차를 따로 관리', dueDate: '2026-12-31' });
+  const updated = findTask(data, task.id); const scheduled = data.runs.find(item => item.id === run.id)!;
+  assert.equal(updated.dueDate, '2026-12-31'); assert.equal(updated.versions.at(-1)?.dueDate, '2026-12-31');
+  assert.equal(scheduled.startDate, '2026-11-01'); assert.equal(scheduled.dueDate, '2026-12-01');
+  assert.deepEqual(scheduled.workflowSnapshot, workflow);
+  const view = getWorkspace(data, task.primaryId, now).tasks.find(item => item.id === task.id)!;
+  assert.equal(view.dueDate, updated.dueDate); assert.equal(view.cycleStartDate, scheduled.startDate); assert.equal(view.cycleDueDate, scheduled.dueDate);
 });

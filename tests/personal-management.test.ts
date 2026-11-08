@@ -194,6 +194,6 @@ test('personal management: delete commands retain optimistic revisions and idemp
   dispatch(state, 'u-jiho', 'task.delete', { taskId: task.id }, requestId); assert.equal(state.revision, revision + 1);
   dispatch(state, 'u-jiho', 'task.delete', { taskId: task.id }, requestId); assert.equal(state.revision, revision + 1);
   assert.equal(state.audit.filter(event => event.action === 'task.delete' && event.targetId === task.id).length, 1);
-  rejects('VERSION_CONFLICT', () => executeCommand(state, 'u-jiho', { type: 'task.restore', payload: { taskId: task.id }, expectedRevision: revision, requestId: randomUUID() }, now));
+  rejects('TARGET_CONFLICT', () => executeCommand(state, 'u-jiho', { type: 'task.restore', payload: { taskId: task.id }, expectedRevision: revision, expected: { kind: 'task', id: task.id, rev: task.rev ?? 0 }, requestId: randomUUID() }, now));
   assert.ok(state.tasks.find(t => t.id === task.id)!.deletedAt);
 });

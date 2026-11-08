@@ -35,7 +35,9 @@ const task = workspace.tasks.find(task => task.primaryId === employee && !task.c
 async function extract(user, expected = 200, bytes = pdfBytes()) { const form = new FormData(); form.set('taskId', task.id); form.set('file', new Blob([bytes], { type: 'application/pdf' }), 'budget-procedure.pdf'); return (await request('/api/procedure-extract', { user, method: 'POST', body: form, expected })).data; }
 const extracted = await extract(employee);
 check('PDF body is actually extracted with page provenance', () => { assert.equal(extracted.pageCount, 1); assert.match(extracted.text, /Prepare budget application/); assert.equal(extracted.pages[0].page, 1); });
-await extract(undefined, 401); await extract('u-jiho', 403); await extract(employee, 415, Buffer.from('not a PDF'));
+await extract(undefined, 401); await extract('u-jiho', 403);
+const invalidPdf = await extract(employee, 422, Buffer.from('not a PDF'));
+assert.equal(invalidPdf.code, 'DOCUMENT_EXTRACTION_FAILED');
 check('PDF extraction enforces session, task access and actual PDF signature', () => {});
 const deniedHead = await command(head, 'unit.create', { title: '부서장 개인업무 금지 검증', description: '검증' }, 403);
 check('Head cannot create personal work', () => assert.equal(deniedHead.code, 'HEAD_REGISTRATION_DENIED'));

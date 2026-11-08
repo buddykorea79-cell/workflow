@@ -137,11 +137,11 @@ test('invalid references, cycles, missing review and out-of-cycle schedules cann
 });
 
 test('idempotent apply cannot duplicate histories and concurrent stale applies cannot overwrite newer edits', () => {
-  const { state, task } = fixture(true), requestId = randomUUID(), revision = state.revision;
+  const { state, task } = fixture(true), requestId = randomUUID(), revision = state.revision, expected = { kind: 'task' as const, id: task.id, rev: task.rev ?? 0 };
   const payload = { taskId: task.id, workflow: workflow() };
   dispatch(state, owner, 'task.procedure.replace', payload, requestId, revision); const applied = structuredClone(state);
   dispatch(state, owner, 'task.procedure.replace', payload, requestId, revision); assert.deepEqual(state, applied);
   assert.throws(() => dispatch(state, owner, 'task.procedure.replace', { ...payload, reason: '다른 요청' }, requestId, revision), error => error instanceof DomainError && error.code === 'IDEMPOTENCY_CONFLICT');
-  assert.throws(() => dispatch(state, owner, 'task.procedure.replace', { ...payload, workflow: workflow('stale') }, randomUUID(), revision), error => error instanceof DomainError && error.code === 'VERSION_CONFLICT');
+  assert.throws(() => executeCommand(state, owner, { type: 'task.procedure.replace', payload: { ...payload, workflow: workflow('stale') }, requestId: randomUUID(), expectedRevision: revision, expected }, now), error => error instanceof DomainError && error.code === 'TARGET_CONFLICT');
   assert.deepEqual(state, applied); assert.equal(state.runs.find(run => run.taskId === task.id)!.procedureHistory!.length, 1);
 });

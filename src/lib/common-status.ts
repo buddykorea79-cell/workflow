@@ -1,5 +1,5 @@
-import { runWorkflow } from './work-cycles';
 import { commonDeadline } from './common-deadline';
+import { executionStatus as executionStateFor, nextExecutionStep } from './status-labels';
 import type { CommonDistribution, CommonExecutionStatus, CommonStage, CommonSummary, CommonTask, Run, Task, WorkspaceData } from './types';
 
 const timestamp = (value?: string) => value && Number.isFinite(Date.parse(value)) ? Date.parse(value) : 0;
@@ -17,10 +17,9 @@ export function taskExecution(state: Pick<WorkspaceData, 'runs'>, task?: Task) {
   // Adding a new plan after a finished occurrence must not remain at 100%.
   // An unfinished historical occurrence still follows its own frozen definition.
   const run = latest && !(latest.status === 'completed' && task.version > latest.definitionVersion) ? latest : undefined;
-  const definition = run ? runWorkflow(task, run) : task.workflow;
   const steps = run ? run.steps.map(step => ({ id: step.stepId, role: step.role, done: step.status === 'completed' })) : task.workflow.map(step => ({ id: step.id, role: step.role, done: step.done === true }));
   const completedSteps = steps.filter(step => step.done).length; const totalSteps = steps.length;
-  const next = steps.find(step => !step.done && (definition?.find(item => item.id === step.id)?.dependsOn ?? []).every(dependency => steps.find(item => item.id === dependency)?.done)) ?? steps.find(step => !step.done);
+  const next = nextExecutionStep(task, run);
   return { source: run ? 'run' as const : 'task' as const, run, completedSteps, totalSteps, progress: totalSteps ? Math.round(100 * completedSteps / totalSteps) : 0, nextRole: next?.role, nextStepId: next?.id };
 }
 
@@ -34,10 +33,10 @@ export function commonDistributionStatus(state: Pick<WorkspaceData, 'users' | 't
   let executionStatus: CommonExecutionStatus = 'not_started';
   if (task?.deletedAt || unit?.deletedAt) executionStatus = 'deleted';
   else if (task?.status === 'archived') executionStatus = 'archived';
-  else if (execution.run?.status === 'paused') executionStatus = 'paused';
-  else if (registered && execution.totalSteps > 0 && execution.completedSteps === execution.totalSteps) executionStatus = 'completed';
-  else if (registered && execution.nextRole === 'reviewer') executionStatus = 'review';
-  else if (registered && (execution.completedSteps > 0 || execution.run && execution.run.status !== 'scheduled')) executionStatus = 'in_progress';
+  else if (registered) {
+    const status = executionStateFor(task, execution.run, execution.progress, execution.nextRole).key;
+    executionStatus = status === 'scheduled' ? 'not_started' : status;
+  }
 
   let stage: CommonStage = distribution.status === 'pending' ? 'team_pending' : distribution.status === 'team_assigned' ? 'person_pending' : distribution.status === 'person_assigned' ? 'registration_pending' : executionStatus === 'completed' ? 'completed' : 'in_progress';
   const active = (userId?: string) => state.users.some(user => user.id === userId && user.active && (!user.endsAt || timestamp(user.endsAt) > now.getTime()));

@@ -1,12 +1,17 @@
 import { normalizePeriod, currentPeriod } from './schedule';
-import { executeBudgetCommand, resolveTaskBudget, validateTaskMoney } from './budget-catalog';
+import { isFutureHalf } from './period';
+import { executeBudgetCommand, getBudgetCatalog, resolveTaskBudget, validateTaskMoney } from './budget-catalog';
 import { nextCycleWorkflow, runWorkflow, taskCycleState } from './work-cycles';
 import { procedureScheduleConflicts } from './procedure-schedule';
+import { DomainError } from './domain-error';
+import { commandValidationLabels, parseInput } from './validation';
+import { commandTarget, commandTargetKey, entityRevision, logicalTargets, revisionEntities, targetLabels, targetRevision } from './command-targets';
+import { resolveAttachmentStoreMode, resolveStoreMode } from './store-mode';
 import { createHash, randomUUID } from 'node:crypto';
 import { isDeepStrictEqual } from 'node:util';
 import { z } from 'zod';
 import { createRun, commonWorkflow, defaultCard, defaultWorkflow, koreaDate, snapshot } from './seed';
-import { commonDistributionStatus, summarizeCommon, taskExecution } from './common-status';
+import { commonDistributionStatus, latestTaskRun, summarizeCommon, taskExecution } from './common-status';
 import { departmentWorkPlan, isDepartmentConfirmed, isRegisteredWork, userIdentity, workDivisionSnapshot } from './work-division';
 import { currentPersonPerformances, scoreUnitsForPeriod, getUnitEvaluation, getUnitScorePlan, hasCompletePerformance, missingPerformanceUnitIds, performanceUnitId, UNIT_SCORE_TOTAL } from './unit-evaluation';
 import { canManageDirective, canRecordDirectiveReport, directiveIssuerLabels, directiveReportStartMonth, isCentralDirective, isDirectiveCoordinator } from './directives';
@@ -17,12 +22,17 @@ import { organizationDivisionForUser } from './organization-division';
 import { withReplacedRunProcedure } from './procedure-replacement';
 import { organizationIdentityIssue, organizationUserChangeIssue } from './organization-management';
 import { canCreateCommon, canReviewCommon, commonApprovalSnapshot, commonOriginDepartment, commonPublished } from './common-approval';
-import type { Attachment, AuditEvent, Command, CommonApprovalRequest, CommonTask, CommonDistribution, DepartmentDivisionReadModel, Handover, Performance, PerformanceSubmissionStatus, Run, Source, Task, Unit, User, WorkflowStep, Workspace, WorkspaceData } from './types';
+import { canonicalWorkImport, validateWorkImport, workImportNeutralCard, type WorkImportInput } from './work-import';
+import type { Attachment, AuditEvent, Command, CommandTargetKind, CommonApprovalRequest, CommonTask, CommonDistribution, DepartmentDivisionReadModel, Handover, Performance, PerformanceSubmissionStatus, Run, Source, TargetRevisionChange, Task, Unit, User, WorkflowStep, Workspace, WorkspaceData } from './types';
 
-export class DomainError extends Error { constructor(public status: number, public code: string, message: string) { super(message); } }
+export { DomainError } from './domain-error';
 function fail(status: number, code: string, message: string): never { throw new DomainError(status, code, message); }
+function assertNotFutureHalf(period: string, now: Date, subject: '성과' | '업무 비중') {
+  if (isFutureHalf(period, now)) fail(422, 'PERIOD_NOT_STARTED', `아직 시작하지 않은 반기의 ${subject}${subject === '성과' ? '는' : '은'} 입력할 수 없습니다.`);
+}
 const id = (prefix: string) => `${prefix}-${randomUUID().slice(0, 12)}`;
 const text = z.string().trim().min(1).max(5000);
+const commandTargetKind = z.enum(Object.keys(targetLabels) as [CommandTargetKind, ...CommandTargetKind[]]);
 const taskDescription = z.string().trim().min(1).max(20_000);
 const attachmentIdsInput = z.array(text).max(30);
 const performanceFields = { title: z.string().trim().max(150).optional(), description: text.max(500, '성과 내용은 500자 이내로 입력해 주세요.'), evidence: z.string().trim().max(5000).optional(), attachmentIds: attachmentIdsInput.optional(), metricName: z.string().max(150).optional(), value: z.number().finite().optional(), unit: z.string().max(50).optional() };
@@ -42,8 +52,8 @@ const workflowInput = z.array(z.object({ id: text, title: text.max(150), role: z
 const cycleScheduleInput = z.object({ title: text.max(150).optional(), startDate: date, dueDate: date, scheduleDetails: z.string().trim().max(5000).optional(), steps: z.array(z.object({ stepId: text, startDate: date.optional(), dueDate: date.optional(), scheduleDetails: z.string().trim().max(5000).optional() })).min(1).max(50) });
 const legacyTaskInput = z.object({ title: text.max(150), description: taskDescription, unitId: text, primaryId: text, supportIds: z.array(text).max(30).default([]), reviewerId: text, dueDate: date, frequency: z.enum(['once', 'monthly', 'quarterly', 'half_yearly', 'yearly']), priority: z.enum(['high', 'medium', 'low']).default('medium'), completionCriteria: text.default('필수 체크와 결과물 확인 및 총괄 검토 완료'), card: z.object({ purpose: z.string(), stakeholders: z.string(), evidence: z.string(), responsibility: z.string(), procedure: z.string(), finance: z.string(), documents: z.string(), issues: z.string(), handover: z.string() }).optional(), workflow: z.array(z.object({ id: text, title: text.max(150), role: z.enum(['primary', 'support', 'reviewer']), description: z.string().max(5000), output: z.string().max(1000), required: z.boolean(), dependsOn: z.array(text), checklist: z.array(text).max(50) })).min(1).max(50).optional(), sourceIds: z.array(text).max(50).default([]) });
 const taskInput = legacyTaskInput.extend({ reviewerId: text.optional(), descriptionAttachmentIds: z.array(text).max(10).optional(), ...budgetFields, expenses: expenseInput.optional(), references: referenceInput.optional(), workflow: workflowInput.optional() });
-function parse<T>(schema: z.ZodType<T>, value: unknown): T { const result = schema.safeParse(value); if (!result.success) fail(422, 'VALIDATION_ERROR', result.error.issues.map(e => `${e.path.join('.') || '입력값'}: ${e.message}`).join('\n')); return result.data; }
-function required(payload: Record<string, unknown>, key: string): string { return parse(text, payload[key]); }
+const unitInput = z.object({ title: text.max(100), description: text, departmentId: z.string().optional(), ownerId: z.string().optional() });
+function required(payload: Record<string, unknown>, key: string): string { return parseInput(text, payload[key], { path: key }); }
 function validateDirectiveDate(common: Pick<CommonTask, 'dueDate' | 'distributions'>, instructedOn: string, now: Date) {
   if (instructedOn > koreaDate(now) || instructedOn > common.dueDate) fail(422, 'DIRECTIVE_DATE_RANGE', '지시일자는 오늘과 업무 마감일 이후로 지정할 수 없습니다.');
   if (common.distributions.some(distribution => distribution.monthlyReports?.some(report => report.month < instructedOn.slice(0, 7)))) fail(409, 'DIRECTIVE_REPORT_DATE_CONFLICT', '이미 기록한 월별 실적보다 이후로 지시일자를 변경할 수 없습니다.');
@@ -187,6 +197,36 @@ function detailValidation(task: Task, state: WorkspaceData) {
   for (const entries of [task.expenses ?? [], task.references ?? []]) if (new Set(entries.map(item => item.id)).size !== entries.length) fail(422, 'DUPLICATE_DETAIL', '집행 내역과 근거 항목의 ID는 중복될 수 없습니다.');
   for (const reference of task.references ?? []) if (reference.attachmentId && !state.attachments.some(attachment => attachment.id === reference.attachmentId && attachment.taskId === task.id && !attachment.performanceId)) fail(422, 'REFERENCE_ATTACHMENT_INVALID', '해당 업무에 업로드한 파일만 근거에 연결할 수 있습니다.');
 }
+/** Build and validate a new record without mutating state or claiming files. */
+function buildUnitForCreate(state: WorkspaceData, user: User, input: z.infer<typeof unitInput>, now: Date): Unit {
+  const deptId = input.departmentId ?? user.departmentId;
+  if (deptId !== user.departmentId || (input.ownerId && input.ownerId !== user.id)) scoped(user, deptId);
+  if (!state.departments.some(department => department.id === deptId)) fail(422, 'DEPARTMENT_MISSING', '유효한 소유 부서를 선택해 주세요.');
+  const owner = activeUser(state, input.ownerId ?? user.id, now);
+  if (owner.departmentId !== deptId) fail(422, 'ASSIGNMENT_SCOPE', '소유 부서의 담당자를 선택해 주세요.');
+  const unit: Unit = { id: id('unit'), title: input.title, description: input.description, departmentId: deptId, ownerId: owner.id, color: 'stone', icon: 'folder' };
+  uniqueUnitTitle(state, unit);
+  return unit;
+}
+
+function buildTaskForCreate(state: WorkspaceData, user: User, input: z.infer<typeof taskInput>, now: Date, cardFactory: (description: string) => Task['card'] = defaultCard): Task {
+  const unit = state.units.find(item => item.id === input.unitId);
+  if (!unit) fail(422, 'UNIT_REQUIRED', '단위업무를 선택해 주세요.');
+  if (unit.departmentId !== user.departmentId && user.role !== 'admin') fail(403, 'OUTSIDE_SCOPE', '소속 부서의 단위업무를 선택해 주세요.');
+  personalTargetUnit(state, user, unit.id, unit.departmentId);
+  const resolvedBudget = resolveTaskBudget(state, undefined, input);
+  const storedInput = { ...input }; delete storedInput.budgetItemId;
+  const task: Task = {
+    ...storedInput, ...resolvedBudget, reviewerId: taskReviewer(state, unit.departmentId, input.primaryId, now),
+    id: id('task'), code: `WK-${String(state.tasks.length + 1).padStart(3, '0')}`, departmentId: unit.departmentId,
+    status: 'draft', version: 1, tags: [], card: input.card ?? cardFactory(input.description),
+    workflow: (input.workflow ?? defaultWorkflow({ hasSupport: input.supportIds.length > 0 })).map(step => ({ ...step, done: false })),
+    versions: [], createdAt: now.toISOString(), updatedAt: now.toISOString(),
+  };
+  validateAssignments(state, user, task, now); detailValidation(task, state); validateWorkflow(task, state);
+  validateDescriptionAttachments(state, user, task.id, task.descriptionAttachmentIds);
+  return task;
+}
 /** Treat omitted optional defaults as the same stored configuration. */
 function comparableTaskConfiguration(task: Task) {
   return JSON.parse(JSON.stringify({
@@ -206,6 +246,30 @@ function validateCycleSchedule(workflow: WorkflowStep[], input: z.infer<typeof c
 function scheduledWorkflow(workflow: WorkflowStep[], input: z.infer<typeof cycleScheduleInput>): WorkflowStep[] {
   return workflow.map(step => { const schedule = input.steps.find(item => item.stepId === step.id)!; return { ...step, startDate: schedule.startDate, dueDate: schedule.dueDate, scheduleDetails: schedule.scheduleDetails }; });
 }
+function cycleDeadlineAuditDetail(task: Task, cycleDueDate: string) {
+  return task.dueDate && cycleDueDate > task.dueDate
+    ? ` · 업무 마감일 초과 (업무 마감 ${task.dueDate} · 회차 종료 ${cycleDueDate})`
+    : '';
+}
+/** Procedure edits own the definition; a managed cycle owns its current dates and notes. */
+function preserveManagedSchedule(task: Task, run: Run, workflow: WorkflowStep[]): WorkflowStep[] {
+  const current = runWorkflow(task, run);
+  const merged = workflow.map(step => {
+    const { startDate: _startDate, dueDate: _dueDate, scheduleDetails: _scheduleDetails, ...definition } = step;
+    const schedule = current.find(item => item.id === step.id);
+    return { ...definition, ...(schedule?.startDate !== undefined ? { startDate: schedule.startDate } : {}), ...(schedule?.dueDate !== undefined ? { dueDate: schedule.dueDate } : {}), ...(schedule?.scheduleDetails !== undefined ? { scheduleDetails: schedule.scheduleDetails } : {}) };
+  });
+  const orderChanged = !isDeepStrictEqual(current.map(step => ({ id: step.id, dependsOn: step.dependsOn })), merged.map(step => ({ id: step.id, dependsOn: step.dependsOn })));
+  if (orderChanged) {
+    // Manual reordering deliberately clears dates that contradict the new order.
+    // Recompute against the latest schedule instead of trusting an older draft's omissions.
+    const conflicts = new Set(procedureScheduleConflicts(merged, merged.map(step => ({ ...step, stepId: step.id }))).map(issue => issue.stepId));
+    for (const step of merged) if (conflicts.has(step.id) && run.steps.find(item => item.stepId === step.id)?.status !== 'completed') {
+      delete step.startDate; delete step.dueDate;
+    }
+  }
+  return merged;
+}
 function assertCycleOwner(state: WorkspaceData, task: Task, user: User, action: string, now: Date) {
   if (user.role === 'head' || user.role !== 'admin' && task.primaryId !== user.id && !canActAsDeputy(state, user, task, action, now)) fail(403, 'CYCLE_OWNER_REQUIRED', '세부업무의 담당자·승인된 업무대행자 또는 관리자만 회차 일정을 등록하고 완료할 수 있습니다.');
   if (task.status === 'archived') fail(409, 'TASK_ARCHIVED', '보관된 업무의 회차는 변경할 수 없습니다.');
@@ -221,7 +285,7 @@ function legacyExecution(task: Task, now: Date): Run {
 function commonDistribution(state: WorkspaceData, payload: Record<string, unknown>): { common: CommonTask; distribution: CommonDistribution } {
   const common = state.commonTasks.find(item => item.id === required(payload, 'commonId'));
   if (!common) return fail(404, 'NOT_FOUND', '공통업무를 찾을 수 없습니다.');
-  if (!commonPublished(common)) fail(409, 'COMMON_APPROVAL_REQUIRED', '작성 부서장의 승인 후에만 배부·등록할 수 있습니다.');
+  if (!commonPublished(common)) fail(409, 'COMMON_APPROVAL_REQUIRED', '작성 부서장의 승인 후에만 배정·등록할 수 있습니다.');
   const distribution = common.distributions.find(item => item.id === required(payload, 'distributionId'));
   if (!distribution) return fail(404, 'DISTRIBUTION_NOT_FOUND', '배포 항목을 찾을 수 없습니다.');
   return { common, distribution };
@@ -254,8 +318,8 @@ function createDirectiveTask(state: WorkspaceData, common: CommonTask, distribut
   if (!unit) { unit = { id: id('unit'), title: '지시사항 접수', description: '부서에 도착한 지시사항을 개인 배정 전까지 보관합니다.', departmentId: distribution.departmentId, ownerId: manager.id, color: 'stone', icon: 'folder' }; state.units.push(unit); }
   const task = makeCommonTask(state, common, distribution.departmentId, unit.id, manager.id, head.id, now); state.tasks.unshift(task); distribution.taskId = task.id;
 }
-function notifyAssignment(state: WorkspaceData, userId: string, common: CommonTask, description: string) {
-  state.notifications.unshift({ id: id('notification'), title: common.title, description, type: 'common', targetId: common.id, read: false, userId });
+function notifyAssignment(state: WorkspaceData, userId: string, common: CommonTask, description: string, now: Date, distribution?: CommonDistribution) {
+  state.notifications.unshift({ id: id('notification'), title: common.title, description, type: 'common', targetType: distribution ? 'distribution' : 'common', targetId: distribution?.id ?? common.id, createdAt: now.toISOString(), read: false, userId });
 }
 function requestCommonApproval(state: WorkspaceData, user: User, common: CommonTask, kind: CommonApprovalRequest['kind'], targetDepartmentIds: string[], now: Date) {
   if (common.approvalRequests?.some(request => request.status === 'pending')) fail(409, 'COMMON_APPROVAL_PENDING', '진행 중인 배포 승인 요청을 먼저 처리해 주세요.');
@@ -264,7 +328,7 @@ function requestCommonApproval(state: WorkspaceData, user: User, common: CommonT
   common.originDepartmentId = departmentId;
   const request: CommonApprovalRequest = { id: id('common-approval'), kind, status: 'pending', departmentId, requestedBy: user.id, requestedAt: now.toISOString(), targetDepartmentIds: [...targetDepartmentIds], version: common.version, snapshot: commonApprovalSnapshot(common) };
   common.approvalRequests ??= []; common.approvalRequests.unshift(request);
-  for (const head of state.users.filter(member => member.departmentId === departmentId && member.role === 'head' && member.active && (!member.endsAt || new Date(member.endsAt) > now))) notifyAssignment(state, head.id, common, `${user.name}님이 ${kind === 'initial' ? '공통 세부업무' : '대상 부서 추가'} 배포 승인을 요청했습니다.`);
+  for (const head of state.users.filter(member => member.departmentId === departmentId && member.role === 'head' && member.active && (!member.endsAt || new Date(member.endsAt) > now))) notifyAssignment(state, head.id, common, `${user.name}님이 ${kind === 'initial' ? '공통 세부업무' : '대상 부서 추가'} 배포 승인을 요청했습니다.`, now);
   return request;
 }
 function handoverAccess(state: WorkspaceData, user: User, handoverId: string): Handover { const h = state.handovers.find(item => item.id === handoverId); if (!h || !([h.fromId, h.toId].includes(user.id) || manageDepartment(user, h.departmentId) || manageDepartment(user, h.targetDepartmentId))) return fail(403, 'HANDOVER_ACCESS_DENIED', '인수인계에 접근할 수 없습니다.'); return h; }
@@ -282,7 +346,56 @@ function applyHandover(state: WorkspaceData, h: Handover, now: Date) {
   for (const runId of h.runIds) { const run = state.runs.find(r => r.id === runId); if (!run || !h.taskIds.includes(run.taskId) || run.primaryId !== h.fromId || run.status === 'completed') fail(409, 'RUN_HANDOVER_CONFLICT', '선택한 진행 회차의 담당자 또는 상태가 변경되었습니다.'); run.primaryId = h.toId; run.supportIds = run.supportIds.filter(u => u !== h.toId); }
   h.status = 'completed'; h.appliedAt = now.toISOString(); emit(state, recipient, 'handover.apply', 'handover', h.id, '책임 이전 완료', `효력 ${h.effectiveAt} · 실제 적용 ${h.appliedAt}`, h.departmentId, now);
 }
-export function reconcileDueHandovers(state: WorkspaceData, now = new Date()) { let changed = false; for (const h of state.handovers.filter(item => item.status === 'scheduled' && new Date(item.effectiveAt) <= now)) { const candidate = structuredClone(state); const target = candidate.handovers.find(item => item.id === h.id)!; try { applyHandover(candidate, target, now); Object.assign(state, candidate); changed = true; } catch (error) { const current = state.handovers.find(item => item.id === h.id)!; current.feedback = error instanceof Error ? error.message : '적용 조건을 확인해 주세요.'; } } if (changed) state.revision++; return changed; }
+type RevisionSnapshot = ReturnType<typeof captureEntityRevisions>;
+function captureEntityRevisions(state: WorkspaceData) {
+  return {
+    records: new Map(revisionEntities(state).map(({ target, entity }) => {
+      const { rev: _rev, ...value } = entity;
+      return [commandTargetKey(target), { value: structuredClone(value), rev: entityRevision(entity) }] as const;
+    })),
+    logical: new Map(logicalTargets(state).map(target => [commandTargetKey(target), { target, rev: targetRevision(state, target) }] as const)),
+  };
+}
+function advanceEntityRevisions(state: WorkspaceData, before: RevisionSnapshot): TargetRevisionChange[] {
+  // Compare business content before touching any rev, including parent catalog snapshots.
+  const updates = revisionEntities(state).map(({ target, entity }) => {
+    const previous = before.records.get(commandTargetKey(target));
+    const { rev: _rev, ...value } = entity;
+    return { target, entity, previous, changed: !previous || !isDeepStrictEqual(previous.value, value) };
+  });
+  const changes: TargetRevisionChange[] = [];
+  for (const { target, entity, previous, changed } of updates) {
+    if (changed) {
+      entity.rev = (previous?.rev ?? 0) + 1;
+      changes.push({ ...target, fromRev: previous?.rev ?? 0, toRev: entity.rev });
+    } else if (previous!.rev > 0) entity.rev = previous!.rev;
+    else delete entity.rev;
+  }
+  const logical = new Map(before.logical);
+  for (const target of logicalTargets(state)) if (!logical.has(commandTargetKey(target))) logical.set(commandTargetKey(target), { target, rev: 0 });
+  for (const { target, rev: fromRev } of logical.values()) {
+    const toRev = targetRevision(state, target);
+    if (fromRev !== toRev) changes.push({ ...target, fromRev, toRev });
+  }
+  return changes;
+}
+export function hasDueHandovers(state: Pick<WorkspaceData, 'handovers'>, now = new Date()): boolean {
+  return state.handovers.some(handover => handover.status === 'scheduled' && new Date(handover.effectiveAt) <= now);
+}
+export function reconcileDueHandovers(state: WorkspaceData, now = new Date()) {
+  const due = state.handovers.filter(item => item.status === 'scheduled' && new Date(item.effectiveAt) <= now);
+  if (!due.length) return false;
+  const before = captureEntityRevisions(state);
+  let applied = false;
+  for (const h of due) {
+    const candidate = structuredClone(state); const target = candidate.handovers.find(item => item.id === h.id)!;
+    try { applyHandover(candidate, target, now); Object.assign(state, candidate); applied = true; }
+    catch (error) { const current = state.handovers.find(item => item.id === h.id)!; current.feedback = error instanceof Error ? error.message : '적용 조건을 확인해 주세요.'; }
+  }
+  const changed = advanceEntityRevisions(state, before).length > 0;
+  if (changed) state.revision++;
+  return applied;
+}
 
 function departmentDivisionReadModel(state: WorkspaceData, departmentId: string, now: Date): DepartmentDivisionReadModel {
   const plan = departmentWorkPlan(state, departmentId);
@@ -301,9 +414,11 @@ function departmentDivisionReadModel(state: WorkspaceData, departmentId: string,
 
 export function getWorkspace(state: WorkspaceData, userId: string, now = new Date()): Workspace {
   const user = activeUser(state, userId, now); const tasks = state.tasks.filter(t => canReadTask(state, user, t, now)).map(task => {
+    const latestRun = latestTaskRun(state, task.id);
+    const view = latestRun ? { ...task, cycleStartDate: latestRun.startDate, cycleDueDate: latestRun.dueDate } : task;
     const run = taskExecution(state, task).run;
-    if (!run || run.definitionVersion !== task.version || run.steps.length !== task.workflow.length || task.workflow.some(step => !run.steps.some(item => item.stepId === step.id))) return task;
-    return { ...task, dueDate: run.dueDate, workflow: run.workflowSnapshot ? runWorkflow(task, run) : task.workflow.map(step => ({ ...step, done: run.steps.find(item => item.stepId === step.id)?.status === 'completed' })) };
+    if (!run || run.definitionVersion !== task.version || run.steps.length !== task.workflow.length || task.workflow.some(step => !run.steps.some(item => item.stepId === step.id))) return view;
+    return { ...view, workflow: run.workflowSnapshot ? runWorkflow(task, run) : task.workflow.map(step => ({ ...step, done: run.steps.find(item => item.stepId === step.id)?.status === 'completed' })) };
   }); const taskIds = new Set(tasks.map(t => t.id)); const runs = state.runs.filter(r => taskIds.has(r.taskId));
   const deptIds = new Set(user.role === 'admin' ? state.departments.map(d => d.id) : [user.departmentId]); const audit = state.audit.filter(e => ((isManager(user) && deptIds.has(e.departmentId)) || e.actorId === user.id) && (!e.action.startsWith('performance.') || e.actorId === user.id || approveDepartment(user, e.departmentId)));
   const canSeeCommonRequests = (common: CommonTask) => user.role === 'admin' || common.managerId === user.id || ['head', 'manager'].includes(user.role) && commonOriginDepartment(state, common) === user.departmentId;
@@ -344,13 +459,32 @@ export function getWorkspace(state: WorkspaceData, userId: string, now = new Dat
     handovers, workTransfers, commonTasks,
     sources: state.sources.filter(s => canReadSource(state, user, s, now)), performances: state.performances.filter(p => p.authorId === user.id || user.role === 'admin' || (user.role === 'head' ? p.departmentId === user.departmentId : !p.period && taskIds.has(p.taskId))), delegations: state.delegations.filter(d => [d.fromId, d.toId, d.requestedBy].includes(user.id) || manageDepartment(user, d.departmentId ?? state.tasks.find(task => task.id === d.taskId)?.departmentId ?? '')), audit, performanceSubmissionStatuses,
     notifications: state.notifications.filter(n => n.userId === user.id), attachments: state.attachments.filter(a => canReadAttachment(state, user, a, now)).map(a => ({ ...a, storageKey: '' })), releases: state.releases ?? [], unitScorePlans: (state.unitScorePlans ?? []).filter(canReadEvaluation), unitEvaluations: (state.unitEvaluations ?? []).filter(canReadEvaluation),
-    mode: process.env.DATABASE_URL ? 'connected' : 'local', integrations: { database: process.env.DATABASE_URL ? 'Neon PostgreSQL 연결' : '로컬 파일 저장', auth: process.env.IEUM_PROTOTYPE_MODE === 'true' ? '프로토타입 역할 선택' : process.env.NEON_AUTH_BASE_URL ? 'Neon 인증 연결' : '로컬 데모 계정', storage: process.env.IEUM_STORAGE_PROVIDER === 'neon' ? (['AWS_ENDPOINT_URL_S3', 'AWS_REGION', 'AWS_ACCESS_KEY_ID', 'AWS_SECRET_ACCESS_KEY'].every(key => process.env[key]?.trim()) ? 'Neon Object Storage 연결 설정됨' : 'Neon 저장소 설정 필요') : process.env.VERCEL ? '미연결 · Neon 저장소 설정 필요' : '로컬 격리 저장', bizrouter: process.env.BIZROUTER_API_KEY?.trim() && process.env.BIZROUTER_MODEL?.trim() ? '연결 설정됨 · 호출 미검증' : process.env.BIZROUTER_API_KEY?.trim() ? '모델 설정 필요 · 수기 작성 가능' : '미연결 · 수기 작성 가능', law: process.env.LAW_API_OC ? '키 설정됨 · 호출 미검증' : '미연결 · 수기 등록 가능' }, serverTime: now.toISOString() };
+    mode: resolveStoreMode() === 'neon' ? 'connected' : 'local', integrations: { database: resolveStoreMode() === 'neon' ? 'Neon PostgreSQL 연결' : '로컬 파일 저장', auth: process.env.IEUM_PROTOTYPE_MODE === 'true' ? '프로토타입 역할 선택' : process.env.NEON_AUTH_BASE_URL ? 'Neon 인증 연결' : '로컬 데모 계정', storage: resolveAttachmentStoreMode() === 'neon' ? (['AWS_ENDPOINT_URL_S3', 'AWS_REGION', 'AWS_ACCESS_KEY_ID', 'AWS_SECRET_ACCESS_KEY'].every(key => process.env[key]?.trim()) ? 'Neon Object Storage 연결 설정됨' : 'Neon 저장소 설정 필요') : process.env.VERCEL ? '미연결 · Neon 저장소 설정 필요' : '로컬 격리 저장', bizrouter: process.env.BIZROUTER_API_KEY?.trim() && process.env.BIZROUTER_MODEL?.trim() ? '연결 설정됨 · 호출 미검증' : process.env.BIZROUTER_API_KEY?.trim() ? '모델 설정 필요 · 수기 작성 가능' : '미연결 · 수기 작성 가능', law: process.env.LAW_API_OC ? '키 설정됨 · 호출 미검증' : '미연결 · 수기 등록 가능' }, serverTime: now.toISOString() };
 }
 
-export function executeCommand(state: WorkspaceData, userId: string, raw: unknown, now = new Date()): void {
-  const user = activeUser(state, userId, now); const command: Command = parse(z.object({ type: text, payload: z.record(z.string(), z.unknown()), expectedRevision: z.number().int().nonnegative(), requestId: text.max(150) }), raw);
-  const fingerprint = createHash('sha256').update(JSON.stringify({ type: command.type, payload: command.payload })).digest('hex'); const prior = state.processedRequests.find(r => r.id === command.requestId && r.actorId === user.id); if (prior) { if (prior.fingerprint !== fingerprint) fail(409, 'IDEMPOTENCY_CONFLICT', '동일한 요청 ID에 다른 내용이 전달되었습니다.'); return; }
-  if (command.expectedRevision !== state.revision) fail(409, 'VERSION_CONFLICT', '다른 변경이 먼저 저장되었습니다. 새로고침한 후 다시 시도해 주세요.');
+export function executeCommand(state: WorkspaceData, userId: string, raw: unknown, now = new Date()): TargetRevisionChange[] {
+  const user = activeUser(state, userId, now); const command: Command = parseInput(z.object({ type: text, payload: z.record(z.string(), z.unknown()), expectedRevision: z.number().int().nonnegative(), expected: z.object({ kind: commandTargetKind, id: text, rev: z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER) }).optional(), requestId: text.max(150) }), raw);
+  const parse = <T>(schema: z.ZodType<T>, value: unknown): T => parseInput(schema, value, { labels: commandValidationLabels(command.type) });
+  const required = (payload: Record<string, unknown>, key: string): string => parseInput(text, payload[key], { path: key, labels: commandValidationLabels(command.type) });
+  let importInput: WorkImportInput | undefined;
+  if (command.type === 'work.import') {
+    const validated = validateWorkImport(command.payload);
+    if (!validated.success) throw new DomainError(422, 'VALIDATION_ERROR', validated.issues[0]?.message ?? '등록할 업무 내용을 확인해 주세요.', validated.issues);
+    importInput = validated.data;
+  }
+  // A response-loss retry may have a new transport request ID. The reviewed import owns a stable identity.
+  const requestKey = importInput ? `work.import:${importInput.importId}` : command.requestId;
+  const fingerprint = createHash('sha256').update(importInput ? `work.import\n${canonicalWorkImport(importInput)}` : JSON.stringify({ type: command.type, payload: command.payload })).digest('hex');
+  const prior = state.processedRequests.find(request => request.id === requestKey && request.actorId === user.id);
+  if (prior) { if (prior.fingerprint !== fingerprint) fail(409, 'IDEMPOTENCY_CONFLICT', '동일한 요청 ID에 다른 내용이 전달되었습니다.'); return []; }
+  const target = commandTarget(command.type, command.payload, { actorId: user.id, departmentId: user.departmentId, delegations: state.delegations });
+  if (command.expected) {
+    if (!target || commandTargetKey(target) !== commandTargetKey(command.expected)) fail(422, 'COMMAND_TARGET_MISMATCH', '저장할 대상과 변경 확인 대상이 다릅니다. 입력 내용을 확인해 주세요.');
+    if (targetRevision(state, target) !== command.expected.rev) fail(409, 'TARGET_CONFLICT', `이 ${targetLabels[target.kind]} 내용을 다른 사용자가 먼저 수정했습니다. 최신 내용을 불러왔으니 변경 내용을 확인한 뒤 다시 저장해 주세요.`);
+  } else if (target) console.warn('[ieum] Command missing expected target revision:', command.type, target.kind);
+  // The bundled catalog already exists logically before its first persisted edit.
+  // Include it in that command's baseline so untouched items keep revision zero.
+  const before = captureEntityRevisions(command.type.startsWith('budget.') && !state.budgetCatalog ? { ...state, budgetCatalog: getBudgetCatalog(state) } : state);
   const p = command.payload; let targetId = ''; let departmentId = user.departmentId; let detail = ''; let title = '';
   assertDefinitionCommand(state, user, command.type, p);
   switch (command.type) {
@@ -396,12 +530,36 @@ export function executeCommand(state: WorkspaceData, userId: string, raw: unknow
       targetId = deptId; departmentId = deptId; break;
     }
     case 'unit.create': {
-      const input = parse(z.object({ title: text.max(100), description: text, departmentId: z.string().optional(), ownerId: z.string().optional() }), p); const deptId = input.departmentId ?? user.departmentId;
-      if (deptId !== user.departmentId || (input.ownerId && input.ownerId !== user.id)) scoped(user, deptId);
-      if (!state.departments.some(d => d.id === deptId)) fail(422, 'DEPARTMENT_MISSING', '유효한 소유 부서를 선택해 주세요.');
-      const owner = activeUser(state, input.ownerId ?? user.id, now); if (owner.departmentId !== deptId) fail(422, 'ASSIGNMENT_SCOPE', '소유 부서의 담당자를 선택해 주세요.');
-      const unit: Unit = { id: id('unit'), title: input.title, description: input.description, departmentId: deptId, ownerId: owner.id, color: 'stone', icon: 'folder' }; uniqueUnitTitle(state, unit);
-      state.units.push(unit); targetId = unit.id; departmentId = deptId; detail = unit.title; title = '단위업무 등록'; break;
+      const unit = buildUnitForCreate(state, user, parse(unitInput, p), now);
+      state.units.push(unit); targetId = unit.id; departmentId = unit.departmentId; detail = unit.title; title = '단위업무 등록'; break;
+    }
+    case 'work.import': {
+      assertDefinitionWritable(state, user, user.departmentId);
+      // Resolve the current reviewer at commit time, never from model output or a stale preview.
+      taskReviewer(state, user.departmentId, user.id, now);
+      const input = importInput!;
+      const staged = { ...state, units: [...state.units], tasks: [...state.tasks] };
+      const created: { unitId: string; taskIds: string[] }[] = [];
+      for (const [index, unitDraft] of input.units.entries()) {
+        let unit: Unit;
+        try { unit = buildUnitForCreate(staged, user, { title: unitDraft.title, description: unitDraft.description }, now); }
+        catch (error) {
+          if (error instanceof DomainError && error.code === 'DUPLICATE_UNIT') throw new DomainError(error.status, error.code, error.message, [{ path: `units.${index}.title`, message: error.message }]);
+          throw error;
+        }
+        staged.units.push(unit);
+        const taskIds: string[] = [];
+        for (const taskDraft of unitDraft.tasks) {
+          const task = buildTaskForCreate(staged, user, parse(taskInput, { ...taskDraft, unitId: unit.id, primaryId: user.id, supportIds: [], sourceIds: [], completionCriteria: '필수 절차 수행 및 검토 완료' }), now, workImportNeutralCard);
+          staged.tasks.unshift(task); taskIds.push(task.id);
+        }
+        created.push({ unitId: unit.id, taskIds });
+      }
+      // All validation above is read-only against existing records. Publish both collections together.
+      state.units = staged.units; state.tasks = staged.tasks;
+      targetId = input.importId; departmentId = user.departmentId; title = '개인 업무 일괄 등록';
+      detail = JSON.stringify({ importId: input.importId, unitCount: created.length, taskCount: created.reduce((count, unit) => count + unit.taskIds.length, 0), created });
+      break;
     }
     case 'unit.update': {
       const unit = ownedUnit(state, user, required(p, 'unitId')); const input = parse(z.object({ title: text.max(100), description: text }), p);
@@ -496,7 +654,7 @@ export function executeCommand(state: WorkspaceData, userId: string, raw: unknow
           const distribution: CommonDistribution = { id: id('dist'), departmentId: target, status: 'pending', distributedAt: now.toISOString() };
           common.departmentIds.push(target); common.distributions.push(distribution);
           if (common.kind === 'directive') createDirectiveTask(state, common, distribution, now);
-          for (const manager of state.users.filter(member => member.departmentId === target && member.role === 'manager' && member.active && (!member.endsAt || new Date(member.endsAt) > now))) notifyAssignment(state, manager.id, common, '작성 부서장이 승인한 업무가 도착했습니다. 담당 팀을 배부해 주세요.');
+          for (const manager of state.users.filter(member => member.departmentId === target && member.role === 'manager' && member.active && (!member.endsAt || new Date(member.endsAt) > now))) notifyAssignment(state, manager.id, common, '작성 부서장이 승인한 업무가 도착했습니다. 담당 팀을 배정해 주세요.', now, distribution);
         }
         if (request.kind === 'initial') common.publicationStatus = 'approved';
         request.status = 'approved'; title = '부서장 승인 · 공통 세부업무 배포';
@@ -505,14 +663,14 @@ export function executeCommand(state: WorkspaceData, userId: string, raw: unknow
         request.status = 'rejected'; title = '공통 세부업무 배포 요청 반려';
       }
       request.resolvedBy = user.id; request.resolvedAt = now.toISOString(); request.reason = reason;
-      for (const recipient of new Set([common.managerId, request.requestedBy])) notifyAssignment(state, recipient, common, request.status === 'approved' ? '부서장이 배포를 승인했습니다. 지정 부서에서 배부를 시작합니다.' : `부서장이 배포 요청을 반려했습니다. ${reason}`);
+      for (const recipient of new Set([common.managerId, request.requestedBy])) notifyAssignment(state, recipient, common, request.status === 'approved' ? '부서장이 배포를 승인했습니다. 지정 부서에서 배정을 시작합니다.' : `부서장이 배포 요청을 반려했습니다. ${reason}`, now);
       targetId = common.id; departmentId = request.departmentId; detail = JSON.stringify({ requestId: request.id, status: request.status, targetDepartmentIds: request.targetDepartmentIds, reason }); break;
     }
     case 'task.create': {
-      const input = parse(taskInput, p); const unit = state.units.find(u => u.id === input.unitId); if (!unit) fail(422, 'UNIT_REQUIRED', '단위업무를 선택해 주세요.'); if (unit.departmentId !== user.departmentId && user.role !== 'admin') fail(403, 'OUTSIDE_SCOPE', '소속 부서의 단위업무를 선택해 주세요.');
-      personalTargetUnit(state, user, unit.id, unit.departmentId);
-      const resolvedBudget = resolveTaskBudget(state, undefined, input); delete input.budgetItemId;
-      const task: Task = { ...input, ...resolvedBudget, reviewerId: taskReviewer(state, unit.departmentId, input.primaryId, now), id: id('task'), code: `WK-${String(state.tasks.length + 1).padStart(3, '0')}`, departmentId: unit.departmentId, status: 'draft', version: 1, tags: [], card: input.card ?? defaultCard(input.description), workflow: (input.workflow ?? defaultWorkflow({ hasSupport: input.supportIds.length > 0 })).map(s => ({ ...s, done: false })), versions: [], createdAt: now.toISOString(), updatedAt: now.toISOString() }; validateAssignments(state, user, task, now); detailValidation(task, state); validateWorkflow(task, state); validateDescriptionAttachments(state, user, task.id, task.descriptionAttachmentIds); const deputy = p.deputy === undefined ? undefined : prepareTaskDelegation(state, user, task, p.deputy, now, fail); state.tasks.unshift(task); claimDescriptionAttachments(state, task); if (deputy) saveEmbeddedDelegation(state, user, deputy, now); targetId = task.id; departmentId = task.departmentId; detail = task.title; title = '새 업무 초안 작성'; break;
+      const task = buildTaskForCreate(state, user, parse(taskInput, p), now);
+      const deputy = p.deputy === undefined ? undefined : prepareTaskDelegation(state, user, task, p.deputy, now, fail);
+      state.tasks.unshift(task); claimDescriptionAttachments(state, task); if (deputy) saveEmbeddedDelegation(state, user, deputy, now);
+      targetId = task.id; departmentId = task.departmentId; detail = task.title; title = '새 업무 초안 작성'; break;
     }
     case 'task.delete': {
       const task = getTask(state, user, required(p, 'taskId'), now);
@@ -599,22 +757,26 @@ export function executeCommand(state: WorkspaceData, userId: string, raw: unknow
           if (!next || next.title !== completed.title || next.role !== completed.role || next.description !== completed.description || next.output !== completed.output || next.required !== completed.required || JSON.stringify(next.dependsOn) !== JSON.stringify(completed.dependsOn) || JSON.stringify(next.checklist) !== JSON.stringify(completed.checklist) || !isDeepStrictEqual(next.attachmentIds ?? completed.attachmentIds ?? [], completed.attachmentIds ?? [])) fail(409, 'COMPLETED_STEP_LOCKED', '완료한 절차의 기준과 체크리스트는 보존됩니다. 미완료 절차를 수정하거나 후속 보완 절차를 추가해 주세요.');
         }
         input.workflow = input.workflow.map(step => { const previous = task.workflow.find(old => old.id === step.id); return { ...step, ...(step.attachmentIds === undefined && previous?.attachmentIds ? { attachmentIds: [...previous.attachmentIds] } : {}), done: previous?.done ?? false }; });
+        const activeRun = taskExecution(state, task).run;
+        if (activeRun?.cycleManaged && activeRun.status !== 'completed') input.workflow = preserveManagedSchedule(task, activeRun, input.workflow);
       }
       const resolvedBudget = resolveTaskBudget(state, task, input); delete input.budgetItemId;
       const next = { ...task, ...input, ...resolvedBudget, reviewerId: taskReviewer(state, task.departmentId, task.primaryId, now), version: Math.max(task.version, ...task.versions.map(version => version.version)) + 1 }; detailValidation(next, state); validateWorkflow(next, state); validateDescriptionAttachments(state, user, task.id, next.descriptionAttachmentIds); const deputy = p.deputy === undefined ? undefined : prepareTaskDelegation(state, user, next, p.deputy, now, fail);
       if (!deputy && isDeepStrictEqual(comparableTaskConfiguration(next), comparableTaskConfiguration(task))) {
         // Remember the idempotency key without producing a new business event or revision.
         state.processedRequests.push({ id: command.requestId, fingerprint, actorId: user.id });
-        return;
+        return [];
       }
       if (!task.versions.length) task.versions.push(snapshot(task, undefined, now.toISOString()));
       Object.assign(task, next); claimDescriptionAttachments(state, task); if (deputy) saveEmbeddedDelegation(state, user, deputy, now); task.updatedAt = now.toISOString();
       task.versions.push(snapshot(task, user.id, now.toISOString())); invalidateHandoverConfirmations(state, task.id);
       // Active execution follows this plan; each earlier plan remains in versions.
       for (const run of state.runs.filter(r => r.taskId === task.id && r.status !== 'completed')) {
-        const preservedWorkflow = input.workflow ? structuredClone(task.workflow) : runWorkflow(task, run);
+        const preservedWorkflow = input.workflow ? run.cycleManaged ? preserveManagedSchedule(task, run, task.workflow) : structuredClone(task.workflow) : runWorkflow(task, run);
         run.definitionVersion = task.version; run.workflowSnapshot = preservedWorkflow; run.updatedAt = now.toISOString(); if (!run.cycleManaged) run.title = `${task.title} · ${run.period}`;
-        if (input.dueDate !== undefined) run.dueDate = task.dueDate;
+        // Legacy runs have no separate schedule; preserve their historical deadline sync.
+        // Explicitly managed cycles keep their own dates when the task deadline changes.
+        if (input.dueDate !== undefined && !run.cycleManaged) run.dueDate = task.dueDate;
         run.steps = task.workflow.map(step => {
           const prior = run.steps.find(s => s.stepId === step.id);
           return { id: prior?.id ?? `exec-${step.id}`, stepId: step.id, title: step.title, role: step.role, status: prior?.status ?? 'pending', output: prior?.output, completedAt: prior?.completedAt, completedBy: prior?.completedBy, checklist: step.checklist.map((title, i) => prior?.checklist.find(c => c.title === title) ?? { id: `${step.id}-c${i + 1}`, title, done: false }) };
@@ -684,7 +846,7 @@ export function executeCommand(state: WorkspaceData, userId: string, raw: unknow
       if (!run.steps.some(step => step.status === 'completed' || step.checklist.some(check => check.done))) run.status = input.startDate > koreaDate(now) ? 'scheduled' : 'in_progress';
       if (!cycles.latest) state.runs.unshift(run);
       syncTaskExecution(state, task, run, now);
-      targetId = run.id; departmentId = run.departmentId; detail = `${run.title} · ${input.startDate}~${input.dueDate}`; title = '업무 회차 일정 및 세부 내용 등록'; break;
+      targetId = run.id; departmentId = run.departmentId; detail = `${run.title} · ${input.startDate}~${input.dueDate}${cycleDeadlineAuditDetail(task, input.dueDate)}`; title = '업무 회차 일정 및 세부 내용 등록'; break;
     }
     case 'run.completeCycle': {
       const task = getTask(state, user, required(p, 'taskId'), now); ensureRegistered(state, task); assertCycleOwner(state, task, user, command.type, now);
@@ -713,8 +875,10 @@ export function executeCommand(state: WorkspaceData, userId: string, raw: unknow
       validateCycleSchedule(workflow, input);
       let previous = cycles.latest;
       if (!previous) {
-        // Older completed work may exist only as task flags. Archive that known
-        // state without inventing completion actors or timestamps.
+        // Older completed work may exist only as task flags. With no recorded cycle
+        // schedule, the task deadline is the only known historical date. Preserve
+        // that fallback without changing the task deadline or an existing run.
+        // Do not invent completion actors or timestamps.
         previous = createRun({ ...task, versions: [] }, `기존 완료 기록`, task.createdAt);
         previous.id = id('run-history'); previous.status = 'completed'; previous.cycleNumber = 1;
         previous.dueDate = task.dueDate; previous.workflowSnapshot = structuredClone(task.workflow);
@@ -730,7 +894,7 @@ export function executeCommand(state: WorkspaceData, userId: string, raw: unknow
       run.status = input.startDate > koreaDate(now) ? 'scheduled' : 'in_progress';
       run.workflowSnapshot = scheduledWorkflow(workflow, input).map(step => ({ ...step, done: false }));
       state.runs.unshift(run); syncTaskExecution(state, task, run, now);
-      targetId = run.id; departmentId = run.departmentId; detail = `${task.title} · ${cycleNumber}회차 · ${input.startDate}~${input.dueDate}`; title = '완료 기록 보존 및 다음 업무 회차 시작'; break;
+      targetId = run.id; departmentId = run.departmentId; detail = `${task.title} · ${cycleNumber}회차 · ${input.startDate}~${input.dueDate}${cycleDeadlineAuditDetail(task, input.dueDate)}`; title = '완료 기록 보존 및 다음 업무 회차 시작'; break;
     }
     case 'run.create': {
       const task = getTask(state, user, required(p, 'taskId'), now); ensureRegistered(state, task); if (!manageDepartment(user, task.departmentId) && task.primaryId !== user.id && !canActAsDeputy(state, user, task, 'run.create', now)) fail(403, 'EXECUTION_DENIED', '회차를 생성할 권한이 없습니다.'); if (!task.versions.length || task.status === 'archived') fail(409, 'UNCONFIRMED_TASK', '유효한 확정 기준이 있는 업무만 회차를 만들 수 있습니다.'); if (state.runs.some(run => run.taskId === task.id && run.cycleManaged)) fail(409, 'CYCLE_COMMAND_REQUIRED', '회차 이력이 있는 업무는 일정 등록 탭의 새 일정 등록을 이용해 주세요.'); const frequency = task.versions.at(-1)?.frequency ?? task.frequency; const period = normalizePeriod(frequency, typeof p.period === 'string' ? p.period : undefined, now); if (!period) fail(422, 'INVALID_PERIOD', '반복 주기에 맞는 기간을 입력해 주세요. 월: 2026-11, 분기: 2026-Q4, 반기: 2026-H2, 연: 2026'); if (state.runs.some(r => r.taskId === task.id && normalizePeriod(frequency, r.period, now) === period)) fail(409, 'DUPLICATE_PERIOD', '해당 기간의 회차가 이미 있습니다.'); const run = createRun(task, period, now.toISOString()); if (p.dueDate && parse(date, p.dueDate) !== run.dueDate) fail(409, 'DEADLINE_CHANGE_REQUIRES_REVIEW', '회차 생성으로 기준 기한을 변경할 수 없습니다. 기준 변경을 검토한 뒤 새 회차를 생성해 주세요.'); run.updatedAt = now.toISOString(); state.runs.unshift(run); syncTaskExecution(state, task, run, now); targetId = run.id; departmentId = run.departmentId; detail = run.title; title = '실행 회차 생성'; break;
@@ -749,7 +913,7 @@ export function executeCommand(state: WorkspaceData, userId: string, raw: unknow
     case 'handover.approve': case 'handover.check': case 'handover.accept': case 'handover.requestChanges': case 'handover.cancel': case 'handover.apply': case 'handover.update': {
       const h = handoverAccess(state, user, required(p, 'handoverId')); targetId = h.id; departmentId = h.departmentId; detail = h.title; if (['completed', 'cancelled'].includes(h.status)) fail(409, 'HANDOVER_FINISHED', '종료된 인수인계는 변경할 수 없습니다.');
       if (command.type !== 'handover.cancel') for (const taskId of h.taskIds) { const task = state.tasks.find(item => item.id === taskId); if (!task) fail(409, 'HANDOVER_CONFLICT', '인계할 업무를 찾을 수 없습니다.'); assertTaskWritable(state, task); }
-      if (command.type === 'handover.approve') { scoped(user, h.departmentId, true); if (h.status !== 'approval') fail(409, 'INVALID_STATE', '승인 검토 중인 인수인계만 승인할 수 있습니다.'); h.approvedBy = user.id; h.approvedAt = now.toISOString(); h.status = 'acceptance'; state.notifications.unshift({ id: id('notification'), title: '인수 확인이 필요해요', description: h.title, type: 'handover', targetId: h.id, read: false, userId: h.toId }); title = '인수인계 승인'; }
+      if (command.type === 'handover.approve') { scoped(user, h.departmentId, true); if (h.status !== 'approval') fail(409, 'INVALID_STATE', '승인 검토 중인 인수인계만 승인할 수 있습니다.'); h.approvedBy = user.id; h.approvedAt = now.toISOString(); h.status = 'acceptance'; state.notifications.unshift({ id: id('notification'), title: '인수 확인이 필요해요', description: h.title, type: 'handover', targetType: 'handover', targetId: h.id, createdAt: now.toISOString(), read: false, userId: h.toId }); title = '인수인계 승인'; }
       if (command.type === 'handover.check') { if (user.id !== h.toId) fail(403, 'RECIPIENT_ONLY', '실제 인수자만 확인할 수 있습니다.'); if (h.status !== 'acceptance') fail(409, 'INVALID_STATE', '승인 후 인수 확인을 진행해 주세요.'); const item = h.checklist.find(c => c.id === required(p, 'checkId')); if (!item) fail(404, 'CHECK_NOT_FOUND', '확인 항목을 찾을 수 없습니다.'); item.checked = parse(z.boolean(), p.checked); title = '인수 자료 확인'; }
       if (command.type === 'handover.accept') { if (user.id !== h.toId) fail(403, 'RECIPIENT_ONLY', '실제 인수자만 인수를 수락할 수 있습니다.'); if (h.status !== 'acceptance' || !h.approvedBy || !h.checklist.every(c => c.checked)) fail(409, 'HANDOVER_NOT_READY', '승인 및 모든 인수 확인 항목을 완료해 주세요.'); h.acceptedBy = user.id; h.acceptedAt = now.toISOString(); h.acceptedRevision = h.revision; h.status = 'scheduled'; applyHandover(state, h, now); title = '인수 수락'; }
       if (command.type === 'handover.requestChanges') { if (user.id !== h.toId && !approveDepartment(user, h.departmentId)) fail(403, 'REVIEW_DENIED', '인수자 또는 승인자만 보완을 요청할 수 있습니다.'); h.feedback = required(p, 'reason'); h.status = 'changes_requested'; h.acceptedBy = undefined; h.acceptedAt = undefined; h.acceptedRevision = undefined; title = '인수인계 보완 요청'; }
@@ -765,7 +929,7 @@ export function executeCommand(state: WorkspaceData, userId: string, raw: unknow
       const team = required(p, 'team'); const lead = activeUser(state, required(p, 'leadId'), now);
       if (lead.departmentId !== distribution.departmentId || lead.role !== 'lead' || lead.team !== team) fail(422, 'TEAM_LEAD_REQUIRED', '해당 부서·팀의 팀장을 선택해 주세요.');
       distribution.team = team; distribution.leadId = lead.id; distribution.status = 'team_assigned'; distribution.teamAssignedAt = now.toISOString();
-      notifyAssignment(state, lead.id, common, '팀에 업무가 배정되었습니다. 수행할 담당자를 지정해 주세요.');
+      notifyAssignment(state, lead.id, common, '팀에 업무가 배정되었습니다. 수행할 담당자를 지정해 주세요.', now, distribution);
       targetId = common.id; departmentId = distribution.departmentId; detail = `${common.title} → ${team}`; title = '부서 담당자의 팀 배정'; break;
     }
     case 'common.assignPerson': {
@@ -775,7 +939,7 @@ export function executeCommand(state: WorkspaceData, userId: string, raw: unknow
       const assignee = activeUser(state, required(p, 'assigneeId'), now);
       if (assignee.departmentId !== distribution.departmentId || assignee.team !== distribution.team || ['head', 'admin'].includes(assignee.role)) fail(422, 'TEAM_MEMBER_REQUIRED', '배정된 팀에 소속된 수행자를 선택해 주세요.');
       distribution.assigneeId = assignee.id; distribution.status = 'person_assigned'; distribution.personAssignedAt = now.toISOString();
-      notifyAssignment(state, assignee.id, common, '개인에게 업무가 도착했습니다. 자신의 단위업무에 등록해 주세요.');
+      notifyAssignment(state, assignee.id, common, '개인에게 업무가 도착했습니다. 자신의 단위업무에 등록해 주세요.', now, distribution);
       targetId = common.id; departmentId = distribution.departmentId; detail = `${common.title} → ${assignee.name}`; title = '팀장의 개인 배정'; break;
     }
     case 'common.register': {
@@ -791,12 +955,12 @@ export function executeCommand(state: WorkspaceData, userId: string, raw: unknow
       if (task) { assertTaskWritable(state, task); task.primaryId = user.id; task.unitId = unit.id; task.reviewerId = head.id; task.updatedAt = now.toISOString(); }
       else { task = makeCommonTask(state, common, distribution.departmentId, unit.id, user.id, head.id, now); state.tasks.unshift(task); }
       validateAssignments(state, user, task, now); validateWorkflow(task, state); distribution.taskId = task.id; distribution.status = 'registered'; distribution.registeredAt = now.toISOString();
-      notifyAssignment(state, common.managerId, common, `${user.name}님이 개인 단위업무에 등록했습니다.`);
+      notifyAssignment(state, common.managerId, common, `${user.name}님이 개인 단위업무에 등록했습니다.`, now, distribution);
       targetId = common.id; departmentId = distribution.departmentId; detail = `${common.title} → ${unit.title}`; title = '개인 단위업무에 세부업무 등록'; break;
     }
     case 'common.assign': {
       const publication = state.commonTasks.find(item => item.id === p.commonId);
-      if (publication && !commonPublished(publication)) fail(409, 'COMMON_APPROVAL_REQUIRED', '작성 부서장의 승인 후에만 배부할 수 있습니다.');
+      if (publication && !commonPublished(publication)) fail(409, 'COMMON_APPROVAL_REQUIRED', '작성 부서장의 승인 후에만 배정할 수 있습니다.');
       if (state.commonTasks.find(c => c.id === p.commonId)?.kind) fail(409, 'STAGED_ASSIGNMENT_REQUIRED', '팀 배정 → 개인 배정 → 단위업무 등록 순서로 진행해 주세요.');
       const common = state.commonTasks.find(c => c.id === required(p, 'commonId')); if (!common) fail(404, 'NOT_FOUND', '공통업무를 찾을 수 없습니다.'); const deptId = typeof p.departmentId === 'string' ? p.departmentId : user.departmentId; scoped(user, deptId); const distribution = common.distributions.find(d => d.departmentId === deptId); if (!distribution || distribution.status !== 'pending') fail(409, 'ALREADY_ASSIGNED', '배정 대기 중인 공통업무가 아닙니다.'); const existing = state.tasks.find(t => t.commonId === common.id && t.departmentId === deptId); if (existing) fail(409, 'EXISTING_BINDING', '기존 부서 업무의 개정으로 연결해야 합니다.');
       const task: Task = { id: id('task'), code: `WK-${String(state.tasks.length + 1).padStart(3, '0')}`, title: common.title, description: common.description, unitId: required(p, 'unitId'), departmentId: deptId, primaryId: required(p, 'primaryId'), supportIds: parse(z.array(text), p.supportIds ?? []), reviewerId: required(p, 'reviewerId'), status: 'draft', priority: 'medium', frequency: common.frequency, dueDate: common.dueDate, tags: ['공통업무'], version: 1, completionCriteria: '공통 필수 기준에 따른 결과 제출과 검토 완료', card: defaultCard(common.description), workflow: commonWorkflow(common.requiredSteps), sourceIds: [], versions: [], commonId: common.id, createdAt: now.toISOString(), updatedAt: now.toISOString() }; validateAssignments(state, user, task, now); state.tasks.unshift(task); distribution.taskId = task.id; distribution.status = 'assigned'; targetId = common.id; departmentId = deptId; detail = common.title; title = '공통업무 부서 배정'; break;
@@ -830,7 +994,7 @@ export function executeCommand(state: WorkspaceData, userId: string, raw: unknow
       const projected = commonDistributionStatus(state, common, distribution, now);
       if (projected.executionStatus === 'completed') fail(409, 'DIRECTIVE_COMPLETED', '완료한 지시사항의 월별 실적은 변경할 수 없습니다. 기존 기록을 확인해 주세요.');
       if (!canRecordDirectiveReport(state, user, common, distribution, now)) fail(403, 'DIRECTIVE_REPORT_DENIED', '진행 중인 지시사항의 현재 담당자만 월별 실적을 입력할 수 있습니다.');
-      const input = parse(z.object({ month: z.string().regex(/^\d{4}-(0[1-9]|1[0-2])$/, '실적 월은 YYYY-MM 형식으로 입력해 주세요.'), achievements: text, nextPlan: z.string().trim().max(5000).default(''), issues: z.string().trim().max(5000).default('') }), p);
+      const input = parse(z.object({ month: z.string().regex(/^\d{4}-(0[1-9]|1[0-2])$/, '실적 월은 연도와 월 형식(예: 2026-11)으로 입력해 주세요.'), achievements: text, nextPlan: z.string().trim().max(5000).default(''), issues: z.string().trim().max(5000).default('') }), p);
       if (input.month < directiveReportStartMonth(common, distribution) || input.month > koreaDate(now).slice(0, 7)) fail(422, 'DIRECTIVE_MONTH_RANGE', '지시일자가 속한 월부터 현재 월까지 실적을 입력할 수 있습니다.');
       const existing = distribution.monthlyReports?.find(report => report.month === input.month);
       if (existing) Object.assign(existing, input, { authorId: user.id, updatedAt: now.toISOString() });
@@ -847,6 +1011,7 @@ export function executeCommand(state: WorkspaceData, userId: string, raw: unknow
       const unitIds = new Set(input.allocations.map(allocation => allocation.unitId));
       if (unitIds.size !== input.allocations.length) fail(422, 'DUPLICATE_SCORE_UNIT', '같은 단위업무를 중복해서 배점할 수 없습니다.');
       if (input.allocations.some(allocation => !units.some(unit => unit.id === allocation.unitId))) fail(403, 'SCORE_OWNER_REQUIRED', '현재 담당 업무 또는 본인의 기존 배점·성과에 연결된 단위업무만 배점할 수 있습니다.');
+      assertNotFutureHalf(input.period, now, '업무 비중');
       if (units.length !== unitIds.size) fail(422, 'SCORE_UNITS_REQUIRED', '모든 활성 단위업무의 배점을 설정해 주세요. 평가 대상이 아닌 단위업무는 0점으로 입력할 수 있습니다.');
       if (input.allocations.reduce((sum, allocation) => sum + Math.round(allocation.maxScore * 100), 0) !== UNIT_SCORE_TOTAL * 100) fail(422, 'SCORE_TOTAL_REQUIRED', '단위업무 배점의 합계는 50점이어야 합니다.');
       const existing = getUnitScorePlan(state, user.id, input.period);
@@ -857,6 +1022,7 @@ export function executeCommand(state: WorkspaceData, userId: string, raw: unknow
     case 'performance.submitPerson': {
       const input = parse(z.object({ period: halfYear, planVersion: z.number().int().positive() }), p);
       if (user.role === 'head' || typeof p.personId === 'string' && p.personId !== user.id) fail(403, 'PERFORMANCE_DENIED', '본인의 반기 성과만 제출할 수 있습니다.');
+      assertNotFutureHalf(input.period, now, '성과');
       if (getUnitEvaluation(state, user.id, input.period)) fail(409, 'EVALUATION_CONFIRMED', '이미 평가가 확정된 반기입니다.');
       const plan = getUnitScorePlan(state, user.id, input.period);
       if (!plan) fail(409, 'SCORE_PLAN_REQUIRED', '모든 단위업무의 업무 비중을 합계 50점으로 먼저 설정해 주세요.');
@@ -872,7 +1038,7 @@ export function executeCommand(state: WorkspaceData, userId: string, raw: unknow
       if (missingPerformanceUnitIds(state, plan.allocations, records, plan.departmentId).length) fail(409, 'UNIT_PERFORMANCE_REQUIRED', '업무 비중이 있는 모든 단위업무에 세부업무 성과를 입력해 주세요. 성과가 없는 단위업무는 비중을 0점으로 설정할 수 있습니다.');
       plan.submittedAt = now.toISOString(); plan.submittedBy = user.id;
       for (const performance of records) if (performance.status === 'draft') performance.status = 'review';
-      for (const head of state.users.filter(member => member.departmentId === plan.departmentId && member.role === 'head' && member.active)) state.notifications.unshift({ id: id('notification'), title: '개인별 반기 성과 평가 요청', description: `${user.name} · ${input.period} · 업무 비중 50점`, type: 'task', targetId: records[0].taskId, destination: { view: 'performance', personId: user.id, period: input.period }, read: false, userId: head.id });
+      for (const head of state.users.filter(member => member.departmentId === plan.departmentId && member.role === 'head' && member.active)) state.notifications.unshift({ id: id('notification'), title: '개인별 반기 성과 평가 요청', description: `${user.name} · ${input.period} · 업무 비중 50점`, type: 'task', targetType: 'performance', targetId: records[0].id, createdAt: now.toISOString(), destination: { view: 'performance', personId: user.id, period: input.period }, read: false, userId: head.id });
       targetId = plan.id; departmentId = plan.departmentId; detail = `${user.name} · ${input.period}`; title = '개인별 반기 성과 제출'; break;
     }
     case 'performance.withdrawSubmission': {
@@ -909,7 +1075,7 @@ export function executeCommand(state: WorkspaceData, userId: string, raw: unknow
       const evaluation = { id: id('unit-evaluation'), planId: plan.id, planVersion: plan.version, personId: person.id, departmentId: plan.departmentId, period: plan.period, scores: plan.allocations.map(allocation => ({ ...allocation, ...input.scores.find(score => score.unitId === allocation.unitId)! })), totalScore: input.scores.reduce((sum, score) => sum + Math.round(score.score * 100), 0) / 100, comment: input.comment, evaluatedBy: user.id, evaluatedAt: now.toISOString(), performanceIds: performances.map(performance => performance.id), performanceSnapshot: performances.map(performance => ({ ...structuredClone(performance), unitId: performanceUnitId(state, performance), taskTitle: state.tasks.find(task => task.id === performance.taskId)?.title ?? '이전 세부업무' })) };
       state.unitEvaluations ??= []; state.unitEvaluations.unshift(evaluation);
       for (const performance of performances) { if (performance.status === 'review') { performance.status = 'confirmed'; performance.approvedBy = user.id; performance.approvedAt = now.toISOString(); } }
-      state.notifications.unshift({ id: id('notification'), title: '개인별 반기 성과 평가 완료', description: `${input.period} · ${evaluation.totalScore}/50점`, type: 'task', targetId: performances[0].taskId, destination: { view: 'performance', personId: person.id, period: input.period }, read: false, userId: person.id });
+      state.notifications.unshift({ id: id('notification'), title: '개인별 반기 성과 평가 완료', description: `${input.period} · ${evaluation.totalScore}/50점`, type: 'task', targetType: 'performance', targetId: performances[0].id, createdAt: now.toISOString(), destination: { view: 'performance', personId: person.id, period: input.period }, read: false, userId: person.id });
       targetId = evaluation.id; departmentId = plan.departmentId; detail = `${person.name} · ${input.period} · ${evaluation.totalScore}/50점`; title = '단위업무별 개인 성과 평가 확정'; break;
     }
     case 'performance.saveHalf': case 'performance.submitHalf': {
@@ -923,6 +1089,7 @@ export function executeCommand(state: WorkspaceData, userId: string, raw: unknow
       const readableFiles = new Set(state.attachments.filter(file => canReadAttachment(state, user, file, now)).map(file => file.id));
       validateLinkedAttachments(state, taskId, input.attachmentIds, 'PERFORMANCE', readableFiles, existing?.id);
       if (existing) {
+        assertNotFutureHalf(input.period, now, '성과');
         if (existing.status === 'confirmed') fail(409, 'PERFORMANCE_CONFIRMED', '이미 확정된 기존 성과는 변경할 수 없습니다.');
         // An author may complete their own historical record without regaining task access.
         Object.assign(existing, input, { title: performanceTitle, evidence: input.evidence ?? existing.evidence, attachmentIds: input.attachmentIds ?? existing.attachmentIds, metricName: input.metricName, value: input.value, unit: input.unit, status: 'draft', score: undefined, comment: undefined, approvedBy: undefined, approvedAt: undefined }); targetId = existing.id; departmentId = existing.departmentId;
@@ -933,6 +1100,7 @@ export function executeCommand(state: WorkspaceData, userId: string, raw: unknow
         const plan = getUnitScorePlan(state, user.id, input.period);
         const recordedDepartment = plan?.departmentId ?? currentPersonPerformances(state, user.id, input.period)[0]?.departmentId;
         if (recordedDepartment && recordedDepartment !== task.departmentId) fail(409, 'PERFORMANCE_DEPARTMENT_MISMATCH', '이 반기는 이전 부서 성과를 정리하는 기록이 있습니다. 현재는 한 반기에 한 부서의 평가를 지원합니다.');
+        assertNotFutureHalf(input.period, now, '성과');
         const performance = { ...input, title: task.title, evidence: input.evidence ?? '', id: id('perf'), taskId: task.id, unitId: task.unitId, runId: state.runs.find(r => r.taskId === task.id)?.id ?? '', authorId: user.id, departmentId: task.departmentId, status: 'draft' as const, createdAt: now.toISOString() };
         state.performances.unshift(performance); targetId = performance.id; departmentId = task.departmentId;
       }
@@ -948,7 +1116,7 @@ export function executeCommand(state: WorkspaceData, userId: string, raw: unknow
       if (perf.status !== 'review') fail(409, 'INVALID_STATE', '평가 대기 중인 성과만 평가할 수 있습니다.');
       const input = parse(z.object({ score: z.number().finite().min(0).max(100), comment: text, decision: z.enum(['confirmed', 'changes_requested']) }), p);
       perf.score = input.score; perf.comment = input.comment; perf.status = input.decision; perf.approvedBy = user.id; perf.approvedAt = now.toISOString();
-      state.notifications.unshift({ id: id('notification'), title: input.decision === 'confirmed' ? '반기 성과 평가 완료' : '반기 성과 보완 요청', description: input.comment, type: 'task', targetId: perf.taskId, read: false, userId: perf.authorId });
+      state.notifications.unshift({ id: id('notification'), title: input.decision === 'confirmed' ? '반기 성과 평가 완료' : '반기 성과 보완 요청', description: input.comment, type: 'task', targetType: 'performance', targetId: perf.id, createdAt: now.toISOString(), read: false, userId: perf.authorId });
       targetId = perf.id; departmentId = perf.departmentId; detail = `${perf.title} · ${input.score}점`; title = input.decision === 'confirmed' ? '부서장 반기 성과 평가' : '반기 성과 보완 요청'; break;
     }
     case 'admin.release': {
@@ -998,7 +1166,8 @@ export function executeCommand(state: WorkspaceData, userId: string, raw: unknow
     case 'reconcile': { if (!isManager(user)) fail(403, 'RECONCILE_DENIED', '예정 작업 보충은 부서담당 이상만 실행할 수 있습니다.'); let count = 0; for (const task of state.tasks.filter(t => !t.deletedAt && state.units.some(u => u.id === t.unitId && !u.deletedAt) && manageDepartment(user, t.departmentId) && t.status === 'confirmed' && t.frequency !== 'once' && !state.runs.some(run => run.taskId === t.id && run.cycleManaged))) { const period = periodFor(task.frequency, now); if (!state.runs.some(r => r.taskId === task.id && normalizePeriod(task.frequency, r.period, now) === period)) { const run = createRun(task, period, now.toISOString()); run.updatedAt = now.toISOString(); state.runs.unshift(run); syncTaskExecution(state, task, run, now); count++; } } targetId = user.departmentId; detail = `현재 기간 회차 ${count}건 보충 · 기존 회차 보존`; title = '예정 작업 보충'; break; }
     default: fail(422, 'UNKNOWN_COMMAND', '지원하지 않는 작업입니다.');
   }
-  emit(state, user, command.type, command.type.split('.')[0], targetId, title, detail, departmentId, now); state.processedRequests.push({ id: command.requestId, fingerprint, actorId: user.id }); state.revision++;
+  emit(state, user, command.type, command.type.split('.')[0], targetId, title, detail, departmentId, now); state.processedRequests.push({ id: requestKey, fingerprint, actorId: user.id }); state.revision++;
+  return advanceEntityRevisions(state, before);
 }
 export function periodFor(frequency: Task['frequency'], now: Date) { const value = koreaDate(now); const year = value.slice(0, 4); const month = Number(value.slice(5, 7)); if (frequency === 'monthly') return `${year}년 ${month}월`; if (frequency === 'quarterly') return `${year}년 ${Math.ceil(month / 3)}분기`; if (frequency === 'half_yearly') return `${year}년 ${month <= 6 ? '상' : '하'}반기`; if (frequency === 'yearly') return `${year}년`; return value; }
 export function denialEvent(state: WorkspaceData, userId: string, command: unknown, error: DomainError) { const user = state.users.find(u => u.id === userId); if (!user) return; const cmd = command as { type?: unknown }; state.audit.unshift({ id: id('audit'), actorId: userId, action: 'command.denied', targetType: 'command', targetId: '', title: '요청 거절', detail: `${typeof cmd?.type === 'string' ? cmd.type : 'invalid'} · ${error.code}`, departmentId: user.departmentId, createdAt: new Date().toISOString() }); }

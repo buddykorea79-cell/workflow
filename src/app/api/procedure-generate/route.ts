@@ -6,6 +6,7 @@ import { transaction } from '@/lib/store';
 import { apiError, json } from '@/lib/api';
 import { readProcedureDocuments, readProcedureOverviewDocuments } from '@/lib/procedure-documents';
 import { generateAiProcedure } from '@/lib/bizrouter';
+import { assertUserRateLimit } from '@/lib/rate-limit';
 import { AI_REFERENCE_LIMIT, procedureOverviewFingerprint, procedureReferenceFingerprint } from '@/lib/procedure-ai-input';
 
 export const runtime = 'nodejs';
@@ -64,6 +65,7 @@ export async function POST(request: NextRequest) {
       return structuredClone({ hasSupport: task.supportIds.length > 0, title: task.title, description: task.description, completionCriteria: task.completionCriteria, overviewAttachments, references: saved, attachments, requiredStepTitles: state.commonTasks.find(common => common.id === task.commonId)?.requiredSteps });
     });
     if (activeRequests.has(userId)) throw new DomainError(429, 'AI_ALREADY_RUNNING', '진행 중인 AI 분석이 끝난 뒤 다시 요청해 주세요.');
+    assertUserRateLimit(userId);
     activeRequests.add(userId); requestKey = userId;
     // Overview files are the primary input and are always read. This switch only controls reference files.
     const overview = await readProcedureOverviewDocuments(source.overviewAttachments);

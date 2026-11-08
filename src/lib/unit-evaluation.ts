@@ -1,8 +1,33 @@
-import type { Performance, UnitPerformanceSnapshot, UnitScoreAllocation, WorkspaceData } from './types';
+import type { Performance, UnitPerformanceSnapshot, UnitScoreAllocation, User, WorkspaceData } from './types';
 
 type EvaluationState = Pick<WorkspaceData, 'users' | 'units' | 'tasks' | 'performances' | 'unitScorePlans' | 'unitEvaluations'>;
 
 export const UNIT_SCORE_TOTAL = 50;
+
+/** Validate the editable values without replacing incomplete input or counting invalid scores. */
+export function validateWeights(units: readonly { id: string }[], values: Readonly<Record<string, string | number | null | undefined>>) {
+  const fieldErrors: Record<string, string> = {};
+  let totalHundredths = 0;
+  for (const unit of units) {
+    const raw = String(values[unit.id] ?? '').trim();
+    const score = Number(raw);
+    if (!raw) fieldErrors[unit.id] = '점수를 입력해 주세요.';
+    else if (!/^[+-]?(?:\d+(?:\.\d*)?|\.\d+)(?:e[+-]?\d+)?$/i.test(raw) || !Number.isFinite(score)) fieldErrors[unit.id] = '숫자로 입력해 주세요.';
+    else if (score < 0) fieldErrors[unit.id] = '0점 이상이어야 합니다.';
+    else if (score > UNIT_SCORE_TOTAL) fieldErrors[unit.id] = '50점 이하여야 합니다.';
+    else {
+      // Use the numeric value's precision: trailing zeros and scientific notation are equivalent.
+      const [significand, exponent = '0'] = String(score).split('e');
+      const decimalPlaces = (significand.split('.')[1]?.length ?? 0) - Number(exponent);
+      if (decimalPlaces > 2) fieldErrors[unit.id] = '소수 둘째 자리까지 입력할 수 있습니다.';
+      else totalHundredths += Math.round(score * 100);
+    }
+  }
+  const total = totalHundredths / 100;
+  const validTotal = totalHundredths === UNIT_SCORE_TOTAL * 100;
+  return { fieldErrors, total, validTotal, canSave: units.length > 0 && !Object.keys(fieldErrors).length && validTotal };
+}
+
 export const getUnitScorePlan = (state: Pick<WorkspaceData, 'unitScorePlans'>, personId: string, period: string) => state.unitScorePlans?.find(plan => plan.personId === personId && plan.period === period);
 export const getUnitEvaluation = (state: Pick<WorkspaceData, 'unitEvaluations'>, personId: string, period: string) => state.unitEvaluations?.find(evaluation => evaluation.personId === personId && evaluation.period === period);
 
@@ -42,6 +67,17 @@ export function currentPersonPerformances(state: Pick<WorkspaceData, 'performanc
 
 export function performanceUnitId(state: Pick<WorkspaceData, 'tasks'>, performance: Performance) {
   return performance.unitId || state.tasks.find(task => task.id === performance.taskId)?.unitId || '';
+}
+
+/** Match the server's review readiness before the reviewer supplies their scores.
+ * Historical authors may be identities in a scoped workspace after moving departments. */
+export function canEvaluateUnitPerformance(state: Pick<WorkspaceData, 'users' | 'tasks' | 'performances' | 'unitScorePlans' | 'unitEvaluations'> & { identities?: readonly { id: string }[] }, user: User, personId: string, period: string, now = new Date()): boolean {
+  if (!user.active || user.endsAt && new Date(user.endsAt) <= now || !['head', 'admin'].includes(user.role) || personId === user.id) return false;
+  if (!state.users.some(person => person.id === personId) && !state.identities?.some(person => person.id === personId)) return false;
+  const plan = getUnitScorePlan(state, personId, period);
+  if (!plan?.submittedAt || user.role !== 'admin' && plan.departmentId !== user.departmentId || getUnitEvaluation(state, personId, period)) return false;
+  const records = currentPersonPerformances(state, personId, period).filter(record => record.departmentId === plan.departmentId);
+  return !records.some(record => record.status === 'changes_requested') && records.some(record => ['review', 'confirmed'].includes(record.status) && plan.allocations.some(allocation => allocation.unitId === performanceUnitId(state, record)));
 }
 
 // Existing long-form records remain submittable; the 500-character limit applies when saving new edits.

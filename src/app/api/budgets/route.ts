@@ -4,7 +4,7 @@ import { assertSameOrigin, currentUserId } from '@/lib/auth';
 import { activeUser, denialEvent, DomainError, executeCommand, getWorkspace } from '@/lib/domain';
 import { getBudgetCatalog, searchBudgets } from '@/lib/budget-catalog';
 import { apiError, json } from '@/lib/api';
-import { transaction } from '@/lib/store';
+import { readState, transaction } from '@/lib/store';
 
 export const runtime = 'nodejs';
 const inputSchema = z.object({
@@ -21,11 +21,10 @@ export async function GET(request: NextRequest) {
     const parsed = inputSchema.safeParse(Object.fromEntries(request.nextUrl.searchParams));
     if (!parsed.success) throw new DomainError(422, 'BUDGET_INVALID_INPUT', '예산 검색어와 연도, 페이지를 확인해 주세요.');
     const input = parsed.data;
-    const result = await transaction(state => {
-      const user = activeUser(state, userId);
-      if (user.role !== 'admin' && (input.includeInactive === 'true' || input.export === 'true')) throw new DomainError(403, 'BUDGET_ADMIN_REQUIRED', '전체 예산 자료 관리와 JSON 내려받기는 관리자만 사용할 수 있습니다.');
-      return input.export === 'true' ? structuredClone(getBudgetCatalog(state)) : searchBudgets(state, { query: input.query, year: input.year, page: input.page, includeInactive: input.includeInactive === 'true' });
-    });
+    const state = await readState();
+    const user = activeUser(state, userId);
+    if (user.role !== 'admin' && (input.includeInactive === 'true' || input.export === 'true')) throw new DomainError(403, 'BUDGET_ADMIN_REQUIRED', '전체 예산 자료 관리와 JSON 내려받기는 관리자만 사용할 수 있습니다.');
+    const result = input.export === 'true' ? structuredClone(getBudgetCatalog(state)) : searchBudgets(state, { query: input.query, year: input.year, page: input.page, includeInactive: input.includeInactive === 'true' });
     const response = json(result);
     if (input.export === 'true') response.headers.set('Content-Disposition', 'attachment; filename="ieum-budget-catalog.json"');
     return response;
@@ -61,9 +60,9 @@ export async function POST(request: NextRequest) {
       activeUser(state, userId);
       const candidate = structuredClone(state);
       try {
-        executeCommand(candidate, userId, command);
+        const commandChanges = executeCommand(candidate, userId, command);
         Object.assign(state, candidate);
-        return { workspace: getWorkspace(state, userId) };
+        return { workspace: { ...getWorkspace(state, userId), commandChanges } };
       } catch (error) {
         if (error instanceof DomainError) { denialEvent(state, userId, command, error); return { error }; }
         throw error;

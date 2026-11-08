@@ -1,0 +1,5 @@
+.accessible-tabs{display:flex;align-items:center;gap:4px;max-width:100%;overflow-x:auto}
+.accessible-tabs [role="tab"]{flex-shrink:0}
+.accessible-tabs [role="tab"]:focus-visible{outline:2px solid var(--brand-primary,#205cd5);outline-offset:-3px}
+[role="tabpanel"][hidden]{display:none}
+[role="tabpanel"]:focus-visible{outline:2px solid var(--brand-primary,#205cd5);outline-offset:3px}

@@ -1,15 +1,24 @@
 'use client';
+import { formatDateFull as day, formatDateTimeFull } from '@/lib/date-format';
 
-import { AdminIntegrations } from './admin-integrations';
-import { AdminBudgetCatalog } from './admin-budget-catalog';
+import { createLazyScreen } from './lazy-screen';
 
 import { useState } from 'react';
 import { ArrowRight, ArrowUpRight, Building2, CalendarDays, Check, CheckCircle2, ChevronDown, ChevronRight, ClipboardCheck, FileText, GitBranch, Layers3, ListChecks, Plus, Search, Send, ShieldCheck, Users } from 'lucide-react';
 import type { CommonTask, CommonDistribution, Performance, User, Workspace } from '@/lib/types';
-import { Badge, Button, EmptyState, Field, Modal, Progress } from './ui';
+import { Badge, Button, EmptyState, Field, Modal, Progress, Tabs, useTabs } from './ui';
 import './management.css';
 import { OrganizationEditor } from './organization-editor';
+import { useNotificationFocus } from './notification-focus';
+import { useUnsavedNavigation } from './unsaved-changes';
 import { isOrganizationUserActive } from '@/lib/organization-management';
+
+const integrationsScreen = createLazyScreen(() => import('./admin-integrations').then(module => module.AdminIntegrations), { label: '연결·테스트', kind: 'section' });
+const budgetScreen = createLazyScreen(() => import('./admin-budget-catalog').then(module => module.AdminBudgetCatalog), { label: '예산 관리', kind: 'section' });
+const AdminIntegrations = integrationsScreen.Component;
+const AdminBudgetCatalog = budgetScreen.Component;
+AdminIntegrations.displayName = 'AdminIntegrations';
+AdminBudgetCatalog.displayName = 'AdminBudgetCatalog';
 
 type CommandFn = (type: string, payload: Record<string, unknown>) => Promise<boolean>;
 type Props = { workspace: Workspace; command: CommandFn };
@@ -18,15 +27,12 @@ type TaskProps = Props & { onOpenTask: (id: string) => void };
 const roleNames: Record<User['role'], string> = { admin: '시스템 관리자', head: '부서장', manager: '부서 담당자', lead: '팀장', member: '업무 담당자' };
 const stages: Record<CommonDistribution['status'], string> = { pending: '부서 접수', team_assigned: '팀 배정 완료', person_assigned: '개인 등록 대기', registered: '수행 중', assigned: '수행 중', submitted: '완료' };
 const stageIndex: Record<CommonDistribution['status'], number> = { pending: 0, team_assigned: 1, person_assigned: 2, registered: 3, assigned: 3, submitted: 4 };
-const day = (value: string) => value ? value.slice(0, 10).replaceAll('-', '.') : '미지정';
 const deptName = (w: Workspace, id: string) => w.departments.find(d => d.id === id)?.name || '부서';
 const userName = (w: Workspace, id?: string) => w.users.find(user => user.id === id)?.name || '미배정';
 
-export { CommonWork } from './common-work';
 
-export { PerformanceView } from './unit-evaluation';
 
-export function OrganizationView({ workspace: w, command }: Props) {
+export function OrganizationView({ workspace: w, command, focusId, focusToken }: Props & { focusId?: string; focusToken?: number }) {
   const isAdmin = w.currentUser.role === 'admin';
   const [departmentId, setDepartmentId] = useState(isAdmin ? 'all' : w.currentUser.departmentId);
   const [role, setRole] = useState('all');
@@ -35,13 +41,20 @@ export function OrganizationView({ workspace: w, command }: Props) {
   const [editor, setEditor] = useState<'department' | 'user' | User | null>(null);
   const departments = w.departments.filter(department => isAdmin || department.id === w.currentUser.departmentId);
   const scopedUsers = w.users.filter(user => isAdmin || user.departmentId === w.currentUser.departmentId);
+  const focusProps = useNotificationFocus(focusId, focusToken, id => {
+    const user = scopedUsers.find(item => item.id === id);
+    if (!user) return;
+    setDepartmentId(user.departmentId); setRole('all'); setQuery('');
+    setProfile(null); setEditor(null);
+    return `person:${user.id}`;
+  });
   const selectedDepartment = isAdmin ? departmentId : w.currentUser.departmentId;
   const users = scopedUsers.filter(user => (selectedDepartment === 'all' || user.departmentId === selectedDepartment) && (role === 'all' || user.role === role) && `${user.name} ${user.id} ${user.email || ''} ${user.team} ${deptName(w, user.departmentId)}`.toLowerCase().includes(query.trim().toLowerCase()));
   const visibleProfile = profile && scopedUsers.find(user => user.id === profile.id);
   const isTeamStaff = (user: User) => user.role !== 'head' && user.role !== 'admin';
   const teamOrder: Record<string, string[]> = { 'dept-plan': ['기획팀', '예산팀', '국회팀'], 'dept-support': ['정보기획팀', '데이터팀', '정보자원팀'], 'dept-innovation': ['혁신팀', '청년팀', '행정지원팀'] };
   const memberOrder: Record<User['role'], number> = { lead: 0, manager: 1, member: 2, head: 3, admin: 4 };
-  return <div className="management-view"><div className="page-heading"><div><p className="eyebrow">People & organization</p><h1>{isAdmin ? '부서별 조직과 구성원' : '우리 부서의 구성원'}</h1><p className="muted">{isAdmin ? '전체 부서의 구성원, 역할과 연락처를 부서별로 확인합니다.' : `${deptName(w, w.currentUser.departmentId)}의 구성원, 역할과 연락처를 확인합니다.`}</p></div><div className="organization-heading-actions"><Badge tone="outline"><Users size={14} />{isAdmin ? '전체 조직' : '내 부서'} · {scopedUsers.length}명</Badge>{isAdmin && <><Button variant="secondary" onClick={() => setEditor('department')}><Building2 size={16} />부서 등록</Button><Button onClick={() => setEditor('user')}><Plus size={16} />구성원 등록</Button></>}</div></div>
+  return <div className="management-view"><div className="page-heading"><div><p className="eyebrow">조직과 구성원</p><h1>{isAdmin ? '부서별 조직과 구성원' : '우리 부서의 구성원'}</h1><p className="muted">{isAdmin ? '전체 부서의 구성원, 역할과 연락처를 부서별로 확인합니다.' : `${deptName(w, w.currentUser.departmentId)}의 구성원, 역할과 연락처를 확인합니다.`}</p></div><div className="organization-heading-actions"><Badge tone="outline"><Users size={14} />{isAdmin ? '전체 조직' : '내 부서'} · {scopedUsers.length}명</Badge>{isAdmin && <><Button variant="secondary" onClick={() => setEditor('department')}><Building2 size={16} />부서 등록</Button><Button onClick={() => setEditor('user')}><Plus size={16} />구성원 등록</Button></>}</div></div>
     {isAdmin ? <div className="management-department-cards">{departments.map((department, index) => <button className={selectedDepartment === department.id ? 'selected' : ''} key={department.id} onClick={() => setDepartmentId(selectedDepartment === department.id ? 'all' : department.id)}><div><span className="management-dept-number">{String(index + 1).padStart(2, '0')}</span><Building2 size={21} /></div><h2>{department.name}</h2><p>{scopedUsers.filter(user => user.departmentId === department.id && isOrganizationUserActive(user, new Date(w.serverTime))).length}명의 활성 구성원<span>{new Set(scopedUsers.filter(user => user.departmentId === department.id && isOrganizationUserActive(user, new Date(w.serverTime)) && isTeamStaff(user)).map(user => user.team)).size}개 팀</span></p><ArrowUpRight size={20} className="management-dept-arrow" /></button>)}</div> : <div className="management-org-scope"><Building2 size={21} /><div><strong>{deptName(w, w.currentUser.departmentId)}</strong><span>우리 부서의 구성원과 권한만 표시됩니다. 전체 조직 조회는 관리자에게 제공됩니다.</span></div><Badge tone="info">내 부서</Badge></div>}
     <div className="management-toolbar"><div className="management-filter-row">{isAdmin && <select aria-label="조직 부서 필터" value={selectedDepartment} onChange={event => setDepartmentId(event.target.value)}><option value="all">전체 부서</option>{departments.map(department => <option value={department.id} key={department.id}>{department.name}</option>)}</select>}<select aria-label="조직 권한 필터" value={role} onChange={event => setRole(event.target.value)}><option value="all">모든 권한</option>{Object.entries(roleNames).map(([key, label]) => <option value={key} key={key}>{label}</option>)}</select><span className="muted">{users.length}명 표시</span></div><label className="management-search"><Search size={17} /><input aria-label="구성원 검색" value={query} onChange={event => setQuery(event.target.value)} placeholder="이름·ID·이메일 검색" /></label></div>
     <div className="management-org-groups">{departments.filter(department => users.some(user => user.departmentId === department.id)).map(department => {
@@ -58,7 +71,7 @@ export function OrganizationView({ workspace: w, command }: Props) {
         <header><div><Building2 size={18} /><h2>{department.name}</h2></div><span>{members.length}명 표시</span></header>
         {groups.map(group => <section className="management-team-group" key={group.key} aria-label={`${department.name} ${group.title}`}>
           <header><h3>{group.title}</h3><span>{group.members.length}명</span></header>
-          <div className="table-wrap"><table className="data-table"><thead><tr><th>구성원 / ID</th><th>팀 / 직위</th><th>권한</th><th>이메일 / 전화번호</th><th>상태</th></tr></thead><tbody>{[...group.members].sort((a, b) => memberOrder[a.role] - memberOrder[b.role] || a.name.localeCompare(b.name, 'ko')).map(user => <tr key={user.id}><td><button className="management-user-link" onClick={() => setProfile(user)}><span className="management-person-avatar">{user.name.slice(0, 1)}</span><span><strong>{user.name}</strong><small>{user.id}</small></span></button></td><td>{user.team}<small>{user.title}</small></td><td><span>{roleNames[user.role]}</span></td><td><span>{user.email || '미등록'}</span><small>{user.phone || '미등록'}</small></td><td><Badge tone={isOrganizationUserActive(user, new Date(w.serverTime)) ? 'success' : 'outline'}>{isOrganizationUserActive(user, new Date(w.serverTime)) ? '활성' : '비활성'}</Badge></td></tr>)}</tbody></table></div>
+          <div className="table-wrap"><table className="data-table"><thead><tr><th>구성원 / ID</th><th>팀 / 직위</th><th>권한</th><th>이메일 / 전화번호</th><th>상태</th></tr></thead><tbody>{[...group.members].sort((a, b) => memberOrder[a.role] - memberOrder[b.role] || a.name.localeCompare(b.name, 'ko')).map(user => <tr key={user.id} {...focusProps(`person:${user.id}`)}><td><button className="management-user-link" onClick={() => setProfile(user)}><span className="management-person-avatar">{user.name.slice(0, 1)}</span><span><strong>{user.name}</strong><small>{user.id}</small></span></button></td><td>{user.team}<small>{user.title}</small></td><td><span>{roleNames[user.role]}</span></td><td><span>{user.email || '미등록'}</span><small>{user.phone || '미등록'}</small></td><td><Badge tone={isOrganizationUserActive(user, new Date(w.serverTime)) ? 'success' : 'outline'}>{isOrganizationUserActive(user, new Date(w.serverTime)) ? '활성' : '비활성'}</Badge></td></tr>)}</tbody></table></div>
         </section>)}
       </section>;
     })}</div>
@@ -93,17 +106,32 @@ const planned = [
 export function AdminView({ workspace: w, command }: Props) {
   const [tab, setTab] = useState('connections');
   const [releaseOpen, setReleaseOpen] = useState(false);
+  const { requestNavigation } = useUnsavedNavigation();
+  const tabs = useTabs({ value: tab, onChange: value => requestNavigation(() => setTab(value)), items: [
+    { value: 'connections', label: '연결·테스트' }, { value: 'budgets', label: '예산 관리' },
+    { value: 'status', label: '구현 현황' },
+    { value: 'releases', label: <>버전 이력<span className="management-tab-count">{(w.releases || []).length}</span></> },
+    { value: 'audit', label: '변경 기록' },
+  ] });
   if (w.currentUser.role !== 'admin') return <EmptyState title="관리자 전용 화면입니다." description="시스템 관리자 계정으로 로그인하면 구현 현황과 버전 이력을 관리할 수 있습니다." />;
+  const preloadTab = (target: EventTarget | null) => {
+    const id = target instanceof Element ? target.closest('[role="tab"]')?.id : undefined;
+    if (id === tabs.tabId('connections')) void integrationsScreen.preload();
+    if (id === tabs.tabId('budgets')) void budgetScreen.preload();
+  };
   const releases = w.releases || [];
   const latest = releases[0];
-  return <div className="management-view"><div className="page-heading"><div><p className="eyebrow">Administration</p><h1>조금씩, 더 나은 온이음.</h1><p className="muted">AI·DB·파일 연결을 시험하고 구현 현황과 변경 이력을 확인합니다.</p></div><Button onClick={() => setReleaseOpen(true)}><Plus size={17} />버전 기록 추가</Button></div>
+  return <div className="management-view" onMouseOver={event => preloadTab(event.target)} onFocusCapture={event => preloadTab(event.target)}><div className="page-heading"><div><p className="eyebrow">시스템 관리</p><h1>조금씩, 더 나은 온이음.</h1><p className="muted">AI·DB·파일 연결을 시험하고 구현 현황과 변경 이력을 확인합니다.</p></div><Button onClick={() => setReleaseOpen(true)}><Plus size={17} />버전 기록 추가</Button></div>
     <div className="management-release-banner"><div className="management-release-icon"><GitBranch size={28} /></div><div><span>최근 기록 버전</span><h2>v{latest?.version || '0.2.0'}</h2><p>{latest?.title || '업무 연결 구조와 디자인 전면 개편'}</p></div><div className="management-release-environment"><Badge tone="outline">{w.mode === 'local' ? '로컬 시연 환경' : '연결 환경'}</Badge><span>{latest ? day(latest.date) : day(w.serverTime)}</span></div></div>
-    <div className="management-admin-tabs tabs">{[['connections', '연결·테스트'], ['budgets', '예산 관리'], ['status', '구현 현황'], ['releases', '버전 이력'], ['audit', '변경 기록']].map(([key, label]) => <button key={key} className={tab === key ? 'active' : ''} onClick={() => setTab(key)}>{label}{key === 'releases' && <span className="management-tab-count">{releases.length}</span>}</button>)}</div>
+    <Tabs tabs={tabs} label="시스템 관리 구분" className="management-admin-tabs tabs" />
+    <div className="management-tab-panel" {...tabs.panelAttrs(tab)}>
     {tab === 'connections' && <AdminIntegrations/>}
     {tab === 'budgets' && <AdminBudgetCatalog workspace={w} command={command}/>}
     {tab === 'status' && <><div className="management-roadmap-heading"><h2>지금 사용할 수 있는 기능</h2><Badge>{implemented.length}개 영역</Badge></div><div className="management-feature-grid">{implemented.map(([title, description], index) => <article key={title}><span className="management-feature-number">{String(index + 1).padStart(2, '0')}</span><div><h3>{title}</h3><p>{description}</p></div><CheckCircle2 size={18} /></article>)}</div><div className="management-roadmap-heading"><h2>다음으로 구현할 기능</h2><span className="muted">프로토타입 기능 확장</span></div><div className="management-planned-list">{planned.map(([title, description, label]) => <article key={title}><span className="management-planned-icon"><ArrowRight size={18} /></span><div><h3>{title}</h3><p>{description}</p></div><Badge tone="outline">{label}</Badge></article>)}</div><div className="management-info"><ShieldCheck size={18} /><p>가상 조직과 역할 선택으로 업무 흐름을 확인하는 프로토타입입니다. 아래에서 DB·첨부파일·AI 연결 설정을 확인할 수 있습니다.</p></div><div className="management-integration-grid">{[['데이터 저장', w.integrations.database], ['인증', w.integrations.auth], ['첨부파일', w.integrations.storage], ['AI 분석', w.integrations.bizrouter], ['법령 연계', w.integrations.law]].map(([label, value]) => <div key={label}><span>{label}</span><strong>{value}</strong></div>)}</div></>}
     {tab === 'releases' && <div className="management-release-list">{releases.map((release, i) => <article key={release.id}><div className="management-release-rail"><span /><i /></div><div className="management-release-entry"><div><h2>v{release.version}</h2>{i === 0 && <Badge tone="dark">최신 기록</Badge>}<span>{day(release.date)}</span></div><h3>{release.title}</h3><p>{release.notes}</p></div></article>)}{!releases.length && <EmptyState title="아직 기록된 버전이 없습니다." description="버전과 변경 내용을 기록해 개발 이력을 남겨 주세요." />}</div>}
-    {tab === 'audit' && <div className="panel management-audit"><div className="panel-header"><h2>최근 변경 기록</h2><span className="muted">{w.audit.length}건</span></div>{w.audit.slice(0, 100).map(a => <article key={a.id}><span className="management-audit-icon"><ListChecks size={17} /></span><div><strong>{a.title}</strong><p>{a.detail}</p><small>{userName(w, a.actorId)} · {deptName(w, a.departmentId)}</small></div><time>{new Date(a.createdAt).toLocaleString('ko-KR', { timeZone: 'Asia/Seoul', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' })}</time></article>)}{!w.audit.length && <EmptyState title="변경 기록이 없습니다." description="업무를 만들고 수정하면 관련 기록이 쌓입니다." />}</div>}
+    {tab === 'audit' && <div className="panel management-audit"><div className="panel-header"><h2>최근 변경 기록</h2><span className="muted">{w.audit.length}건</span></div>{w.audit.slice(0, 100).map(a => <article key={a.id}><span className="management-audit-icon"><ListChecks size={17} /></span><div><strong>{a.title}</strong><p>{a.detail}</p><small>{userName(w, a.actorId)} · {deptName(w, a.departmentId)}</small></div><time>{formatDateTimeFull(a.createdAt)}</time></article>)}{!w.audit.length && <EmptyState title="변경 기록이 없습니다." description="업무를 만들고 수정하면 관련 기록이 쌓입니다." />}</div>}
+    </div>
+    {tabs.items.filter(item => item.value !== tab).map(item => <div key={item.value} {...tabs.panelAttrs(item.value)} />)}
     {releaseOpen && <CreateRelease command={command} onClose={() => setReleaseOpen(false)} />}
   </div>;
 }

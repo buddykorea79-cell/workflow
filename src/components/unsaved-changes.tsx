@@ -1,42 +1,56 @@
 'use client';
 
-import { createContext, useCallback, useContext, useEffect, useId, useMemo, useRef, useState, type ReactNode } from 'react';
-import { Button, Modal } from './ui';
+import { createContext, useCallback, useContext, useEffect, useId, useMemo, useRef, useState, useSyncExternalStore, type ReactNode } from 'react';
+import { createUnsavedChangesRegistry } from '@/lib/unsaved-changes';
+import { ConfirmDialog } from './ui';
 
 type Navigation = () => void;
 type UnsavedContext = {
   register: (id: string, dirty: boolean, label: string) => void;
   draftIds: () => string[];
+  clearDraft: (id: string) => void;
+  clearDrafts: (ids: readonly string[]) => void;
+  confirmDiscard: (preservedIds?: readonly string[]) => Promise<boolean>;
   requestNavigation: (action: Navigation, onCancel?: Navigation, preservedIds?: readonly string[]) => void;
 };
-const Context = createContext<UnsavedContext>({ register: () => undefined, draftIds: () => [], requestNavigation: action => action() });
+const Context = createContext<UnsavedContext>({ register: () => undefined, draftIds: () => [], clearDraft: () => undefined, clearDrafts: () => undefined, confirmDiscard: async () => true, requestNavigation: action => action() });
 const PreservedContext = createContext<readonly string[]>([]);
+type PendingNavigation = { action: Navigation; onCancel?: Navigation; labels: string[] };
 
 /** Keep drafts in their mounted forms until the user explicitly chooses to leave. */
 export function UnsavedChangesProvider({ children }: { children: ReactNode }) {
-  const entries = useRef(new Map<string, string>());
-  const [pending, setPending] = useState<{ action: Navigation; onCancel?: Navigation; labels: string[] } | null>(null);
-  const register = useCallback((id: string, dirty: boolean, label: string) => {
-    if (dirty) entries.current.set(id, label); else entries.current.delete(id);
-  }, []);
+  const [registry] = useState(createUnsavedChangesRegistry);
+  const dirty = useSyncExternalStore(registry.subscribe, registry.hasChanges, () => false);
+  const [pending, setPending] = useState<PendingNavigation | null>(null);
+  const pendingRef = useRef<PendingNavigation | null>(null);
   const requestNavigation = useCallback((action: Navigation, onCancel?: Navigation, preservedIds: readonly string[] = []) => {
-    const labels = [...entries.current].filter(([id]) => !preservedIds.includes(id)).map(([, label]) => label);
+    // Keep the first requested destination while its confirmation is open.
+    if (pendingRef.current) { onCancel?.(); return; }
+    const labels = registry.labels(preservedIds);
     if (!labels.length) { action(); return; }
-    setPending({ action, onCancel, labels: [...new Set(labels)] });
-  }, []);
+    const request = { action, onCancel, labels };
+    pendingRef.current = request; setPending(request);
+  }, [registry]);
+  const confirmDiscard = useCallback((preservedIds: readonly string[] = []) => new Promise<boolean>(resolve => {
+    requestNavigation(() => resolve(true), () => resolve(false), preservedIds);
+  }), [requestNavigation]);
   useEffect(() => {
+    if (!dirty) return;
     const protect = (event: BeforeUnloadEvent) => {
-      if (!entries.current.size) return;
+      if (!registry.hasChanges()) return;
       event.preventDefault(); event.returnValue = '';
     };
     window.addEventListener('beforeunload', protect);
     return () => window.removeEventListener('beforeunload', protect);
-  }, []);
-  const value = useMemo(() => ({ register, requestNavigation, draftIds: () => [...entries.current.keys()] }), [register, requestNavigation]);
-  const keepWriting = () => { const cancel = pending?.onCancel; setPending(null); cancel?.(); };
-  return <Context.Provider value={value}>{children}{pending && <Modal title="저장하지 않은 내용이 있습니다" description="이동하면 작성 중인 내용이 사라질 수 있습니다. 저장하려면 계속 작성한 뒤 저장 버튼을 눌러 주세요." onClose={keepWriting}>
-    <div className="form-stack"><p>{pending.labels.join(' · ')}</p><div className="form-actions"><Button variant="secondary" onClick={() => { const action = pending.action; setPending(null); action(); }}>저장하지 않고 이동</Button><Button onClick={keepWriting}>계속 작성</Button></div></div>
-  </Modal>}</Context.Provider>;
+  }, [dirty, registry]);
+  useEffect(() => () => { pendingRef.current?.onCancel?.(); pendingRef.current = null; }, []);
+  const value = useMemo(() => ({ register: registry.register, clearDraft: registry.clearDraft, clearDrafts: registry.clearDrafts, draftIds: registry.draftIds, requestNavigation, confirmDiscard }), [registry, requestNavigation, confirmDiscard]);
+  const finish = (discard: boolean) => {
+    const request = pendingRef.current;
+    pendingRef.current = null; setPending(null);
+    if (discard) request?.action(); else request?.onCancel?.();
+  };
+  return <Context.Provider value={value}>{children}{pending && <ConfirmDialog onCancel={() => finish(false)} onConfirm={() => finish(true)}><p>{pending.labels.join(' · ')}</p></ConfirmDialog>}</Context.Provider>;
 }
 
 /** Opening task details keeps the page behind the dialog mounted and its drafts intact. */
@@ -54,8 +68,9 @@ export function useUnsavedChanges(dirty: boolean, label = '작성 중인 내용'
 }
 
 export function useUnsavedNavigation() {
-  const { requestNavigation } = useContext(Context);
+  const { requestNavigation, confirmDiscard, clearDraft, clearDrafts } = useContext(Context);
   const inheritedIds = useContext(PreservedContext);
   const requestScopedNavigation = useCallback((action: Navigation, onCancel?: Navigation, preservedIds: readonly string[] = []) => requestNavigation(action, onCancel, [...inheritedIds, ...preservedIds]), [inheritedIds, requestNavigation]);
-  return { requestNavigation: requestScopedNavigation, requestWorkspaceNavigation: requestNavigation };
+  const confirmScopedDiscard = useCallback((preservedIds: readonly string[] = []) => confirmDiscard([...inheritedIds, ...preservedIds]), [inheritedIds, confirmDiscard]);
+  return { requestNavigation: requestScopedNavigation, requestWorkspaceNavigation: requestNavigation, confirmDiscard: confirmScopedDiscard, clearDraft, clearDrafts };
 }

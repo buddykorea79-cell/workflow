@@ -23,9 +23,12 @@ test('statistics setup CLI previews without changes and requires explicit databa
     const preview = await exec(process.execPath, args, { cwd: process.cwd(), env }); const plan = JSON.parse(preview.stdout);
     assert.equal(plan.mode, 'preview'); assert.equal(plan.addedTasks, 1); assert.equal(plan.addedCommonTasks, 1); assert.equal(await readFile(source, 'utf8'), before);
     assert.deepEqual((await readdir(directory)).sort(), ['workspace.json']);
-    await assert.rejects(exec(process.execPath, [...args, '--apply', '--expect-workspace', 'wrong'], { cwd: process.cwd(), env: { ...env, DATABASE_URL: 'not-a-real-connection-string' } }), error => {
+    await assert.rejects(exec(process.execPath, [...args, '--apply', '--expect-workspace', 'wrong'], { cwd: process.cwd(), env: { ...env, IEUM_STORE: 'neon', DATABASE_URL: 'not-a-real-connection-string' } }), error => {
       const failure = error as { stderr?: string }; assert.match(failure.stderr || '', /expect-workspace/); assert.equal(failure.stderr?.includes('not-a-real-connection-string'), false); return true;
     });
+    assert.equal(await readFile(source, 'utf8'), before);
+    const localPreview = await exec(process.execPath, args, { cwd: process.cwd(), env: { ...env, IEUM_STORE: 'local', DATABASE_URL: 'not-a-real-connection-string' } });
+    assert.equal(JSON.parse(localPreview.stdout).storage, 'local');
     assert.equal(await readFile(source, 'utf8'), before);
   } finally {
     const resolved = path.resolve(directory);

@@ -67,3 +67,61 @@ test('procedure editor disables unchanged saves and unassigned support while pre
   assert.doesNotMatch(render(true, true), /<option value="support" disabled=""/);
   assert.deepEqual(workflow, before);
 });
+
+test('missing support explains role selection and only offers shortcuts to editable roles', () => {
+  const state = createSeed(new Date('2026-11-07T03:00:00Z'));
+  const workspace = getWorkspace(state, 'u-support-member', new Date('2026-11-07T03:00:00Z'));
+  const task = workspace.tasks.find(item => item.id === 'task-data')!;
+  const workflow = defaultWorkflow({ legacy: true }).map(step => ({ ...step, done: false }));
+  const props: Parameters<typeof editorUi.ProcedureEditor>[0] = {
+    workspace, taskId: task.id, workflow, originalWorkflow: workflow, participants: taskProcedureParticipants(workspace, task),
+    command: async () => true, editable: true, busy: false, hasSupport: false, diagramChanged: false, redrawKey: 0,
+    onApply: async () => true, onChange: () => undefined, onRemove: () => undefined, onMove: () => undefined, onAdd: () => undefined,
+  };
+  const render = (overrides: Partial<typeof props> = {}) => renderToStaticMarkup(createElement(editorUi.ProcedureEditor, { ...props, ...overrides }));
+  const editable = render();
+  assert.match(editable, /<span[^>]*badge[^>]*>지원자 미지정<\/span>/);
+  assert.match(editable, /아래 ‘누가’에서 담당자 역할로 바꾼 뒤 수정사항을 저장/);
+  assert.match(editable, /<button[^>]*aria-label="자료 준비 담당자 지정"/);
+  const warningId = editable.match(/class="pe-participant-warning" id="([^"]+)"/)?.[1];
+  assert.ok(warningId);
+  assert.ok(editable.includes(`aria-describedby="${warningId}"`));
+  assert.match(render({ busy: true }), /<button[^>]*aria-label="자료 준비 담당자 지정"/);
+
+  const viewing = render({ editable: false, onStartEditing: () => undefined });
+  assert.match(viewing, />업무 기준 수정<\/button>/);
+  assert.doesNotMatch(viewing, /aria-label="자료 준비 담당자 지정"/);
+  const noPermission = render({ editable: false });
+  assert.match(noPermission, /업무 담당자에게 담당 역할 수정을 요청/);
+  assert.doesNotMatch(noPermission, />업무 기준 수정<\/button>/);
+
+  const common = render({ requiredStepTitles: ['자료 준비'] });
+  assert.match(common, /공통업무 담당자에게 절차 기준 확인을 요청/);
+  assert.doesNotMatch(common, /aria-label="자료 준비 담당자 지정"/);
+  const completed = render({ originalWorkflow: workflow.map(step => ({ ...step, done: step.role === 'support' })) });
+  assert.match(completed, /완료된 절차의 담당 역할은 기록으로 보존/);
+  assert.doesNotMatch(completed, /aria-label="자료 준비 담당자 지정"/);
+  assert.doesNotMatch(render({ hasSupport: true }), /class="pe-participant-warning"/);
+});
+
+test('missing reviewer follows automatic department-head assignment without offering arbitrary selection', () => {
+  const state = createSeed(new Date('2026-11-07T03:00:00Z'));
+  const workspace = getWorkspace(state, 'u-support-member', new Date('2026-11-07T03:00:00Z'));
+  const task = workspace.tasks.find(item => item.id === 'task-data')!;
+  const workflow = defaultWorkflow().map(step => ({ ...step, done: false }));
+  const props: Parameters<typeof editorUi.ProcedureEditor>[0] = {
+    workspace, taskId: task.id, workflow, originalWorkflow: workflow, participants: { ...taskProcedureParticipants(workspace, task), reviewer: '검토자 미지정' },
+    command: async () => true, editable: true, busy: false, hasReviewer: false, diagramChanged: false, redrawKey: 0,
+    onOpenOrganization: () => undefined,
+    onApply: async () => true, onChange: () => undefined, onRemove: () => undefined, onMove: () => undefined, onAdd: () => undefined,
+  };
+  const member = renderToStaticMarkup(createElement(editorUi.ProcedureEditor, props));
+  assert.match(member, /<span[^>]*badge[^>]*>검토자 미지정<\/span>/);
+  assert.match(member, /관리자에게 소유 부서의 부서장 등록·확인을 요청/);
+  assert.doesNotMatch(member, />조직 · 구성원 확인<\/button>/);
+  assert.doesNotMatch(member, /aria-label="내부 검토 담당자 지정"/);
+  const admin = renderToStaticMarkup(createElement(editorUi.ProcedureEditor, { ...props, workspace: { ...workspace, currentUser: { ...workspace.currentUser, role: 'admin' } } }));
+  assert.match(admin, /소유 부서의 활성 부서장으로 자동 지정/);
+  assert.match(admin, />조직 · 구성원 확인<\/button>/);
+  assert.doesNotMatch(renderToStaticMarkup(createElement(editorUi.ProcedureEditor, { ...props, hasReviewer: true })), /class="pe-participant-warning"/);
+});

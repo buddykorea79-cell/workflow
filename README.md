@@ -159,16 +159,17 @@ npm test
 npm run build
 ```
 
-HTTP 흐름 검증은 **별도 데이터 폴더를 쓰는 테스트 서버**에서 실행합니다. 실제 시연 데이터에 실행하지 않습니다.
+HTTP 흐름 검증은 **로컬 저장을 강제하는 테스트 서버**에서 실행합니다. `.env.local`에 DB·파일 저장소 연결값이 있어도 `qa:serve`는 `IEUM_STORE=local`과 로컬 파일 저장을 적용하고, `.qa-data`에 가상 데이터를 저장합니다.
 
 ```powershell
-$env:IEUM_DATA_DIR = 'D:\Workflow-Project\.qa-data'
-npm start -- --port 3001
+npm run qa:serve
 # 다른 터미널
 node tests/http-workflow.mjs http://127.0.0.1:3001
 ```
 
-테스트 후 테스트 서버를 종료하고 `IEUM_DATA_DIR` 환경변수를 해제하면 기본 저장 경로로 돌아갑니다.
+PowerShell과 Git Bash에서 같은 명령을 사용합니다. 먼저 `npm run build`를 실행하고, 시작 로그의 `로컬 QA` 및 첫 조회 후 `저장소: 로컬 파일`을 확인해 주세요. 경로나 포트를 바꾸려면 `IEUM_QA_DATA_DIR`, `IEUM_QA_PORT`를 지정할 수 있습니다. 테스트 서버를 종료하면 별도로 설정한 저장 모드는 부모 터미널에 남지 않습니다.
+
+`IEUM_DATA_DIR`만 바꿔서는 DB 연결이 격리되지 않습니다. `DATABASE_URL`과 함께 설정하면서 `IEUM_STORE`를 생략하면 저장소 접근을 거부합니다. 일반 DB 사용은 `IEUM_DATA_DIR`을 지우고, 명시적 DB 사용은 `IEUM_STORE=neon`을 설정하세요. Vercel은 로컬 저장을 허용하지 않습니다.
 
 ## 부서 업무분장과 세부업무 절차
 

@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
+import { currentHalf, previousHalf } from './helpers/http-period.mjs';
 
 // Run against a separate local instance, with IEUM_DATA_DIR set to .qa-data.
 // Example: node tests/http-workflow.mjs http://127.0.0.1:3001
@@ -82,8 +83,7 @@ await login(creator.id);
 const now = (await workspace(creator.id)).serverTime;
 const date = new Date(now); date.setUTCDate(date.getUTCDate() + 20);
 const dueDate = date.toISOString().slice(0, 10);
-const currentYear = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Seoul', year: 'numeric' }).format(new Date(now));
-const period = `${currentYear}-H2`;
+const period = currentHalf(now);
 const commonPayload = { title: `${marker} 공통업무`, description: '격리된 HTTP 검증용 공통업무입니다.', projectName: `${marker} 사업`, dueDate, frequency: 'half_yearly', requiredSteps: ['자료 준비', '결과 검토', '최종 제출'], departmentIds: [targetDept.id], distributionMode: 'selected', kind: 'common' };
 let state = await command(creator.id, 'common.create', commonPayload);
 let common = state.commonTasks.find(c => c.title === commonPayload.title);
@@ -172,7 +172,7 @@ check('A final unit evaluation persists the 50-point total and department-head f
   const record = state.performances.find(item => item.id === performanceId), evaluation = state.unitEvaluations.find(item => item.personId === targetMember.id && item.period === period);
   assert.equal(record.status, 'confirmed'); assert.equal(record.approvedBy, targetHead.id); assert.equal(evaluation.totalScore, 44); assert.equal(evaluation.comment, evaluationPayload.comment); assert.ok(evaluation.performanceIds.includes(performanceId));
 });
-await command(targetMember.id, 'performance.saveHalf', { ...performancePayload, period: `${currentYear}-H1`, title: `${marker} 다른 반기 성과` });
+await command(targetMember.id, 'performance.saveHalf', { ...performancePayload, period: previousHalf(period), title: `${marker} 다른 반기 성과` });
 
 state = await command(creator.id, 'common.create', { ...commonPayload, title: `${marker} 전체 부서 공통업무`, distributionMode: 'all' });
 state = await approveCommon(creator.id, state.commonTasks.find(c => c.title === `${marker} 전체 부서 공통업무`).id);
@@ -211,9 +211,22 @@ const samePayload = { title: `${marker} 재시도 단위`, description: '중복 
 await command(targetMember.id, 'unit.create', samePayload, 200, { requestId: idempotencyId, expectedRevision: originalRevision });
 state = await command(targetMember.id, 'unit.create', samePayload, 200, { requestId: idempotencyId, expectedRevision: originalRevision });
 check('Identical retry requests remain idempotent despite stale revisions', () => assert.equal(state.units.filter(u => u.title === samePayload.title).length, 1));
-await command(targetMember.id, 'unit.create', { ...samePayload, title: `${marker} 이전 버전 저장` }, 409, { expectedRevision: originalRevision });
+const independentTitle = `${marker} 이전 전역 버전의 새 단위`;
+state = await command(targetMember.id, 'unit.create', { ...samePayload, title: independentTitle }, 200, { expectedRevision: originalRevision });
+const conflictUnit = state.units.find(unit => unit.title === independentTitle);
+check('Independent creation succeeds despite an older global revision', () => assert.ok(conflictUnit));
+const expectedUnit = { kind: 'unit', id: conflictUnit.id, rev: conflictUnit.rev ?? 0 };
+const latestUnitTitle = `${marker} 대상 버전 갱신`;
+state = await command(targetMember.id, 'unit.update', { unitId: conflictUnit.id, title: latestUnitTitle, description: samePayload.description }, 200, { expected: expectedUnit });
+const staleTarget = await command(targetMember.id, 'unit.update', { unitId: conflictUnit.id, title: `${marker} 오래된 대상 덮어쓰기`, description: samePayload.description }, 409, { expected: expectedUnit });
+check('A stale revision of the same unit is rejected without replacing its latest content', () => {
+  assert.equal(staleTarget.code, 'TARGET_CONFLICT');
+  assert.ok(state.units.find(unit => unit.id === conflictUnit.id).rev > expectedUnit.rev);
+});
+state = await workspace(targetMember.id);
+assert.equal(state.units.find(unit => unit.id === conflictUnit.id).title, latestUnitTitle);
 await request('/api/session', { method: 'POST', body: { userId: admin.id }, expected: 403, headers: { Origin: 'https://outside.example' } });
-check('Stale writes and cross-origin session mutations are rejected', () => assert.ok(true));
+check('Cross-origin session mutations are rejected', () => assert.ok(true));
 const logout = await request('/api/session', { method: 'DELETE', user: targetMember.id });
 cookies.delete(targetMember.id);
 check('Logout clears the session cookie', () => assert.ok(logout.response.headers.get('set-cookie')?.includes('Max-Age=0')));

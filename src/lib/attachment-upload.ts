@@ -4,6 +4,7 @@ import { activeUser, assertTaskWritable, canReadTask, DomainError } from './doma
 import type { WorkspaceData } from './types';
 import { canActAsDeputy } from './delegations';
 import { currentPersonPerformances, getUnitEvaluation, getUnitScorePlan } from './unit-evaluation';
+import { isFutureHalf } from './period';
 
 export const attachmentExtensions = new Set(['pdf', 'docx', 'xlsx', 'xls', 'pptx', 'png', 'jpg', 'jpeg', 'webp', 'txt', 'csv', 'hwp', 'hwpx']);
 export function isOwnDraftAttachment(taskId: string, userId: string) {
@@ -21,17 +22,18 @@ export function parseUploadDescriptor(value: unknown) {
   return { ...parsed.data, name, mime: parsed.data.mime || 'application/octet-stream' };
 }
 
-export function assertAttachmentUploadAllowed(state: WorkspaceData, userId: string, taskId: string, performanceId?: string) {
-  const user = activeUser(state, userId); const task = state.tasks.find(item => item.id === taskId);
+export function assertAttachmentUploadAllowed(state: WorkspaceData, userId: string, taskId: string, performanceId?: string, now = new Date()) {
+  const user = activeUser(state, userId, now); const task = state.tasks.find(item => item.id === taskId);
   if (performanceId !== undefined) {
     const record = state.performances.find(item => item.id === performanceId && item.taskId === taskId && item.authorId === user.id);
     if (!record?.period || !currentPersonPerformances(state, user.id, record.period).some(item => item.id === record.id)) throw new DomainError(403, 'PERFORMANCE_ATTACHMENT_DENIED', '본인이 작성한 기존 반기 성과에만 참고 파일을 추가할 수 있습니다.');
+    if (isFutureHalf(record.period, now)) throw new DomainError(422, 'PERIOD_NOT_STARTED', '아직 시작하지 않은 반기의 성과는 입력할 수 없습니다.');
     if (!['draft', 'changes_requested'].includes(record.status) || getUnitEvaluation(state, user.id, record.period) || getUnitScorePlan(state, user.id, record.period)?.submittedAt) throw new DomainError(409, 'PERFORMANCE_ATTACHMENT_LOCKED', '제출하거나 평가가 확정된 성과에는 파일을 추가할 수 없습니다.');
     return { user, task, departmentId: record.departmentId };
   }
   if (isOwnDraftAttachment(taskId, userId) && user.role !== 'head') return { user, task: undefined, departmentId: user.departmentId };
-  if (!task || !canReadTask(state, user, task)) throw new DomainError(403, 'ATTACHMENT_DENIED', '해당 업무에 파일을 첨부할 수 없습니다.');
-  assertTaskWritable(state, task); const now = new Date();
+  if (!task || !canReadTask(state, user, task, now)) throw new DomainError(403, 'ATTACHMENT_DENIED', '해당 업무에 파일을 첨부할 수 없습니다.');
+  assertTaskWritable(state, task);
   const assigned = user.role === 'admin' || [task.primaryId, ...task.supportIds].includes(user.id) || state.runs.some(run => run.taskId === taskId && run.status !== 'completed' && [run.primaryId, ...run.supportIds].includes(user.id));
   const delegated = canActAsDeputy(state, user, task, 'attachment.upload', now);
   if (!assigned && !delegated) throw new DomainError(403, 'ATTACHMENT_DENIED', '현재 담당자 또는 첨부 권한이 있는 대행자만 등록할 수 있습니다.');

@@ -2,6 +2,7 @@ export type BudgetMode = 'manual' | 'catalog' | 'none';
 
 /** Amounts in this catalog are integer Korean won, independently of the PDF's display unit. */
 export interface BudgetCatalogItem {
+  rev?: number;
   id: string;
   year: number;
   account: string;
@@ -36,6 +37,7 @@ export interface BudgetCatalogSource {
 }
 
 export interface BudgetCatalog {
+  rev?: number;
   schemaVersion: 1;
   year: number;
   source: BudgetCatalogSource;
@@ -51,4 +53,5 @@ export interface BudgetSearchResult {
   source: BudgetCatalogSource;
   years: number[];
   revision: number;
+  catalogRev?: number;
 }

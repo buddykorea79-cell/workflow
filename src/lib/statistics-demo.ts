@@ -66,7 +66,7 @@ export function applyStatisticsDemo(state: WorkspaceData, now = new Date()): Sta
   common.approvalRequests = [{ id: ids.approval, kind: 'initial', status: 'pending', departmentId: ids.senderDepartment, requestedBy: ids.sender, requestedAt: iso, targetDepartmentIds: [ids.recipientDepartment], version: 1, snapshot: commonApprovalSnapshot(common) }];
 
   state.units.push(...units); state.tasks.push(task); state.commonTasks.push(common);
-  state.notifications.unshift({ id: ids.notification, title: '행정안전 통계연보 발간 · 배포 승인 요청', description: '업무 담당자 1이 혁신행정담당관실에 통계 자료 작성을 요청했습니다. 대상 부서에 전달하려면 작성 부서장이 승인해 주세요.', type: 'common', targetId: common.id, read: false, userId: 'u-support-head' });
+  state.notifications.unshift({ id: ids.notification, title: '행정안전 통계연보 발간 · 배포 승인 요청', description: '업무 담당자 1이 혁신행정담당관실에 통계 자료 작성을 요청했습니다. 대상 부서에 전달하려면 작성 부서장이 승인해 주세요.', type: 'common', targetType: 'common', targetId: common.id, createdAt: now.toISOString(), read: false, userId: 'u-support-head' });
   state.audit.unshift({ id: `audit-${STATISTICS_DEMO_MARKER}`, actorId: 'system', action: 'demo.statistics.setup', targetType: 'workspace', targetId: STATISTICS_DEMO_MARKER, title: '두 담당자 통계연보 공통업무 시연 추가', detail: JSON.stringify({ senderId: ids.sender, recipientId: ids.recipient, taskId: task.id, commonId: common.id, targetDepartmentIds: [ids.recipientDepartment], publicationStatus: 'pending', preservedExistingRecords: true }), departmentId: ids.senderDepartment, createdAt: iso });
   state.revision++; return { changed: true, addedUnits: 2, addedTasks: 1, addedCommonTasks: 1, addedNotifications: 1, revision: state.revision };
 }

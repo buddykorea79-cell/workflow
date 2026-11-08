@@ -1,0 +1,21 @@
+.help-title{display:flex;align-items:center;flex-wrap:wrap;gap:10px}
+.help-title>h1{margin:0}
+.help-button{display:inline-flex;align-items:center;justify-content:center;gap:5px;min-height:32px;padding:4px 7px;border:0;border-radius:8px;background:transparent;color:var(--brand-primary,#205cd5);font:inherit;font-size:13px;line-height:1.5;cursor:pointer;white-space:nowrap}
+.help-button:hover{background:var(--pale-blue,#f1f5ff)}
+.help-button:focus-visible,.help-callout button:focus-visible{outline:2px solid var(--brand-primary,#205cd5);outline-offset:3px}
+.help-callout{min-width:0;padding:11px 14px;border:1px solid var(--brand-line,#d6e2fa);border-radius:12px;background:var(--pale-blue,#f1f5ff);color:var(--ink,#263850);font-size:14px;line-height:1.65}
+.help-callout-heading{display:flex;align-items:flex-start;justify-content:space-between;gap:14px}
+.help-callout .help-callout-summary{margin:0;min-width:0;font-size:14px;font-weight:550;line-height:1.65;color:inherit;overflow-wrap:anywhere}
+.help-callout-toggle,.help-callout-dismiss{border:0;background:transparent;color:var(--brand-primary,#205cd5);font:inherit;font-size:13px;line-height:1.65;cursor:pointer}
+.help-callout-toggle{display:inline-flex;align-items:center;gap:4px;flex-shrink:0;padding:0 2px;min-height:24px;white-space:nowrap}
+.help-callout-body{display:flex;align-items:flex-start;gap:12px;margin-top:6px}
+.help-callout-body[hidden]{display:none}
+.help-callout-copy{flex:1;min-width:0;color:var(--muted,#64748b);font-size:13px;line-height:1.65;overflow-wrap:anywhere}
+.help-callout-copy p{margin:0}
+.help-callout-copy p+p{margin-top:5px}
+.help-callout-copy ul{margin:0;padding-left:19px}
+.help-callout-dismiss{display:block;flex-shrink:0;margin:0 0 0 auto;padding:0 2px;min-height:24px}
+.help-callout-legend{background:transparent;border-color:var(--line,#e2e8f0)}
+.cw-approval-section>.help-callout{margin-bottom:14px}
+.cw-flat-table>.help-callout{margin:12px}
+@media(max-width:600px){.help-title{gap:7px}.help-callout{padding:10px 12px}.help-callout-heading{gap:8px}.help-callout-body{flex-wrap:wrap;gap:5px}.help-callout-copy{flex-basis:100%}.help-callout-toggle,.help-callout-dismiss{min-height:30px}.help-button{min-height:36px}}

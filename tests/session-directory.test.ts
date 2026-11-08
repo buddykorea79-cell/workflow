@@ -4,16 +4,17 @@ import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { NextRequest } from 'next/server';
 import { GET } from '../src/app/api/session/route';
-import { sessionCookie, signSession } from '../src/lib/auth';
+import { accessCookie, sessionCookie, signAccess, signSession } from '../src/lib/auth';
 import { createSeed } from '../src/lib/seed';
 
 test('the prototype directory supports demo switching without widening the ordinary department directory', async () => {
   const qaRoot = path.resolve(process.cwd(), '.qa-data'); await mkdir(qaRoot, { recursive: true });
   const directory = await mkdtemp(path.join(qaRoot, 'session-directory-test-'));
-  const keys = ['DATABASE_URL', 'NEON_AUTH_BASE_URL', 'VERCEL', 'IEUM_DATA_DIR', 'IEUM_SESSION_SECRET', 'IEUM_PROTOTYPE_MODE'] as const;
+  const keys = ['DATABASE_URL', 'NEON_AUTH_BASE_URL', 'VERCEL', 'IEUM_DATA_DIR', 'IEUM_SESSION_SECRET', 'IEUM_PROTOTYPE_MODE', 'IEUM_PROTOTYPE_ACCESS_CODE'] as const;
   const previous = Object.fromEntries(keys.map(key => [key, process.env[key]]));
   process.env.DATABASE_URL = ''; process.env.NEON_AUTH_BASE_URL = ''; process.env.VERCEL = ''; process.env.IEUM_DATA_DIR = directory;
   process.env.IEUM_SESSION_SECRET = 'isolated-session-directory-test-secret'; process.env.IEUM_PROTOTYPE_MODE = 'true';
+  process.env.IEUM_PROTOTYPE_ACCESS_CODE = 'synthetic-directory-access-code';
   try {
     const state = createSeed();
     const sender = state.users.find(user => user.id === 'u-support-member')!;
@@ -22,7 +23,7 @@ test('the prototype directory supports demo switching without widening the ordin
     state.users.push({ ...recipient, id: 'inactive-demo-directory-user', active: false });
     const file = path.join(directory, 'workspace.json');
     const original = JSON.stringify(state, null, 2); await writeFile(file, original, 'utf8');
-    const request = (scope = '', userId?: string) => new NextRequest(`https://prototype.example/api/session${scope ? `?scope=${scope}` : ''}`, { headers: userId ? { cookie: `${sessionCookie}=${signSession(userId)}` } : {} });
+    const request = (scope = '', userId?: string) => new NextRequest(`https://prototype.example/api/session${scope ? `?scope=${scope}` : ''}`, { headers: { cookie: `${accessCookie}=${signAccess()}${userId ? `; ${sessionCookie}=${signSession(userId)}` : ''}` } });
     const allowedUserKeys = new Set(['id', 'name', 'initials', 'departmentId', 'team', 'role', 'title', 'color', 'active', 'endsAt']);
     const allActiveIds = state.users.filter(user => user.active).map(user => user.id).sort();
     const allDepartmentIds = state.departments.map(department => department.id).sort();

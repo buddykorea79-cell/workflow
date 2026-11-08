@@ -10,6 +10,7 @@ import { apiError, json } from '@/lib/api';
 import { PROCEDURE_PDF_LIMIT } from '@/lib/procedure-draft';
 import { extractDocument } from '@/lib/document-extraction';
 import { authorizeProcedureExtraction } from '@/lib/procedure-extraction-access';
+import { assertUserRateLimit } from '@/lib/rate-limit';
 
 export const runtime = 'nodejs';
 export const maxDuration = 60;
@@ -69,6 +70,7 @@ export async function POST(request: NextRequest) {
     }
     if (!taskId || taskId.length > 150) throw new DomainError(422, 'FILE_REQUIRED', '업무와 문서 파일을 선택해 주세요.');
     const attachment = await transaction(state => authorizeProcedureExtraction(state, userId, taskId, attachmentId));
+    assertUserRateLimit(userId);
     const buffer = attachment
       ? attachment.storageProvider === 'neon' ? await readNeonFile(attachment.storageKey, attachment.storageBucket) : await readFile(path.join(dataDirectory(), 'files', path.basename(attachment.storageKey)))
       : Buffer.from(await file!.arrayBuffer());

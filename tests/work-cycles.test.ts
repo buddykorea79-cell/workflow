@@ -41,8 +41,9 @@ test('cycles: completing then repeating resets only new execution while preservi
   assert.equal(taskExecution(state, getTask(state)).progress, 0); assert.equal(current.notes.length, 0);
   assert.deepEqual(state.runs.find(run => run.id === previous.id), previous);
   const view = getWorkspace(state, owner, now).tasks.find(task => task.id === taskId)!;
-  assert.equal(view.dueDate, '2026-12-20'); assert.equal(view.workflow[0].startDate, '2026-12-01'); assert.equal(view.workflow[0].dueDate, '2026-12-02');
-  assert.notEqual(getTask(state).dueDate, view.dueDate); // execution schedule is not a definition rewrite
+  assert.equal(view.cycleStartDate, '2026-12-01'); assert.equal(view.cycleDueDate, '2026-12-20'); assert.equal(view.workflow[0].startDate, '2026-12-01'); assert.equal(view.workflow[0].dueDate, '2026-12-02');
+  assert.equal(getTask(state).dueDate, view.dueDate); // execution schedule is not a definition rewrite
+  assert.notEqual(view.dueDate, view.cycleDueDate);
 });
 
 test('cycles: incomplete, paused and another open occurrence cannot be skipped', () => {
@@ -75,22 +76,24 @@ test('cycles: impossible dates, missing steps, schedule bounds and dependency in
 });
 
 test('cycles: stale previous IDs, version conflict and duplicate submissions cannot create extra cycles', () => {
-  const state = createSeed(now); complete(state); const input = payload(state); const requestId = randomUUID(); const revision = state.revision;
+  const state = createSeed(now); complete(state); const input = payload(state); const requestId = randomUUID(); const revision = state.revision; const expected = { kind: 'task' as const, id: taskId, rev: getTask(state).rev ?? 0 };
   rejects('CYCLE_CHANGED', () => dispatch(state, owner, 'run.nextCycle', { ...input, previousRunId: 'outdated' }));
   dispatch(state, owner, 'run.nextCycle', input, requestId, revision); const count = state.runs.length;
   dispatch(state, owner, 'run.nextCycle', input, requestId, revision); assert.equal(state.runs.length, count);
   rejects('CYCLE_CHANGED', () => dispatch(state, owner, 'run.nextCycle', input));
-  rejects('VERSION_CONFLICT', () => dispatch(state, owner, 'run.nextCycle', payload(state), randomUUID(), revision));
+  rejects('TARGET_CONFLICT', () => executeCommand(state, owner, { type: 'run.nextCycle', payload: payload(state), requestId: randomUUID(), expectedRevision: revision, expected }, now));
 });
 
 test('cycles: legacy completed task-only records are archived without fabricating completion actors', () => {
   const state = createSeed(now); state.runs = state.runs.filter(run => run.taskId !== taskId);
+  const originalDueDate = getTask(state).dueDate;
   getTask(state).workflow.forEach(step => { step.done = true; });
   dispatch(state, owner, 'run.nextCycle', payload(state));
   const runs = taskCycleState(state, getTask(state)).runs;
   assert.equal(runs.length, 2); const previous = runs.find(run => run.status === 'completed')!;
   assert.ok(previous.workflowSnapshot); assert.ok(previous.steps.every(step => step.status === 'completed' && !step.completedBy && !step.completedAt));
   assert.equal(previous.completedAt, undefined); assert.equal(runs[0].previousRunId, previous.id);
+  assert.equal(previous.dueDate, originalDueDate); assert.equal(getTask(state).dueDate, originalDueDate);
 });
 
 test('cycles: legacy run snapshots are captured and current schedule survives unrelated task edits', () => {
@@ -110,7 +113,8 @@ test('cycles: clearing optional step dates cannot reintroduce previous-cycle dat
   const state = createSeed(now); complete(state); const input = payload(state);
   dispatch(state, owner, 'run.nextCycle', { ...input, steps: input.steps.map(step => ({ stepId: step.stepId })) });
   const task = getWorkspace(state, owner, now).tasks.find(task => task.id === taskId)!;
-  assert.ok(task.workflow.every(step => !step.startDate && !step.dueDate)); assert.equal(task.dueDate, input.dueDate);
+  assert.ok(task.workflow.every(step => !step.startDate && !step.dueDate)); assert.equal(task.cycleDueDate, input.dueDate);
+  assert.equal(task.dueDate, getTask(state).dueDate);
 });
 
 test('cycles: completed managed cycle execution is frozen and later recurring creation does not bypass history', () => {

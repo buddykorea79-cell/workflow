@@ -1,16 +1,22 @@
 'use client';
+import { formatDateTimeFull } from '@/lib/date-format';
 
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { ArrowLeftRight, Building2, History, Save, ShieldCheck } from 'lucide-react';
 import type { User, Workspace } from '@/lib/types';
 import { isOrganizationUserActive, organizationResponsibilities, organizationUserChangeIssue } from '@/lib/organization-management';
 import { Badge, Button, Field, Modal, type CommandFn } from './ui';
+import { useRevisionCommand } from './command-revision';
+import { useUnsavedChanges, useUnsavedNavigation } from './unsaved-changes';
 
 const roleNames: Record<User['role'], string> = { admin: '시스템 관리자', head: '부서장', manager: '부서 담당자', lead: '팀장', member: '업무 담당자' };
 type Props = { workspace: Workspace; command: CommandFn; mode: 'department' | 'user' | User; onClose: () => void };
 
 export function OrganizationEditor({ workspace: w, command, mode, onClose }: Props) {
   const existing = typeof mode === 'object' ? mode : undefined;
+  const revision = useRevisionCommand(w, command, existing ? { kind: 'user', id: existing.id } : null);
+  const mounted = useRef(true);
+  useEffect(() => { mounted.current = true; return () => { mounted.current = false; }; }, []);
   const [name, setName] = useState(existing?.name || '');
   const [shortName, setShortName] = useState('');
   const [departmentId, setDepartmentId] = useState(existing?.departmentId || w.currentUser.departmentId);
@@ -23,6 +29,14 @@ export function OrganizationEditor({ workspace: w, command, mode, onClose }: Pro
   const [reason, setReason] = useState('');
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
+  const [savedNotice, setSavedNotice] = useState('');
+  const [creationCommitted, setCreationCommitted] = useState(false);
+  const draftSnapshot = JSON.stringify({ name, shortName, departmentId, team, role, title, email, phone, active, reason });
+  const draftRef = useRef(draftSnapshot); draftRef.current = draftSnapshot;
+  const [savedSnapshot, setSavedSnapshot] = useState(draftSnapshot);
+  const draftId = useUnsavedChanges(draftSnapshot !== savedSnapshot, existing ? '구성원 인사정보' : '조직 등록 정보');
+  const { requestNavigation, clearDraft } = useUnsavedNavigation();
+  const closeEditor = () => requestNavigation(() => { clearDraft(draftId); onClose(); });
   if (w.currentUser.role !== 'admin') return null;
   const now = new Date(w.serverTime);
   const responsibilities = existing ? organizationResponsibilities(w, existing.id, now) : [];
@@ -31,18 +45,28 @@ export function OrganizationEditor({ workspace: w, command, mode, onClose }: Pro
   const issue = existing && next ? organizationUserChangeIssue(w, w.currentUser, existing, next, now) : undefined;
   const personnelChanges = existing ? w.audit.filter(event => event.targetId === existing.id && event.action === 'organization.userUpdate').slice(0, 10) : [];
   const departmentName = (id?: string) => w.departments.find(department => department.id === id)?.name || id || '미지정';
-  const openHandover = () => { onClose(); window.location.hash = 'handover'; };
+  const openHandover = () => requestNavigation(() => { clearDraft(draftId); onClose(); window.location.hash = 'handover'; });
   const submit = async (event: React.FormEvent) => {
-    event.preventDefault(); if (saving || issue) return;
-    setSaving(true); setError('');
+    event.preventDefault(); if (saving || issue || revision.conflicted || creationCommitted) return;
+    const submittedDraft = draftSnapshot;
+    let closeAfterSave = false;
+    setSaving(true); setError(''); setSavedNotice('');
     const payload = mode === 'department' ? { name, shortName } : { name, departmentId, team, role, title, email, phone, ...(existing ? { userId: existing.id, active, reason } : {}) };
     try {
-      if (await command(mode === 'department' ? 'organization.departmentCreate' : existing ? 'organization.userUpdate' : 'organization.userCreate', payload)) onClose();
-      else setError('저장하지 못했습니다. 화면 위 안내 메시지를 확인하고 입력값 또는 남은 업무 책임을 정리해 주세요.');
-    } catch (cause) { setError(cause instanceof Error ? cause.message : '인사정보를 저장하지 못했습니다.'); }
-    finally { setSaving(false); }
+      const saved = await revision.command(mode === 'department' ? 'organization.departmentCreate' : existing ? 'organization.userUpdate' : 'organization.userCreate', payload, { onSaved: () => {
+        if (!mounted.current) return;
+        closeAfterSave = draftRef.current === submittedDraft;
+        setSavedSnapshot(submittedDraft);
+        if (!existing) setCreationCommitted(true);
+        setSavedNotice(existing ? '요청한 인사정보를 저장했습니다. 이후 작성한 내용은 한 번 더 저장해 주세요.' : '등록이 완료되었습니다. 저장 중 추가한 입력은 화면에 남아 있으며 복사해서 보관할 수 있습니다.');
+      } });
+      if (!mounted.current) return;
+      if (saved && closeAfterSave) { clearDraft(draftId); onClose(); }
+      else if (!saved) setError('저장하지 못했습니다. 화면 위 안내 메시지를 확인하고 입력값 또는 남은 업무 책임을 정리해 주세요.');
+    } catch (cause) { if (mounted.current) setError(cause instanceof Error ? cause.message : '인사정보를 저장하지 못했습니다.'); }
+    finally { if (mounted.current) setSaving(false); }
   };
-  return <Modal title={mode === 'department' ? '새 부서 등록' : existing ? '구성원 인사정보 변경' : '새 구성원 등록'} description={existing ? '업무 소유권은 자동 변경되지 않습니다. 전보·비활성화 전에 인수인계를 완료해 주세요.' : '등록한 정보는 프로토타입 조직과 역할 선택에 반영됩니다.'} wide={!!existing} onClose={() => { if (!saving) onClose(); }}>
+  return <Modal title={mode === 'department' ? '새 부서 등록' : existing ? '구성원 인사정보 변경' : '새 구성원 등록'} description={existing ? '업무 소유권은 자동 변경되지 않습니다. 전보·비활성화 전에 인수인계를 완료해 주세요.' : '등록한 정보는 프로토타입 조직과 역할 선택에 반영됩니다.'} wide={!!existing} onClose={closeEditor}>
     <form className="form-stack organization-editor" onSubmit={submit}>
       {mode === 'department' ? <>
         <Field label="부서 이름"><input required maxLength={100} value={name} onChange={event => setName(event.target.value)} placeholder="예: 디지털전략실" /></Field>
@@ -69,14 +93,14 @@ export function OrganizationEditor({ workspace: w, command, mode, onClose }: Pro
         </>}
         <div className="management-info"><ShieldCheck size={18} /><p>인사정보는 기관 관리자만 변경합니다. 기존 부서의 부서장·부서 담당자와 기관 관리자를 유지해야 하며, 업무 배정은 인수인계에서 별도로 처리합니다.</p></div>
       </>}
-      {issue && <p className="form-error" role="alert">{issue.message}</p>}{error && <p className="form-error" role="alert">{error}</p>}
-      <div className="form-actions"><Button type="button" variant="secondary" disabled={saving} onClick={onClose}>취소</Button><Button type="submit" disabled={saving || !!issue}><Save size={16} />{saving ? '저장 중…' : mode === 'department' ? '부서 등록' : existing ? '인사정보 저장' : '구성원 등록'}</Button></div>
+      {revision.conflict}{issue && <p className="form-error" role="alert">{issue.message}</p>}{error && <p className="form-error" role="alert">{error}</p>}{savedNotice && <p role="status" className="muted">{savedNotice}</p>}
+      <div className="form-actions"><Button type="button" variant="secondary" onClick={closeEditor}>닫기</Button><Button type="submit" disabled={saving || !!issue || revision.conflicted || creationCommitted}><Save size={16} />{saving ? '저장 중…' : mode === 'department' ? '부서 등록' : existing ? '인사정보 저장' : '구성원 등록'}</Button></div>
     </form>
     {existing && <section className="organization-change-history" aria-label="인사정보 변경 기록"><h3><History size={17} />최근 인사정보 변경 기록</h3>{personnelChanges.length ? personnelChanges.map(event => {
       let change: { reason?: string; before?: Partial<User>; after?: Partial<User> } = {};
       try { change = JSON.parse(event.detail); } catch { /* Older audit text remains readable. */ }
       const summary = change.before && change.after ? [change.before.departmentId !== change.after.departmentId ? `${departmentName(change.before.departmentId)} → ${departmentName(change.after.departmentId)}` : '', change.before.team !== change.after.team ? `${change.before.team} → ${change.after.team}` : '', change.before.role !== change.after.role ? `${roleNames[change.before.role!]} → ${roleNames[change.after.role!]}` : '', change.before.active !== change.after.active ? change.after.active ? '활성화' : '비활성화' : ''].filter(Boolean).join(' · ') : '';
-      return <article key={event.id}><strong>{summary || '구성원 정보 수정'}</strong><p>{change.reason || event.detail}</p><small>{w.users.find(user => user.id === event.actorId)?.name || '관리자'} · {new Date(event.createdAt).toLocaleString('ko-KR', { timeZone: 'Asia/Seoul' })}</small></article>;
+      return <article key={event.id}><strong>{summary || '구성원 정보 수정'}</strong><p>{change.reason || event.detail}</p><small>{w.users.find(user => user.id === event.actorId)?.name || '관리자'} · {formatDateTimeFull(event.createdAt)}</small></article>;
     }) : <p className="muted">아직 변경 기록이 없습니다.</p>}</section>}
   </Modal>;
 }

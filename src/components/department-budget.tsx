@@ -1,4 +1,5 @@
 'use client';
+import { formatDateTimeFull } from '@/lib/date-format';
 
 import { useEffect, useState } from 'react';
 import { Building2, Download, FolderTree, Info, RefreshCw, Search, Wallet } from 'lucide-react';
@@ -112,7 +113,7 @@ function DepartmentBudgetView({ workspace }: { workspace: Workspace }) {
         </tbody>)}<tfoot><tr><th scope="row">{search ? '검색 결과 합계' : '전체 합계'}</th><td className="db-number">{visible.taskCount}건</td><td className="db-number">{money(visible.budget)}</td><td className="db-number">{money(visible.spent)}</td><td className={`db-number ${visible.balance < 0 ? 'db-negative' : ''}`}>{money(visible.balance)}</td></tr></tfoot></table></div> : <EmptyState title={search ? '검색 조건에 맞는 예산이 없습니다.' : `${data.year}년 확정 예산에 연결된 업무가 없습니다.`} description={search ? '사업명이나 분야를 바꾸어 검색해 주세요.' : '세부업무의 예산·집행에서 확정 예산을 검색해 연결하면 이곳에 함께 집계됩니다.'} action={search ? <Button variant="secondary" onClick={() => setQuery('')}>검색 초기화</Button> : undefined}/>}
       </section>
       <section className="db-separate" aria-label="원장 연결 외 별도 예산 집계"><div className="db-separate-heading"><h2>별도 집계</h2><p>확정 예산 합계에 포함하지 않는 업무입니다. 검색 조건과 관계없이 부서 전체를 표시합니다.</p></div><div className="db-separate-grid"><article><div><h3>직접 입력·원장 미연결</h3><Badge>{data.manual.taskCount}건</Badge></div><dl><div><dt>입력 예산 <small>연도 미지정</small></dt><dd>{money(data.manual.budget)}원</dd></div><div><dt>{data.year}년 집행액</dt><dd>{money(data.manual.spent)}원</dd></div><div><dt>차감잔액</dt><dd className={data.manual.balance < 0 ? 'db-negative' : ''}>{money(data.manual.balance)}원</dd></div></dl><p>입력 예산에서 선택한 연도의 집행액만 차감합니다. 세부업무에서 확정 예산을 연결하면 위 사업별 집계에 포함됩니다.</p></article><article><div><h3>비예산 업무</h3><Badge>{data.nonBudgetTaskCount}건</Badge></div><p>비예산으로 지정한 업무는 확정 예산과 집행액 합계에서 제외합니다.</p>{data.otherBudgetYear.expenseCount > 0 && <div className="db-other-year"><strong>다른 연도 예산의 {data.year}년 집행</strong><span>{money(data.otherBudgetYear.spent)}원 · {data.otherBudgetYear.expenseCount}건</span><p>다른 회계연도 예산에 연결된 업무의 집행입니다. 위 사업별 잔액에 포함하지 않습니다.</p></div>}</article></div></section>
-      <footer className="db-notes"><p>보관된 업무의 집행은 포함하고 삭제된 업무는 제외합니다.{data.excludedTaskCount > 0 && ` 집계 대상에서 제외된 업무 ${data.excludedTaskCount}건.`}{data.ignoredOtherYearExpenseCount > 0 && ` 선택연도 외 집행 ${data.ignoredOtherYearExpenseCount}건은 제외했습니다.`}</p><p>조회 기준 {new Date(data.generatedAt).toLocaleString('ko-KR', { timeZone: 'Asia/Seoul' })}</p></footer>
+      <footer className="db-notes"><p>보관된 업무의 집행은 포함하고 삭제된 업무는 제외합니다.{data.excludedTaskCount > 0 && ` 집계 대상에서 제외된 업무 ${data.excludedTaskCount}건.`}{data.ignoredOtherYearExpenseCount > 0 && ` 선택연도 외 집행 ${data.ignoredOtherYearExpenseCount}건은 제외했습니다.`}</p><p>조회 기준 {formatDateTimeFull(data.generatedAt)}</p></footer>
     </>}
   </div>;
 }

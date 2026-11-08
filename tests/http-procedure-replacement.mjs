@@ -33,18 +33,16 @@ async function login(userId) {
 }
 async function workspace(user = owner) { const { data } = await request('/api/workspace', { user }); assertLocal(data); return data; }
 async function command(user, type, payload, requestId = randomUUID()) {
-  // Another QA actor may save unrelated work. Retry a fresh revision only for
-  // successful setup operations; intentional conflict tests use request directly.
-  for (let attempt = 0; attempt < 4; attempt++) {
-    const current = await workspace(user);
-    const envelope = { type, payload, expectedRevision: current.revision, requestId };
-    const response = await fetch(base + '/api/commands', { method: 'POST', headers: { Origin: base, 'Content-Type': 'application/json', Cookie: cookies.get(user) || '' }, body: JSON.stringify(envelope), redirect: 'error', signal: AbortSignal.timeout(30_000) });
-    const data = await response.json();
-    if (response.status === 409 && data.code === 'VERSION_CONFLICT' && attempt < 3) continue;
-    assert.equal(response.status, 200, JSON.stringify({ status: response.status, code: data.code, error: data.error }));
-    assertLocal(data); lastCommand = envelope; return data;
-  }
-  throw new Error('Concurrent QA saves prevented setup.');
+  const current = await workspace(user);
+  const target = ['task.configure', 'task.procedure.replace'].includes(type) || type === 'run.schedule' && !payload.runId
+    ? { kind: 'task', id: payload.taskId, entity: current.tasks.find(item => item.id === payload.taskId) }
+    : type === 'run.completeStep' || type === 'run.schedule'
+      ? { kind: 'run', id: payload.runId, entity: current.runs.find(item => item.id === payload.runId) } : null;
+  const envelope = { type, payload, expectedRevision: current.revision, requestId, ...(target ? { expected: { kind: target.kind, id: target.id, rev: target.entity?.rev ?? 0 } } : {}) };
+  // A target conflict requires the user to review the draft. Never retry it
+  // against a newly fetched revision and silently overwrite another change.
+  const { data } = await request('/api/commands', { user, method: 'POST', body: envelope });
+  assertLocal(data); lastCommand = envelope; return data;
 }
 
 let state = await login(owner); await login(head); await login(foreign);
@@ -107,7 +105,7 @@ pass('Replaying the exact apply request cannot duplicate steps or procedure hist
 await login(owner); state = await workspace();
 assert.equal(runIn(state).id, runId); assert.deepEqual(taskIn(state).workflow.map(step => step.id), draft.map(step => step.id));
 assert.deepEqual(runIn(state).procedureHistory[0], savedHistory);
-const staleRevision = state.revision;
+const staleRevision = state.revision, staleExpected = { kind: 'task', id: taskId, rev: taskIn(state).rev ?? 0 };
 const edited = structuredClone(taskIn(state).workflow);
 edited[0].title = '사용자가 수정한 최종 자료 작성';
 edited[0].description = '사용자가 실제 수행에 맞게 수정한 가상 설명';
@@ -128,7 +126,7 @@ async function denied(actor, replacement, expected, code) {
   const current = await workspace();
   await rejected(actor, { type: 'task.procedure.replace', payload: replacement, expectedRevision: current.revision, requestId: randomUUID() }, expected, code);
 }
-await rejected(owner, { type: 'task.procedure.replace', payload, expectedRevision: staleRevision, requestId: randomUUID() }, 409, 'VERSION_CONFLICT');
+await rejected(owner, { type: 'task.procedure.replace', payload, expectedRevision: staleRevision, expected: staleExpected, requestId: randomUUID() }, 409, 'TARGET_CONFLICT');
 await rejected(owner, { ...appliedEnvelope, payload: { ...payload, reason: '재사용 요청 내용 변경' } }, 409, 'IDEMPOTENCY_CONFLICT');
 pass('Stale saves and reused request IDs with different content fail atomically');
 

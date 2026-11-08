@@ -7,7 +7,7 @@ import os from 'node:os';
 import { GetObjectCommand, S3Client } from '@aws-sdk/client-s3';
 import { NextRequest } from 'next/server';
 import { POST } from '../src/app/api/procedure-extract/route';
-import { sessionCookie, signSession } from '../src/lib/auth';
+import { accessCookie, sessionCookie, signAccess, signSession } from '../src/lib/auth';
 import { createSeed } from '../src/lib/seed';
 
 function smallPdf(): Buffer {
@@ -30,7 +30,7 @@ function smallPdf(): Buffer {
 
 test('prototype PDF extraction checks task access and stored bytes before parsing a Neon attachment', async () => {
   const directory = await mkdtemp(path.join(os.tmpdir(), 'ieum-prototype-extract-'));
-  const keys = ['IEUM_DATA_DIR', 'DATABASE_URL', 'VERCEL', 'NEON_AUTH_BASE_URL', 'IEUM_PROTOTYPE_MODE', 'IEUM_SESSION_SECRET', 'IEUM_APP_ORIGIN', 'IEUM_STORAGE_PROVIDER', 'AWS_ENDPOINT_URL_S3', 'AWS_REGION', 'AWS_ACCESS_KEY_ID', 'AWS_SECRET_ACCESS_KEY', 'IEUM_STORAGE_BUCKET'] as const;
+  const keys = ['IEUM_DATA_DIR', 'DATABASE_URL', 'VERCEL', 'NEON_AUTH_BASE_URL', 'IEUM_PROTOTYPE_MODE', 'IEUM_SESSION_SECRET', 'IEUM_PROTOTYPE_ACCESS_CODE', 'IEUM_APP_ORIGIN', 'IEUM_STORAGE_PROVIDER', 'AWS_ENDPOINT_URL_S3', 'AWS_REGION', 'AWS_ACCESS_KEY_ID', 'AWS_SECRET_ACCESS_KEY', 'IEUM_STORAGE_BUCKET'] as const;
   const previous = Object.fromEntries(keys.map(key => [key, process.env[key]]));
   const originalSend = S3Client.prototype.send;
   const originalFetch = globalThis.fetch;
@@ -39,6 +39,7 @@ test('prototype PDF extraction checks task access and stored bytes before parsin
     keys.forEach(key => { delete process.env[key]; });
     Object.assign(process.env, {
       IEUM_DATA_DIR: directory, IEUM_PROTOTYPE_MODE: 'true', IEUM_SESSION_SECRET: 'mock-prototype-extraction-session-secret-long-enough', IEUM_APP_ORIGIN: 'https://prototype.example',
+      IEUM_PROTOTYPE_ACCESS_CODE: 'synthetic-extraction-access-code',
       IEUM_STORAGE_PROVIDER: 'neon', AWS_ENDPOINT_URL_S3: 'https://storage.example.test', AWS_REGION: 'us-east-2', AWS_ACCESS_KEY_ID: 'mock-key', AWS_SECRET_ACCESS_KEY: 'mock-secret', IEUM_STORAGE_BUCKET: 'test-attachments',
     });
     const mockSend = async (command: unknown) => {
@@ -57,7 +58,7 @@ test('prototype PDF extraction checks task access and stored bytes before parsin
     const save = () => writeFile(path.join(directory, 'workspace.json'), JSON.stringify(state, null, 2));
     await save();
     const payload = { taskId: task.id, attachmentId: attachment.id };
-    const request = (userId: string | null = task.primaryId, body: unknown = payload) => new NextRequest('https://prototype.example/api/procedure-extract', { method: 'POST', headers: { 'Content-Type': 'application/json', origin: 'https://prototype.example', ...(userId ? { cookie: `${sessionCookie}=${signSession(userId)}` } : {}) }, body: JSON.stringify(body) });
+    const request = (userId: string | null = task.primaryId, body: unknown = payload) => new NextRequest('https://prototype.example/api/procedure-extract', { method: 'POST', headers: { 'Content-Type': 'application/json', origin: 'https://prototype.example', cookie: `${accessCookie}=${signAccess()}${userId ? `; ${sessionCookie}=${signSession(userId)}` : ''}` }, body: JSON.stringify(body) });
 
     assert.equal((await POST(request(null))).status, 401);
     assert.equal((await POST(request('u-jiho'))).status, 403);
@@ -68,7 +69,7 @@ test('prototype PDF extraction checks task access and stored bytes before parsin
     assert.equal(storageReads, 0);
     state.departmentWorkPlans = [{ departmentId: task.departmentId, status: 'confirmed', version: 1 }]; await save();
     const form = new FormData(); form.append('taskId', task.id); form.append('file', new File([new Uint8Array(storedBytes)], 'source.pdf', { type: 'application/pdf' }));
-    const imported = await POST(new NextRequest('https://prototype.example/api/procedure-extract', { method: 'POST', headers: { origin: 'https://prototype.example', cookie: `${sessionCookie}=${signSession(task.primaryId)}` }, body: form }));
+    const imported = await POST(new NextRequest('https://prototype.example/api/procedure-extract', { method: 'POST', headers: { origin: 'https://prototype.example', cookie: `${accessCookie}=${signAccess()}; ${sessionCookie}=${signSession(task.primaryId)}` }, body: form }));
     assert.equal(imported.status, 409); assert.equal((await imported.json()).code, 'DEPARTMENT_CONFIRMED');
     assert.equal(storageReads, 0);
     const confirmedRead = await POST(request()); const confirmedResult = await confirmedRead.json();

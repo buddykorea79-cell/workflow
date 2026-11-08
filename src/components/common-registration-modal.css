@@ -1,0 +1,13 @@
+.common-registration-context{display:flex;align-items:center;gap:13px;padding:16px;background:var(--soft);border-radius:14px}
+.common-registration-context>svg{flex-shrink:0;color:var(--muted)}
+.common-registration-context>div{display:flex;flex-direction:column;gap:5px;min-width:0}
+.common-registration-context strong{overflow-wrap:anywhere;font-size:16px}
+.common-registration-context span,.common-registration-note{font-size:14px;color:var(--muted);line-height:1.7}
+.common-registration-choice{margin:0}
+.common-registration-toggle{justify-content:flex-start;width:fit-content;max-width:100%;white-space:normal}
+.common-registration-unit{display:flex;flex-direction:column;gap:18px;padding:20px;border:1px solid var(--line);border-radius:16px;background:#fafbfc}
+.common-registration-unit h3{font-size:16px}
+.common-registration-unit>.form-actions{margin-top:0;padding-top:16px}
+.common-registration-note{padding:12px 15px;border-radius:12px;background:var(--soft)}
+.common-registration-actions{flex-wrap:wrap;margin-top:0}
+@media(max-width:480px){.common-registration-unit{padding:16px}.common-registration-actions>.btn{flex:1 1 auto}.common-registration-unit>.form-actions{flex-wrap:wrap}.common-registration-unit>.form-actions>.btn{white-space:normal}}

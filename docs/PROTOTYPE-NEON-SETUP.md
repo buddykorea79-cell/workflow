@@ -83,6 +83,8 @@ DATABASE_URL="복사한 postgresql:// 연결 문자열"
 IEUM_WORKSPACE_ID=development
 IEUM_PROTOTYPE_MODE=true
 IEUM_SESSION_SECRET="직접 생성한 32자 이상의 임의 문자열"
+IEUM_PROTOTYPE_ACCESS_CODE="시연 참여자에게만 전달할 16자 이상의 임의 접근 코드"
+IEUM_API_RATE_LIMIT_PER_MINUTE=10
 
 # 첨부파일: Neon → Object storage에서 만든 버킷
 IEUM_STORAGE_PROVIDER=neon
@@ -206,6 +208,8 @@ WHERE id = 'development';
 | `IEUM_WORKSPACE_ID` | `development` |
 | `IEUM_PROTOTYPE_MODE` | `true` |
 | `IEUM_SESSION_SECRET` | 위에서 만든 임의 문자열 |
+| `IEUM_PROTOTYPE_ACCESS_CODE` | 시연 참여자에게만 전달할 16자 이상의 임의 접근 코드 |
+| `IEUM_API_RATE_LIMIT_PER_MINUTE` | 사용자별 분당 호출 상한. 기본 `10` |
 | `IEUM_APP_ORIGIN` | `https://on-ieum.vercel.app` |
 | `IEUM_STORAGE_PROVIDER` | `neon` |
 | `IEUM_STORAGE_BUCKET` | `ieum-attachments` 또는 실제 버킷 이름 |
@@ -213,7 +217,19 @@ WHERE id = 'development';
 | `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY` | 같은 Storage 자격증명 |
 | `BIZROUTER_API_KEY`, `BIZROUTER_MODEL` | 기존 BizRouter 설정 유지 |
 
-`NEON_AUTH_BASE_URL`, `NEON_AUTH_USER_MAP`, `IEUM_DATA_DIR`은 추가하지 않습니다. Preview에도 시험할 경우 그 주소에 맞는 `IEUM_APP_ORIGIN`과 버킷 CORS가 필요합니다. 프로토타입 모드에서는 접속자가 가상 계정과 역할을 선택할 수 있습니다.
+`NEON_AUTH_BASE_URL`, `NEON_AUTH_USER_MAP`, `IEUM_DATA_DIR`은 추가하지 않습니다. Preview에도 시험할 경우 그 주소에 맞는 `IEUM_APP_ORIGIN`과 버킷 CORS가 필요합니다. 원격 프로토타입에서는 접근 코드를 확인한 접속자가 가상 계정과 역할을 선택할 수 있습니다.
+
+### 원격 프로토타입 접근 보호
+
+2026-11-07부터 원격 프로토타입은 `IEUM_SESSION_SECRET` 32자 이상과 `IEUM_PROTOTYPE_ACCESS_CODE` 16자 이상을 모두 요구합니다. 접근 코드가 없거나 짧으면 서버가 503 설정 오류를 반환합니다. **코드 변경을 배포하기 전에 사용할 환경의 접근 코드를 설정한 뒤 재배포**하세요. 실제 비밀값을 Git·화면 캡처·공개 문서에 넣지 않고, 코드가 있는 시연 참여자에게만 별도로 전달합니다.
+
+원격 주소에 처음 접속하면 역할 목록 대신 접근 코드 입력란이 표시됩니다. 성공하면 서버가 `HttpOnly`, `Secure`, `SameSite=Lax`인 서명 쿠키 `ieum_access`를 발급하며 유효기간은 12시간입니다. 원격에서는 HTTPS를 사용합니다. 코드 확인 전에는 계정 목록, 역할 로그인 및 기존 역할 세션을 사용하는 업무 API에도 접근할 수 없습니다. 로그아웃은 역할 세션과 접근 쿠키를 함께 지웁니다. 접근 코드나 세션 비밀값을 교체하면 기존 접근 쿠키도 무효가 됩니다. `localhost`·`127.0.0.1`의 로컬 데모는 기존 비밀번호 없는 역할 선택을 유지합니다.
+
+접근 코드 입력은 IP당 분당 최대 5회이며, 잘못된 코드 응답은 250ms 지연합니다. Vercel 환경에서는 플랫폼의 `x-vercel-forwarded-for`를 사용합니다. 다른 호스팅 환경은 외부에서 임의로 보낸 IP 헤더를 신뢰하지 않고 공통 제한을 적용하므로, 자체 프록시를 운영하려면 신뢰할 IP 전달 규칙을 먼저 구현해야 합니다. [Vercel 요청 헤더 안내](https://vercel.com/docs/headers/request-headers)
+
+절차 AI 생성·문서 추출·업무 개요 분석·법령 조회는 사용자별로 합산하여 기본 분당 10회까지 허용합니다. `IEUM_API_RATE_LIMIT_PER_MINUTE`를 양의 정수로 설정해 조정하며, 제한을 넘으면 429와 “잠시 후 다시 시도해 주세요.”를 반환합니다. 입력 형식과 업무 접근 권한을 확인한 요청부터 계산합니다.
+
+이 횟수 제한은 서버 인스턴스별 메모리에 저장되어 재시작 시 초기화되고 여러 인스턴스 간 공유되지 않습니다. 역할 선택형 프로토타입에서 계정을 바꾸면 사용자별 제한도 달라지므로, 기관 인증이나 전역 비용 상한을 대신하지 않습니다. 원격 시연에는 [Vercel Deployment Protection](https://vercel.com/docs/deployment-protection)도 함께 적용하는 것을 권장합니다. 전역 제한이 필요한 운영 환경에서는 공유 저장소 기반 제한과 실제 사용자 인증을 추가해야 합니다.
 
 ## 7. BizRouter 값은 어디에서 확인하나요?
 
@@ -224,7 +240,7 @@ WHERE id = 'development';
 
 BizRouter 연결과 실제 분석은 `npm run bizrouter:check`로 별도 확인할 수 있습니다. 가상 근거 3개를 실제 API로 보내므로 사용량이 발생하며, 실제 DB와 업무 데이터는 변경하지 않습니다. 모델 목록·요약·절차 생성 문제의 점검 결과는 [BizRouter 분석 QA](QA-bizrouter-analysis.md)를 참고하세요. 기존 키·모델 설정을 그대로 사용합니다.
 
-1. `http://127.0.0.1:3000` 또는 Vercel의 앱 주소에 접속해 기존 시연 계정으로 로그인합니다.
+1. `http://127.0.0.1:3000` 또는 Vercel의 앱 주소에 접속합니다. Vercel에서는 안내받은 접근 코드를 먼저 확인한 뒤 기존 시연 계정으로 로그인합니다.
 2. 기존 단위업무·세부업무·일정·성과·월별 실적이 보이는지 확인합니다.
 3. 현재 주담당자·지원담당자 계정으로 업무를 엽니다. 기준을 작성할 때에는 **업무 기준 수정 → 관련 근거**에서 작은 TXT 또는 PDF 파일을 올립니다. 확정 후 생산 문서를 추가할 때에는 **수행 기록 입력 → 관련 근거**에서 유형이 생산 문서인 자료에 연결합니다. 관리자라는 이유만으로 모든 업무에 파일을 올릴 수 있는 것은 아닙니다.
 4. 파일 교체 시 새로 가져온 본문과 추출 경고를 확인하고 사용할 본문을 선택합니다. 기존 본문은 새 파일과 일치한다는 확인 후 유지할 수 있습니다. 읽을 수 없는 파일의 새 본문을 선택하면 기존 본문을 비우므로 필요한 내용을 직접 입력합니다. 스캔 PDF·앞 10,000자 제한 등 누락 가능성도 확인합니다.
@@ -262,7 +278,8 @@ BizRouter 연결과 실제 분석은 `npm run bizrouter:check`로 별도 확인�
 | `InvalidAccessKeyId` | Access Key ID에 `token_id` 전체 값을 넣었는지 확인 |
 | `SignatureDoesNotMatch` | Secret Access Key에 `s3_secret_access_key`를 넣었는지 확인. `api_token`으로 대체하지 않음 |
 | `AccessDenied` | 저장소 자격증명에 쓰기 권한이 있는지, endpoint가 같은 브랜치인지 확인 |
-| Vercel 시연 계정 선택이 막힘 | `IEUM_PROTOTYPE_MODE=true`, 32자 이상 `IEUM_SESSION_SECRET`, 정확한 `IEUM_APP_ORIGIN` 확인. 기관 인증 변수는 비워 두고 Redeploy |
+| Vercel 시연 계정 선택이 막힘 | `IEUM_PROTOTYPE_MODE=true`, 32자 이상 `IEUM_SESSION_SECRET`, 16자 이상 `IEUM_PROTOTYPE_ACCESS_CODE`, 정확한 `IEUM_APP_ORIGIN` 확인. 기관 인증 변수는 비워 두고 Redeploy |
+| 접근 코드 또는 분석 요청이 429로 제한됨 | 1분 후 다시 시도. 사용자별 AI·추출·법령 호출은 합산하며 서버별 제한임 |
 | 브라우저에서 파일 전송만 실패함 | 버킷 CORS에 실제 앱의 origin이 허용되어 있는지 확인. DB 연결 성공과 파일 CORS는 별개 |
 | `neon:check`에서 `objectWrites: not-tested` | 읽기 위주 연결 점검의 정상 표시. `neon:files:check -- --origin https://on-ieum.vercel.app`으로 임시 파일 시험을 별도 실행 |
 | 업로드했는데 새로고침 후 근거 연결이 없음 | 파일 선택·본문 확인 후 변경사항 저장 또는 수행 기록 저장까지 완료했는지 확인 |

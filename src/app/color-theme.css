@@ -58,7 +58,7 @@ body .sidebar .nav-item.active .nav-count { background: #205cd5; color: #fff; }
 body .sidebar .nav-count { min-width: 22px; height: 22px; border-radius: 7px; font-size: 12px; }
 body .sidebar-tail { padding-top: 24px; }
 body .profile-button { border-radius: 12px; border: 1px solid #e1e7f0; background: #f7f9fc; }
-body .topbar { height: 72px; padding: 0 32px; border-bottom-color: #dce4ee; }
+body .topbar { height: var(--topbar-height); padding: 0 32px; border-bottom-color: #dce4ee; }
 body .breadcrumb { color: #52637a; font-size: 14px; }
 body .breadcrumb b { font-weight: 650; color: #243b5a; }
 body .session-button { font-size: 14px; color: #425775; }
@@ -120,7 +120,7 @@ body .cw-approval-section, body .cw-work, body .cw-query-panel { background: #ff
 @media (max-width: 760px) {
   body .sidebar { width: 262px; }
   body .main-content { padding: 24px 16px; }
-  body .topbar { height: 64px; padding: 0 14px; gap: 8px; }
+  body .topbar { height: var(--topbar-height); padding: 0 14px; gap: 8px; }
   body .topbar .breadcrumb b { font-size: 14px; }
   body .search-box { display: none; }
   body .page-heading { gap: 16px; }

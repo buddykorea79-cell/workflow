@@ -312,7 +312,7 @@ test('personnel handover: partial transfer pins legacy performance to its origin
   const before = structuredClone(performance);
   dispatch(state, sourceId, 'transfer.request', request());
   dispatch(state, headId, 'transfer.approve', { transferId: latest(state).id });
-  assert.deepEqual(state.performances.find(item => item.id === performance.id), { ...before, unitId: task.unitId });
+  assert.deepEqual(state.performances.find(item => item.id === performance.id), { ...before, unitId: task.unitId, rev: (before.rev ?? 0) + 1 });
 });
 
 test('personnel handover: run-only requests reject duplicates and stale approval targets', () => {

@@ -39,7 +39,8 @@ test('schedule: dates and details persist as execution data while locked definit
   assert.deepEqual(run.steps, previous.steps); assert.deepEqual(run.notes, previous.notes);
   assert.deepEqual(taskOf(state).versions, task.versions); assert.equal(taskOf(state).dueDate, task.dueDate); assert.deepEqual(state.departmentWorkPlans, plans);
   const view = getWorkspace(state, owner, now).tasks.find(task => task.id === taskId)!;
-  assert.equal(view.workflow[1].scheduleDetails, input.steps[1].scheduleDetails); assert.equal(view.dueDate, input.dueDate);
+  assert.equal(view.workflow[1].scheduleDetails, input.steps[1].scheduleDetails); assert.equal(view.dueDate, task.dueDate);
+  assert.equal(view.cycleStartDate, input.startDate); assert.equal(view.cycleDueDate, input.dueDate);
 });
 
 test('schedule: full set, dependency order, bounds, current run and ownership are enforced atomically', () => {

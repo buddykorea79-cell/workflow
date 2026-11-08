@@ -6,6 +6,7 @@
     "dev": "next dev --hostname 127.0.0.1",
     "build": "next build --webpack",
     "start": "next start --hostname 127.0.0.1",
+    "qa:serve": "node scripts/qa-serve.mjs",
     "typecheck": "tsc --noEmit",
     "test": "tsx --test tests/*.test.ts",
     "neon:check": "node --env-file=.env.local --import tsx scripts/check-neon.ts",

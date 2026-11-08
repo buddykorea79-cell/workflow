@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
+import { currentHalf } from './helpers/http-period.mjs';
 
 // Start an isolated local server with IEUM_DATA_DIR=.data/qa-simple-task,
 // DATABASE_URL='' and local storage on port 3001 before running this script.
@@ -90,16 +91,18 @@ state = await command('run.schedule', { taskId, startDate: dates[0], dueDate: da
 const runId = runIn(state).id;
 assert.equal(runIn(state).startDate, '2026-11-10');
 assert.equal(runIn(state).dueDate, '2026-11-12');
-assert.equal(taskIn(state).dueDate, '2026-11-12');
+assert.equal(taskIn(state).dueDate, '2026-11-30');
+assert.equal(taskIn(state).cycleStartDate, '2026-11-10');
+assert.equal(taskIn(state).cycleDueDate, '2026-11-12');
 assert.equal(taskIn(state).version, definitionVersion);
 assert.equal(taskIn(state).workflow[1].startDate, undefined);
 assert.equal(taskIn(state).workflow[1].dueDate, undefined);
 assert.equal(taskIn(state).workflow[2].startDate, undefined);
 assert.equal(taskIn(state).workflow[2].dueDate, '2026-11-12');
 assert.deepEqual(runIn(state).workflowSnapshot[0].attachmentIds, [file.id]);
-pass('Procedure dates derive the current range while undated procedures and file links are preserved');
+pass('Procedure dates define the cycle range while the task deadline, undated procedures and file links are preserved');
 
-const period = '2026-H2';
+const period = currentHalf(state.serverTime);
 const description = '부서별 자료를 취합하고 누락 항목을 확인하여 검토 시간을 줄였습니다.';
 state = await command('performance.saveHalf', { taskId, period, description, attachmentIds: [file.id] });
 const performanceIn = current => current.performances.find(item => item.taskId === taskId && item.period === period);

@@ -1,0 +1,4 @@
+.read-field .read-field-value{min-height:44px;padding:12px 14px;white-space:pre-wrap;overflow-wrap:anywhere;word-break:normal;color:var(--ink,#172b4d);font-size:15px;font-weight:400;line-height:1.5}
+.read-field .read-field-empty{color:var(--muted,#52637a)}
+.read-field-value a{color:var(--brand-primary,#205cd5);text-decoration:underline;text-underline-offset:3px;overflow-wrap:anywhere}
+.read-field-value a:focus-visible{outline:2px solid var(--brand-primary,#205cd5);outline-offset:3px;border-radius:2px}

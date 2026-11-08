@@ -11,6 +11,7 @@ import { dataDirectory, transaction } from '@/lib/store';
 import { apiError, json } from '@/lib/api';
 import { extractDocument } from '@/lib/document-extraction';
 import { generateAiTaskDescription } from '@/lib/bizrouter';
+import { assertUserRateLimit } from '@/lib/rate-limit';
 
 export const runtime = 'nodejs';
 export const maxDuration = 70;
@@ -41,11 +42,13 @@ export async function POST(request: NextRequest) {
     requests.add(userId); key = userId;
     if (input.action === 'extract') {
       const attachment = await transaction(state => descriptionAttachment(state, userId, input.attachmentId));
+      assertUserRateLimit(userId);
       const buffer = attachment.storageProvider === 'neon' ? await readNeonFile(attachment.storageKey, attachment.storageBucket) : await readFile(path.join(dataDirectory(), 'files', path.basename(attachment.storageKey)));
       if (buffer.length !== attachment.size || createHash('sha256').update(buffer).digest('hex') !== attachment.sha256) throw new DomainError(409, 'ATTACHMENT_CHANGED', '저장된 파일의 크기나 내용이 다릅니다. 다시 올려 주세요.');
       return json({ attachmentId: attachment.id, name: attachment.name, ...await extractDocument(buffer, attachment.name) });
     }
     const documents = await transaction(state => input.documents.map(document => ({ ...document, name: descriptionAttachment(state, userId, document.attachmentId).name })));
+    assertUserRateLimit(userId);
     return json(await generateAiTaskDescription({ title: input.title, description: input.description, documents }, { signal: request.signal }));
   } catch (error) { return apiError(error); }
   finally { if (key) requests.delete(key); }

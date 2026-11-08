@@ -34,7 +34,7 @@ test('budget endpoints authorize session/admin access, persist catalog edits, bo
     const exported = await GET(query('u-admin', { export: 'true' })); assert.equal(exported.status, 200); assert.match(exported.headers.get('content-disposition')!, /attachment/);
     const catalog = await exported.json(); assert.equal(catalog.items.length, 308); assert.equal(catalog.schemaVersion, 1);
     const item: BudgetCatalogItem = { id: 'route-demo-budget', year: 2026, account: '시연 회계', field: '시연 분야', sector: '시연 부문', program: '시연 프로그램', projectName: '시연 예산 사업', confirmedAmountWon: 10000, active: true };
-    const command = { type: 'budget.upsert', payload: { item }, expectedRevision: state.revision, requestId: randomUUID() };
+    const command = { type: 'budget.upsert', payload: { item }, expectedRevision: state.revision, expected: { kind: 'budgetItem', id: item.id, rev: 0 }, requestId: randomUUID() };
     assert.equal((await POST(post('u-support-member', command))).status, 403);
     assert.equal((await POST(post('u-admin', command, {}, 'https://other.example'))).status, 403);
     assert.equal((await POST(post('u-admin', { ...command, type: 'task.configure' }))).status, 422);
@@ -47,7 +47,8 @@ test('budget endpoints authorize session/admin access, persist catalog edits, bo
     assert.equal(saved.budgetCatalog!.items.length, 309); assert.equal(saved.budgetCatalog!.items.find(row => row.id === item.id)?.updatedBy, 'u-admin');
     assert.equal(JSON.stringify(saved.tasks), JSON.stringify(state.tasks)); assert.equal(JSON.stringify(saved.runs), JSON.stringify(state.runs));
     const duplicate = await POST(post('u-admin', command)); assert.equal(duplicate.status, 200); assert.equal((await duplicate.json()).revision, workspace.revision);
-    assert.equal((await POST(post('u-admin', { ...command, requestId: randomUUID(), payload: { item: { ...item, confirmedAmountWon: 12 } } }))).status, 409);
+    const conflict = await POST(post('u-admin', { ...command, requestId: randomUUID(), payload: { item: { ...item, confirmedAmountWon: 12 } } }));
+    assert.equal(conflict.status, 409); assert.equal((await conflict.json()).code, 'TARGET_CONFLICT');
     const snapshot = JSON.stringify(saved.budgetCatalog);
     const invalidImport = await POST(post('u-admin', { type: 'budget.import', payload: { catalog: { ...catalog, items: [item, item] } }, expectedRevision: workspace.revision, requestId: randomUUID() }));
     assert.equal(invalidImport.status, 422);

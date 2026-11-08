@@ -1,4 +1,5 @@
 'use client';
+import { formatDateFull } from '@/lib/date-format';
 
 import { useEffect, useRef, useState } from 'react';
 import { ChevronLeft, ChevronRight, ExternalLink, Landmark, LoaderCircle, Search, X } from 'lucide-react';
@@ -9,7 +10,7 @@ import { Button, Field } from './ui';
 import './law-reference-picker.css';
 
 type LookupError = { message: string; code?: string };
-const displayDate = (value: string) => value || '미제공';
+const displayDate = (value: string) => { const formatted = formatDateFull(value); return formatted === '미지정' ? value || '미제공' : formatted; };
 
 export function LawReferencePicker({ taskId, references, disabled = false, onChange }: {
   taskId: string; references: TaskReference[]; disabled?: boolean; onChange: (references: TaskReference[]) => void;
@@ -35,7 +36,8 @@ export function LawReferencePicker({ taskId, references, disabled = false, onCha
   useEffect(() => { if (disabled) { request.current?.abort(); setBusy(''); } }, [disabled]);
 
   function close() { request.current?.abort(); setBusy(''); setOpen(false); }
-  function changeKind(value: LawKind) { setKind(value); setResults(null); setDetail(null); setSelectedIds([]); setError(null); setNotice(''); }
+  function cancelLookup() { request.current?.abort(); request.current = null; setBusy(''); }
+  function changeKind(value: LawKind) { cancelLookup(); setKind(value); setResults(null); setDetail(null); setSelectedIds([]); setError(null); setNotice(''); }
 
   async function search(page = 1, current = { kind, scope, query: query.trim() }) {
     if (disabled || !current.query || current.query.length > 100) return;
@@ -82,9 +84,9 @@ export function LawReferencePicker({ taskId, references, disabled = false, onCha
     <div className="law-lookup-intro"><div><Landmark size={20}/><div><h4>법령·행정규칙에서 근거 찾기</h4><p>키워드로 검색하고 필요한 조문을 선택하면 원문 내용과 출처를 가져옵니다.</p></div></div><Button variant="secondary" disabled={disabled} onClick={() => open ? close() : setOpen(true)}>{open ? <X size={16}/> : <Search size={16}/>} {open ? '검색 닫기' : '법령·행정규칙 검색'}</Button></div>
     {open && <div className="law-lookup-content">
       <div className="law-search-controls">
-        <Field label="자료 종류"><select value={kind} disabled={locked} onChange={event => changeKind(event.target.value as LawKind)}><option value="law">법령</option><option value="admrul">행정규칙</option></select></Field>
-        <Field label="검색 범위"><select value={scope} disabled={locked} onChange={event => setScope(event.target.value as LawSearchScope)}><option value="title">제목</option><option value="content">본문</option></select></Field>
-        <Field label="검색 키워드"><input value={query} disabled={locked} maxLength={100} placeholder="예: 통계, 개인정보 보호, 기록물 관리" onChange={event => setQuery(event.target.value)} onKeyDown={event => { if (event.key === 'Enter') { event.preventDefault(); if (!locked) void search(); } }}/></Field>
+        <Field label="자료 종류"><select value={kind} disabled={disabled} onChange={event => changeKind(event.target.value as LawKind)}><option value="law">법령</option><option value="admrul">행정규칙</option></select></Field>
+        <Field label="검색 범위"><select value={scope} disabled={disabled} onChange={event => { cancelLookup(); setScope(event.target.value as LawSearchScope); }}><option value="title">제목</option><option value="content">본문</option></select></Field>
+        <Field label="검색 키워드"><input value={query} disabled={disabled} maxLength={100} placeholder="예: 통계, 개인정보 보호, 기록물 관리" onChange={event => { cancelLookup(); setQuery(event.target.value); }} onKeyDown={event => { if (event.key === 'Enter') { event.preventDefault(); if (!locked) void search(); } }}/></Field>
         <Button disabled={locked || !query.trim()} onClick={() => void search()}>{busy === 'search' ? <LoaderCircle size={16} className="spin"/> : <Search size={16}/>} 검색</Button>
       </div>
       <p className="law-lookup-note">국가법령정보센터에서 조회한 자료입니다. 시행일과 적용 범위를 확인한 뒤 업무의 근거로 선택해 주세요.</p>
@@ -95,11 +97,11 @@ export function LawReferencePicker({ taskId, references, disabled = false, onCha
         {!results.items.length ? <p className="law-lookup-empty">검색 결과가 없습니다. 다른 키워드나 검색 범위로 찾아보세요.</p> : <ul>{results.items.map(item => <li key={`${item.kind}-${item.id}`}><div><strong>{item.title}</strong><p>{[item.category, item.ministry].filter(Boolean).join(' · ') || '소관기관 정보 미제공'}</p><small>시행 {displayDate(item.effectiveDate)} · 공포·발령 {displayDate(item.promulgationDate)}</small></div><Button variant="secondary" disabled={locked} onClick={() => void loadDetail(item)} aria-label={`${item.title} 조문 보기`}>조문 보기<ChevronRight size={15}/></Button></li>)}</ul>}
         {lastPage > 1 && <nav className="law-results-pagination" aria-label="법령 검색 페이지"><Button variant="ghost" disabled={locked || results.page <= 1} onClick={() => void search(results.page - 1, { kind: results.kind, scope: results.scope, query: results.query })}><ChevronLeft size={16}/>이전</Button><span>{results.page} / {lastPage}</span><Button variant="ghost" disabled={locked || results.page >= lastPage} onClick={() => void search(results.page + 1, { kind: results.kind, scope: results.scope, query: results.query })}>다음<ChevronRight size={16}/></Button></nav>}
       </section>}
-      {detail && <section className="law-article-picker" aria-label="가져올 조문 선택"><header><div><h4>{detail.title}</h4><p>{[detail.category, detail.ministry].filter(Boolean).join(' · ')} · 시행 {displayDate(detail.effectiveDate)}</p><a href={detail.sourceUrl} target="_blank" rel="noreferrer">국가법령정보센터 원문 <ExternalLink size={13}/></a></div><Button variant="ghost" disabled={locked} onClick={() => { setDetail(null); setSelectedIds([]); setError(null); }}>검색 결과로</Button></header>
+      {detail && <section className="law-article-picker" aria-label="가져올 조문 선택"><header><div><h4>{detail.title}</h4><p>{[detail.category, detail.ministry].filter(Boolean).join(' · ')} · 시행 {displayDate(detail.effectiveDate)}</p><a href={detail.sourceUrl} target="_blank" rel="noreferrer">국가법령정보센터 원문 <ExternalLink size={13}/></a></div><Button variant="ghost" disabled={disabled} onClick={() => { cancelLookup(); setDetail(null); setSelectedIds([]); setError(null); }}>검색 결과로</Button></header>
         {detail.warnings.length > 0 && <ul className="law-detail-warnings">{detail.warnings.map((warning, index) => <li key={index}>{warning}</li>)}</ul>}
-        <Field label="이 법령·규칙 안에서 조문 찾기"><input value={articleQuery} disabled={locked} placeholder="조문 번호·제목·본문의 키워드" maxLength={100} onChange={event => setArticleQuery(event.target.value)} onKeyDown={event => { if (event.key === 'Enter') event.preventDefault(); }}/></Field>
-        <div className="law-selection-heading"><span>표시 {visibleArticles.length}개 · 선택 {selectedIds.length}개</span><Button variant="ghost" disabled={locked || !visibleArticles.length} onClick={() => setSelectedIds(current => visibleArticles.every(article => current.includes(article.id)) ? current.filter(id => !visibleArticles.some(article => article.id === id)) : [...new Set([...current, ...visibleArticles.map(article => article.id)])])}>{visibleArticles.length > 0 && visibleArticles.every(article => selectedIds.includes(article.id)) ? '표시된 조문 선택 해제' : '표시된 조문 전체 선택'}</Button></div>
-        <div className="law-article-list">{visibleArticles.length ? visibleArticles.map(article => <article key={article.id}><label className="law-article-select"><input type="checkbox" checked={selectedIds.includes(article.id)} disabled={locked} onChange={event => setSelectedIds(current => event.target.checked ? [...current, article.id] : current.filter(id => id !== article.id))}/><strong>{lawArticleLabel(article) || '본문'}</strong></label><details><summary>조문 본문 보기</summary><pre>{article.content}</pre></details></article>) : <p className="law-lookup-empty">일치하는 조문이 없습니다. 검색어를 지우거나 원문을 확인해 주세요.</p>}</div>
+        <Field label="이 법령·규칙 안에서 조문 찾기"><input value={articleQuery} disabled={disabled} placeholder="조문 번호·제목·본문의 키워드" maxLength={100} onChange={event => setArticleQuery(event.target.value)} onKeyDown={event => { if (event.key === 'Enter') event.preventDefault(); }}/></Field>
+        <div className="law-selection-heading"><span>표시 {visibleArticles.length}개 · 선택 {selectedIds.length}개</span><Button variant="ghost" disabled={disabled || !visibleArticles.length} onClick={() => setSelectedIds(current => visibleArticles.every(article => current.includes(article.id)) ? current.filter(id => !visibleArticles.some(article => article.id === id)) : [...new Set([...current, ...visibleArticles.map(article => article.id)])])}>{visibleArticles.length > 0 && visibleArticles.every(article => selectedIds.includes(article.id)) ? '표시된 조문 선택 해제' : '표시된 조문 전체 선택'}</Button></div>
+        <div className="law-article-list">{visibleArticles.length ? visibleArticles.map(article => <article key={article.id}><label className="law-article-select"><input type="checkbox" checked={selectedIds.includes(article.id)} disabled={disabled} onChange={event => setSelectedIds(current => event.target.checked ? [...current, article.id] : current.filter(id => id !== article.id))}/><strong>{lawArticleLabel(article) || '본문'}</strong></label><details><summary>조문 본문 보기</summary><pre>{article.content}</pre></details></article>) : <p className="law-lookup-empty">일치하는 조문이 없습니다. 검색어를 지우거나 원문을 확인해 주세요.</p>}</div>
         <div className="law-import-action"><p>선택한 조문은 각각 새 근거로 추가됩니다. 기존 근거와 첨부파일은 유지됩니다.</p><Button disabled={locked || !selectedIds.length} onClick={addSelected}>선택한 {selectedIds.length}개 조문을 근거에 추가</Button></div>
       </section>}
     </div>}

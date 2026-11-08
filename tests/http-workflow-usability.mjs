@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import { createHash, randomUUID } from 'node:crypto';
+import { recentHalves } from './helpers/http-period.mjs';
 
 // This script intentionally accepts only the isolated local QA server.
 const target = new URL(process.argv[2] || 'http://127.0.0.1:3001');
@@ -124,7 +125,7 @@ pass('A department manager can cancel another employee’s request; outsiders ca
 
 state = await workspace();
 const usedPeriods = new Set([...state.performances.filter(record => record.authorId === employee).map(record => record.period), ...state.unitScorePlans.filter(plan => plan.personId === employee).map(plan => plan.period)]);
-const period = Array.from({ length: 20 }, (_, index) => `${2099 - Math.floor(index / 2)}-H${index % 2 ? 1 : 2}`).find(value => !usedPeriods.has(value));
+const period = recentHalves(state.serverTime).find(value => !usedPeriods.has(value));
 assert.ok(period, 'Use a fresh isolated QA store after exhausting the synthetic periods.');
 state = await command(employee, 'performance.saveHalf', { taskId: evidenceTaskId, period, description: '인수인계 전 작성한 본인 성과' });
 const performanceId = state.performances.find(record => record.taskId === evidenceTaskId && record.period === period && record.authorId === employee).id;

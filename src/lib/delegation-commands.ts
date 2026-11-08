@@ -1,5 +1,6 @@
 import { createHash, randomUUID } from 'node:crypto';
 import { z } from 'zod';
+import { parseInput } from './validation';
 import { canRequestTaskDelegation, canReviewTaskDelegation, delegationActions, delegationStatus } from './delegations';
 import { commonPublished } from './common-approval';
 import { isRegisteredWork } from './work-division';
@@ -35,9 +36,7 @@ function assertNoOverlap(state: WorkspaceData, candidate: Pick<Delegation, 'id' 
 export function prepareTaskDelegation(state: WorkspaceData, user: User, task: Task, payload: unknown, now: Date, fail: Fail): Delegation {
   validateTask(state, task, now, fail);
   if (!canRequestTaskDelegation(state, user, task, now)) fail(403, 'DELEGATION_REQUEST_DENIED', '원담당자 또는 업무 소유 부서의 부서 담당자만 대행을 요청할 수 있습니다.');
-  const parsed = inputSchema.safeParse(payload);
-  if (!parsed.success) fail(422, 'VALIDATION_ERROR', parsed.error.issues.map(issue => issue.message).join('\n'));
-  const input = parsed.data!;
+  const input = parseInput(inputSchema, payload, { labels: { toId: '대행자', reason: '대행 요청 사유' } });
   validateRecipient(state, task, input.toId, now, fail);
   if (new Date(input.endsAt) <= new Date(input.startsAt) || new Date(input.endsAt) <= now) fail(422, 'DELEGATION_PERIOD', '종료 시각은 시작 시각과 현재 시각 이후여야 합니다.');
   if (!state.users.some(member => active(member, now) && member.role === 'head' && member.departmentId === task.departmentId && ![user.id, task.primaryId, input.toId].includes(member.id))) fail(409, 'DELEGATION_HEAD_REQUIRED', '승인할 원부서의 부서장을 먼저 등록해 주세요.');
@@ -45,12 +44,12 @@ export function prepareTaskDelegation(state: WorkspaceData, user: User, task: Ta
   assertNoOverlap(state, delegation, fail);
   return delegation;
 }
-function notify(state: WorkspaceData, userIds: string[], delegation: Delegation, title: string, description: string) {
-  for (const userId of new Set(userIds)) state.notifications.unshift({ id: `notification-${randomUUID()}`, title, description, type: 'task', targetId: delegation.taskId, destination: { view: 'delegation', delegationId: delegation.id }, read: false, userId });
+function notify(state: WorkspaceData, userIds: string[], delegation: Delegation, title: string, description: string, now: Date) {
+  for (const userId of new Set(userIds)) state.notifications.unshift({ id: `notification-${randomUUID()}`, title, description, type: 'task', targetType: 'delegation', targetId: delegation.id, createdAt: now.toISOString(), destination: { view: 'delegation', delegationId: delegation.id }, read: false, userId });
 }
 export function storeTaskDelegation(state: WorkspaceData, delegation: Delegation, now: Date) {
   state.delegations.unshift(delegation);
-  notify(state, state.users.filter(member => active(member, now) && member.role === 'head' && member.departmentId === delegation.departmentId).map(member => member.id), delegation, '업무대행 승인 요청', `${delegation.taskTitle} · ${delegation.reason}`);
+  notify(state, state.users.filter(member => active(member, now) && member.role === 'head' && member.departmentId === delegation.departmentId).map(member => member.id), delegation, '업무대행 승인 요청', `${delegation.taskTitle} · ${delegation.reason}`, now);
 }
 function executeSingleDelegationCommand(state: WorkspaceData, user: User, type: string, payload: Record<string, unknown>, now: Date, fail: Fail) {
   if (type === 'delegation.request' || type === 'delegation.create') {
@@ -93,7 +92,7 @@ function executeSingleDelegationCommand(state: WorkspaceData, user: User, type: 
   delegation.resolvedBy = user.id; delegation.resolvedAt = now.toISOString(); delegation.resolutionReason = reason;
   const titles = { approved: '부서장 업무대행 승인', rejected: '업무대행 요청 반려', cancelled: '업무대행 요청 취소', revoked: '업무대행 종료' };
   const title = titles[delegation.status as keyof typeof titles];
-  notify(state, [delegation.fromId, delegation.toId, ...(delegation.requestedBy ? [delegation.requestedBy] : [])], delegation, title, `${delegation.taskTitle ?? task?.title ?? '업무대행'}${reason ? ` · ${reason}` : ''}`);
+  notify(state, [delegation.fromId, delegation.toId, ...(delegation.requestedBy ? [delegation.requestedBy] : [])], delegation, title, `${delegation.taskTitle ?? task?.title ?? '업무대행'}${reason ? ` · ${reason}` : ''}`, now);
   return { targetId: delegation.id, departmentId, title, detail: JSON.stringify({ taskId: delegation.taskId, fromId: delegation.fromId, toId: delegation.toId, status: delegation.status, reason }) };
 }
 
@@ -106,9 +105,7 @@ function batchAudit(state: WorkspaceData, user: User, type: string, delegation: 
 /** A selection is a fixed set of original tasks; neither later work nor copies join it. */
 export function executeDelegationCommand(state: WorkspaceData, user: User, type: string, payload: Record<string, unknown>, now: Date, fail: Fail) {
   if (type === 'delegation.requestBatch') {
-    const parsed = batchInputSchema.safeParse(payload);
-    if (!parsed.success) return fail(422, 'VALIDATION_ERROR', '원담당자, 대행할 업무 1~300건, 대행자와 기간·사유를 확인해 주세요.');
-    const input = parsed.data;
+    const input = parseInput(batchInputSchema, payload, { labels: { fromId: '원담당자', toId: '대행자', reason: '대행 요청 사유' } });
     if (new Set(input.taskIds).size !== input.taskIds.length) fail(422, 'DELEGATION_DUPLICATE_TASK', '같은 세부업무를 중복 선택할 수 없습니다.');
     const tasks = input.taskIds.map(taskId => state.tasks.find(task => task.id === taskId));
     if (tasks.some(task => !task)) return fail(404, 'NOT_FOUND', '선택한 대행 업무를 찾을 수 없습니다. 목록을 새로 확인해 주세요.');
@@ -118,7 +115,7 @@ export function executeDelegationCommand(state: WorkspaceData, user: User, type:
     const batchId = `delegation-batch-${randomUUID()}`;
     const records = selected.map((task, index) => ({ ...prepareTaskDelegation(state, user, task, input, now, fail), batchId, ...(index === 0 ? { batchTaskIds: [...input.taskIds] } : {}) }));
     for (const delegation of records) { state.delegations.unshift(delegation); batchAudit(state, user, type, delegation, now); }
-    notify(state, state.users.filter(member => active(member, now) && member.role === 'head' && member.departmentId === departmentId).map(member => member.id), records[0], '업무대행 일괄 승인 요청', `${records.length}개 세부업무 · ${input.reason}`);
+    notify(state, state.users.filter(member => active(member, now) && member.role === 'head' && member.departmentId === departmentId).map(member => member.id), records[0], '업무대행 일괄 승인 요청', `${records.length}개 세부업무 · ${input.reason}`, now);
     return { targetId: batchId, departmentId, title: `${records.length}건 ${batchTitles[type]}`, detail: JSON.stringify({ batchId, taskIds: input.taskIds, fromId: input.fromId, toId: input.toId, startsAt: records[0].startsAt, endsAt: records[0].endsAt, reason: input.reason }) };
   }
   const record = typeof payload.delegationId === 'string' ? state.delegations.find(item => item.id === payload.delegationId) : undefined;
@@ -137,7 +134,7 @@ export function executeDelegationCommand(state: WorkspaceData, user: User, type:
   const results = selected.map(item => executeSingleDelegationCommand(candidate, user, type, { ...payload, delegationId: item.id }, now, fail));
   // Commit only after all authority, freshness and period checks have passed.
   for (const item of selected) Object.assign(item, candidate.delegations.find(record => record.id === item.id)!);
-  notify(state, [members[0].fromId, members[0].toId, ...(members[0].requestedBy ? [members[0].requestedBy] : [])], members[0], batchTitles[type], `${selected.length}개 세부업무${typeof payload.reason === 'string' && payload.reason.trim() ? ` · ${payload.reason.trim()}` : ''}`);
+  notify(state, [members[0].fromId, members[0].toId, ...(members[0].requestedBy ? [members[0].requestedBy] : [])], members[0], batchTitles[type], `${selected.length}개 세부업무${typeof payload.reason === 'string' && payload.reason.trim() ? ` · ${payload.reason.trim()}` : ''}`, now);
   for (const item of selected) batchAudit(state, user, type, item, now);
   return { targetId: batchId, departmentId: results[0].departmentId, title: `${selected.length}건 ${batchTitles[type]}`, detail: JSON.stringify({ batchId, taskIds: selected.map(item => item.taskId), fromId: members[0].fromId, toId: members[0].toId, status: selected[0].status, reason: typeof payload.reason === 'string' ? payload.reason.trim() : '' }) };
 }
