@@ -1,13 +1,15 @@
 'use client';
 
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { Background, Controls, MarkerType, Position, ReactFlow, type Edge, type Node } from '@xyflow/react';
-import { ArrowDown, ArrowUp, ArrowRight, Check, FileText, GitBranch, LoaderCircle, Maximize2, Minimize2, Plus, Sparkles, Trash2, Upload, X } from 'lucide-react';
+import { createPortal } from 'react-dom';
+import { Background, Controls, MarkerType, Position, ReactFlow, type Edge, type Node, type ReactFlowInstance } from '@xyflow/react';
+import { ArrowDown, ArrowUp, ArrowRight, Check, FileText, GitBranch, LoaderCircle, Maximize2, Plus, Sparkles, Trash2, Upload, X } from 'lucide-react';
 import type { Attachment, Task, TaskReference, WorkflowStep } from '@/lib/types';
 import { replaceProcedureDraft, generateProcedureDraft, procedureErrors, PROCEDURE_PDF_LIMIT, PROCEDURE_TEXT_LIMIT, type ProcedureDraft, type ProcedurePage } from '@/lib/procedure-draft';
 import { appendProcedureStep, canMoveProcedureStep, canRemoveProcedureStep, moveProcedureStep, removeProcedureStep } from '@/lib/procedure-order';
 import { AI_REFERENCE_LIMIT, AI_REFERENCE_TEXT_LIMIT, procedureOverviewFingerprint, procedureReferenceFingerprint } from '@/lib/procedure-ai-input';
 import { useUnsavedChanges } from './unsaved-changes';
+import { Button, Modal } from './ui';
 import { sameDraft } from '@/lib/pending-draft';
 import '@xyflow/react/dist/style.css';
 import './procedure-builder.css';
@@ -18,13 +20,48 @@ const participantFallbacks = { primary: '담당자 미지정', support: '지원�
 export type ProcedureParticipants = Partial<Record<WorkflowStep['role'], string>>;
 const prefix = () => `procedure-${crypto.randomUUID().slice(0, 12)}`;
 
-export function ProcedureFlow({ workflow, participants, selectedId, onSelect, redrawKey = 0 }: { workflow: WorkflowStep[]; participants?: ProcedureParticipants; selectedId?: string; onSelect?: (id: string) => void; redrawKey?: number }) {
-  const [expanded, setExpanded] = useState(false);
+export function ProcedureFlowCanvas({ nodes, edges, redrawKey, onSelect }: { nodes: Node[]; edges: Edge[]; redrawKey: number; onSelect?: (id: string) => void }) {
+  const container = useRef<HTMLDivElement | null>(null);
+  const instance = useRef<ReactFlowInstance | null>(null);
   useEffect(() => {
-    if (!expanded) return;
-    const escape = (event: KeyboardEvent) => { if (event.key === 'Escape') { event.stopPropagation(); setExpanded(false); } };
-    document.addEventListener('keydown', escape, true);
-    return () => document.removeEventListener('keydown', escape, true);
+    const element = container.current;
+    if (!element || typeof ResizeObserver === 'undefined') return;
+    let width = element.clientWidth, height = element.clientHeight, frame = 0;
+    const observer = new ResizeObserver(entries => {
+      const size = entries[0]?.contentRect;
+      if (!size || size.width <= 0 || size.height <= 0 || (Math.abs(width - size.width) < 1 && Math.abs(height - size.height) < 1)) return;
+      width = size.width; height = size.height;
+      cancelAnimationFrame(frame);
+      frame = requestAnimationFrame(() => { void instance.current?.fitView({ padding: 0.12, maxZoom: 1 }); });
+    });
+    observer.observe(element);
+    return () => { observer.disconnect(); cancelAnimationFrame(frame); };
+  }, []);
+  const canSelect = (id: string) => nodes.some(node => node.id === id && node.selectable !== false);
+  return <div ref={container} className="procedure-flow" aria-label="담당자·지원·검토 역할별 절차 흐름도" onKeyDownCapture={event => {
+    if (!onSelect || (event.key !== 'Enter' && event.key !== ' ')) return;
+    const node = (event.target as HTMLElement).closest<HTMLElement>('.react-flow__node');
+    if (!node?.dataset.id || !canSelect(node.dataset.id)) return;
+    event.preventDefault(); event.stopPropagation(); onSelect(node.dataset.id);
+  }}>
+    <ReactFlow key={redrawKey} nodes={nodes} edges={edges} onInit={value => { instance.current = value; }} fitView fitViewOptions={{ padding: 0.12, maxZoom: 1 }} minZoom={0.1} maxZoom={1.6} nodesDraggable={false} nodesConnectable={false} nodesFocusable={!!onSelect} edgesFocusable={false} deleteKeyCode={null} zoomOnScroll={false} panOnScroll={false} preventScrolling={false} onNodeClick={(_, node) => { if (canSelect(node.id)) onSelect?.(node.id); }}>
+      <Background color="#dce6f4" gap={22}/><Controls showInteractive={false}/>
+    </ReactFlow>
+  </div>;
+}
+
+export function ProcedureFlow({ workflow, participants, selectedId, onSelect, redrawKey = 0, compact = false }: { workflow: WorkflowStep[]; participants?: ProcedureParticipants; selectedId?: string; onSelect?: (id: string) => void; redrawKey?: number; compact?: boolean }) {
+  const [expanded, setExpanded] = useState(false);
+  const [expandedSelection, setExpandedSelection] = useState('');
+  const destination = useRef<string | null>(null);
+  const selectRef = useRef(onSelect); selectRef.current = onSelect;
+  useEffect(() => {
+    if (expanded || !destination.current) return;
+    const id = destination.current;
+    let nextFrame = 0;
+    // Let Modal restore its trigger first, then move to the requested editor.
+    const frame = requestAnimationFrame(() => { nextFrame = requestAnimationFrame(() => { destination.current = null; selectRef.current?.(id); }); });
+    return () => { cancelAnimationFrame(frame); cancelAnimationFrame(nextFrame); };
   }, [expanded]);
   const { nodes, edges } = useMemo(() => {
     const laneRoles = roles.filter(role => role !== 'support' || workflow.some(step => step.role === 'support'));
@@ -58,16 +95,22 @@ export function ProcedureFlow({ workflow, participants, selectedId, onSelect, re
     return { nodes, edges };
   }, [workflow, selectedId, participants]);
   if (!workflow.length) return <div className="procedure-flow-empty">절차를 등록하면 담당 역할별 흐름도가 표시됩니다.</div>;
-  return <div className={`procedure-flow-section${expanded ? ' is-expanded' : ''}`}>
-    <div className="procedure-flow-legend"><span><GitBranch size={15}/>역할별 업무 흐름</span><button type="button" onClick={() => setExpanded(value => !value)}>{expanded ? <Minimize2 size={15}/> : <Maximize2 size={15}/>} {expanded ? '작게 보기' : '크게 보기'}</button></div>
-    <p className="procedure-flow-help">화면을 끌어 이동하거나 +/−로 확대하세요. 연결된 선행 절차는 모두 완료해야 합니다.</p>
-    <div className="procedure-flow" aria-label="담당자·지원·검토 역할별 절차 흐름도">
-      <ReactFlow key={`${expanded}-${redrawKey}-${workflow.map(step => step.id + step.dependsOn.join(',')).join('|')}`} nodes={nodes} edges={edges} fitView fitViewOptions={{ padding: 0.12, maxZoom: 1 }} minZoom={0.2} maxZoom={1.6} nodesDraggable={false} nodesConnectable={false} edgesFocusable={false} deleteKeyCode={null} onNodeClick={(_, node) => { if (!node.id.startsWith('lane-')) onSelect?.(node.id); }}>
-        <Background color="#dce6f4" gap={22}/><Controls showInteractive={false}/>
-      </ReactFlow>
+  const select = (id: string, enlarged: boolean) => { if (workflow.some(step => step.id === id)) { if (enlarged) setExpandedSelection(id); else onSelect?.(id); } };
+  const canvas = (enlarged: boolean) => <ProcedureFlowCanvas key={workflow.map(step => step.id + step.dependsOn.join(',')).join('|')} redrawKey={redrawKey} nodes={enlarged ? nodes.map(node => ({ ...node, selected: node.id === expandedSelection })) : nodes} edges={edges} onSelect={onSelect ? id => select(id, enlarged) : undefined}/>;
+  const list = (enlarged: boolean) => <details className="procedure-accessible-list"><summary>절차 목록으로 보기</summary><ol>{workflow.map(step => <li key={step.id}>{onSelect ? <button type="button" aria-pressed={(enlarged ? expandedSelection : selectedId) === step.id} onClick={() => select(step.id, enlarged)}>{step.title || '새 절차'}</button> : <b>{step.title}</b>}<span>{roleLabels[step.role]} · {participants?.[step.role]?.trim() || participantFallbacks[step.role]} · {step.dependsOn.length ? `선행: ${step.dependsOn.map(id => workflow.find(item => item.id === id)?.title || id).join(', ')}` : '시작 절차'}</span></li>)}</ol></details>;
+  return <>
+    <div className={`procedure-flow-section${compact ? ' is-compact' : ''}`}>
+      <div className="procedure-flow-legend"><span><GitBranch size={17}/>{compact ? '업무 절차도' : '역할별 업무 흐름'}</span><button type="button" aria-haspopup="dialog" onClick={() => { setExpandedSelection(selectedId || workflow[0].id); setExpanded(true); }}><Maximize2 size={15}/> 확대 보기</button></div>
+      {!compact && <p className="procedure-flow-help">화면을 끌어 이동하거나 +/−로 확대하세요. 연결된 선행 절차는 모두 완료해야 합니다.</p>}
+      {canvas(false)}
+      {compact && onSelect ? <nav className="procedure-flow-shortcuts" aria-label="절차 편집 위치 선택">{workflow.map((step, index) => <button type="button" key={step.id} aria-pressed={selectedId === step.id} onClick={() => select(step.id, false)}><span>{index + 1}</span>{step.title || '새 절차'}</button>)}</nav> : list(false)}
     </div>
-    <details className="procedure-accessible-list"><summary>절차 목록으로 보기</summary><ol>{workflow.map(step => <li key={step.id}><b>{step.title}</b><span>{roleLabels[step.role]} · {participants?.[step.role]?.trim() || participantFallbacks[step.role]} · {step.dependsOn.length ? `선행: ${step.dependsOn.map(id => workflow.find(item => item.id === id)?.title || id).join(', ')}` : '시작 절차'}</span></li>)}</ol></details>
-  </div>;
+    {expanded && typeof document !== 'undefined' && createPortal(<Modal title="업무 절차도 크게 보기" description="화면을 끌거나 +/−로 확대할 수 있습니다. 연결된 선행 절차는 모두 완료해야 합니다." wide className="procedure-flow-modal" onClose={() => setExpanded(false)}>
+      {canvas(true)}
+      {list(true)}
+      <div className="procedure-flow-modal-actions"><Button variant="secondary" onClick={() => setExpanded(false)}>닫기</Button>{onSelect && <Button disabled={!workflow.some(step => step.id === expandedSelection)} onClick={() => { destination.current = expandedSelection; setExpanded(false); }}>선택한 절차로 이동 <ArrowRight size={15}/></Button>}</div>
+    </Modal>, document.body)}
+  </>;
 }
 
 export interface ProcedureBuilderProps {
@@ -89,6 +132,8 @@ export function ProcedureBuilder({ taskId, overview, overviewAttachments, workfl
   const [type, setType] = useState<TaskReference['type']>('guideline'); const [text, setText] = useState('');
   const [pages, setPages] = useState<ProcedurePage[] | undefined>(); const [draft, setDraft] = useState<ProcedureDraft | null>(null);
   const [selectedId, setSelectedId] = useState(''); const [busy, setBusy] = useState(false); const [error, setError] = useState('');
+  const [focusSelected, setFocusSelected] = useState(false);
+  const selectedEditor = useRef<HTMLDivElement | null>(null);
   const [fileNotice, setFileNotice] = useState(''); const [reviewed, setReviewed] = useState(false);
   const [applying, setApplying] = useState(false); const [diagramChanged, setDiagramChanged] = useState(false); const [redrawKey, setRedrawKey] = useState(0);
   const [sourceMode, setSourceMode] = useState<'ai' | 'local'>('ai');
@@ -108,6 +153,12 @@ export function ProcedureBuilder({ taskId, overview, overviewAttachments, workfl
   const hasSourceContent = Boolean(overview.description.trim() || overview.completionCriteria.trim() || overview.descriptionAttachmentIds?.length || selectedReferences.length);
   useEffect(() => { setReviewed(false); setGeneratedBy(''); }, [sourceFingerprint]);
   useEffect(() => () => controller.current?.abort(), []);
+  useEffect(() => {
+    if (!focusSelected || !selectedEditor.current) return;
+    selectedEditor.current.focus({ preventScroll: true });
+    selectedEditor.current.scrollIntoView({ block: 'start' });
+    setFocusSelected(false);
+  }, [focusSelected, selectedId]);
   const selected = draft?.steps.find(step => step.id === selectedId);
   const selectedRequired = !!selected && requiredStepTitles.includes(selected.title);
   const selectedLastReviewer = selected?.role === 'reviewer' && draft?.steps.filter(step => step.role === 'reviewer').length === 1;
@@ -218,9 +269,9 @@ export function ProcedureBuilder({ taskId, overview, overviewAttachments, workfl
     {draft && <div className="procedure-draft"><div className="procedure-draft-heading"><div><h4>검토할 절차 초안 <span>{draft.steps.length}개</span></h4><p>누가, 무엇을, 어떻게 할지 수정하고 위·아래로 순서를 정하세요.</p></div><button type="button" className="btn btn-secondary" disabled={locked || draft.steps.length >= 50} onClick={() => { const id = `${prefix()}-manual`; setDraft(current => current ? { ...current, steps: appendProcedureStep(current.steps, { id, title: '', role: 'primary', description: '', output: '', required: true, dependsOn: [], checklist: [], done: false }).workflow, evidence: { ...current.evidence, [id]: { sourceTitle: title, locator: '직접 작성한 절차', excerpt: '' } } } : current); setSelectedId(id); setReviewed(false); setDiagramChanged(true); }}><Plus size={15}/>수기로 절차 추가</button></div>
       <ul className="procedure-warnings">{draft.warnings.map(warning => <li key={warning}>{warning}</li>)}</ul>
       <p className="procedure-draft-status" role="status">{diagramChanged ? '수정한 내용과 순서를 미리 보고 있습니다. 아래 주황색 버튼으로 저장하고 반영하세요.' : '절차를 선택해 내용을 수정할 수 있습니다.'}</p>
-      <ProcedureFlow workflow={draft.steps} participants={participants} selectedId={selectedId} onSelect={setSelectedId} redrawKey={redrawKey}/>
+      <ProcedureFlow workflow={draft.steps} participants={participants} selectedId={selectedId} onSelect={id => { setSelectedId(id); setFocusSelected(true); }} redrawKey={redrawKey}/>
       <div className="procedure-edit-layout"><nav className="procedure-step-list" aria-label="초안 단계 선택">{draft.steps.map((step, index) => <button type="button" key={step.id} className={step.id === selectedId ? 'selected' : ''} disabled={locked} onClick={() => setSelectedId(step.id)}><span>{String(index + 1).padStart(2, '0')}</span><div><b>{step.title || '새 절차'}</b><small>{roleLabels[step.role]}<br/>{participants?.[step.role]?.trim() || participantFallbacks[step.role]}</small></div></button>)}</nav>
-      {selected && <div className="procedure-step-editor">
+      {selected && <div className="procedure-step-editor" ref={selectedEditor} tabIndex={-1} aria-label={`${selected.title || '새 절차'} 초안 편집`}>
         <div className="procedure-editor-title"><h4>{draft.steps.findIndex(step => step.id === selected.id) + 1}번 절차 수정</h4><div className="procedure-draft-order"><button type="button" className="btn btn-secondary" disabled={locked || !canMoveProcedureStep(draft.steps, selected.id, 'up')} aria-label={`${selected.title || '새 절차'} 위로 이동`} onClick={() => moveSelected('up')}><ArrowUp size={14}/>위로</button><button type="button" className="btn btn-secondary" disabled={locked || !canMoveProcedureStep(draft.steps, selected.id, 'down')} aria-label={`${selected.title || '새 절차'} 아래로 이동`} onClick={() => moveSelected('down')}><ArrowDown size={14}/>아래로</button>{!selectedRequired && !selectedLastReviewer && canRemoveProcedureStep(draft.steps, selected.id) && <button type="button" className="procedure-remove" disabled={locked} onClick={() => { const remaining = removeProcedureStep(draft.steps, selected.id).workflow; setDraft({ ...draft, steps: remaining }); setSelectedId(remaining[0]?.id || ''); setReviewed(false); setDiagramChanged(true); }}><Trash2 size={14}/>삭제</button>}</div></div>
         <div className="procedure-source-grid procedure-essential-grid"><label><span>누가</span><select value={selected.role} disabled={locked || selectedRequired || selectedLastReviewer} onChange={event => updateStep(selected.id, { role: event.target.value as WorkflowStep['role'] })}>{roles.map(role => <option key={role} value={role} disabled={role === 'support' && !hasSupport}>{participants?.[role]?.trim() || participantFallbacks[role]} · {roleLabels[role]}</option>)}</select></label><label><span>무엇을</span><input value={selected.title} maxLength={150} disabled={locked || selectedRequired} placeholder="예: 부서별 자료 취합" onChange={event => updateStep(selected.id, { title: event.target.value })}/></label></div>
         <label><span>어떻게</span><textarea rows={4} value={selected.description} maxLength={5000} disabled={locked} placeholder="수행 방법을 간단하게 적어 주세요." onChange={event => updateStep(selected.id, { description: event.target.value })}/></label>

@@ -1,4 +1,4 @@
-.pe-editor{display:flex;flex-direction:column;gap:20px;min-width:0}
+.pe-editor{--pe-diagram-height:min(350px,42dvh);display:flex;flex-direction:column;gap:20px;min-width:0}
 .pe-editor .pw-section-intro{align-items:flex-start}.pe-editor .pw-section-intro h3 span{font-size:15px;font-weight:450}
 .pe-steps{display:flex;flex-direction:column;gap:18px}
 .pe-step{border:1px solid #e1e7ee;border-radius:16px;padding:22px;background:#fff;min-width:0}
@@ -18,10 +18,10 @@
 .pe-essential-readonly dt{color:#6b7a8d;font-size:14px}
 .pe-essential-readonly dd{margin:0;color:#334962;white-space:pre-wrap;overflow-wrap:anywhere}
 .pe-essential-readonly dd small{margin-left:10px;color:#6b7a8d;font-size:13px}
-.pe-disclosure>summary{display:flex;align-items:center;gap:8px;cursor:pointer;list-style:none;font-size:14px;color:#536880;line-height:1.7}
-.pe-disclosure>summary::-webkit-details-marker{display:none}.pe-disclosure>summary::after{content:'+';margin-left:auto;font-size:19px;font-weight:400}.pe-disclosure[open]>summary::after{content:'−'}
-.pe-disclosure>summary small{font-size:12px;color:#7a899b;margin-left:3px}.pe-disclosure>summary:focus-visible{outline:2px solid #376cb8;outline-offset:5px;border-radius:4px}
-.pe-diagram{border:1px solid #e8edf3;border-radius:12px;background:#f9fbfd}.pe-diagram>summary{padding:13px 17px}.pe-diagram-body{padding:0 15px 15px}.pe-diagram-status{font-size:14px;line-height:1.7;color:#6a7c91;margin:5px 0 12px}
+.pe-diagram{position:sticky;top:0;z-index:12;flex-shrink:0;max-height:var(--pe-diagram-height);overflow:auto;overscroll-behavior:contain;border:1px solid #bfd2ee;border-radius:14px;background:#fff;box-shadow:0 5px 16px #17376112}
+.pe-diagram .procedure-flow-section{margin:0;border:0;border-radius:13px}.pe-diagram .lazy-screen{border:0;min-height:160px}
+.pe-diagram-status{display:flex;justify-content:space-between;gap:4px 12px;flex-wrap:wrap;font-size:12px;line-height:1.6;color:#526b88;margin:0;padding:7px 12px;border-top:1px solid #e3ebf6;background:#f5f9ff}.pe-diagram-status>span{color:#5c6e84}
+.pe-step{scroll-margin-top:calc(var(--pe-diagram-height) + 40px)}.pe-step.is-selected{border-color:#84a9de;box-shadow:0 0 0 2px #e7f0ff}.pe-step:focus-visible{outline:2px solid #2563c5;outline-offset:3px}
 .pe-step .task-files{margin-top:18px}
 .pe-apply-bar{display:flex;align-items:center;justify-content:space-between;gap:20px;padding:19px 20px;border:1px solid #f2d2bc;border-radius:13px;background:#fff8f2}.pe-apply-bar p{margin:0;font-size:15px;line-height:1.8;color:#73472b;font-weight:600}.pe-apply-bar p span{font-size:14px;color:#876a56;font-weight:400}.pe-apply-bar .btn{flex-shrink:0;font-size:14px}
 .pe-step-controls,.pe-move-buttons{display:flex;align-items:center;gap:6px}.pe-step-controls{flex-shrink:0;margin-left:auto}.pe-move-buttons .btn{min-height:33px;padding:0 10px;font-size:12px;gap:4px;border-radius:8px}.pe-delete{color:#a85b43}.pe-delete:hover{background:#fff1e9;color:#973b25}.pe-locked-order{font-size:14px;line-height:1.7;color:#697d94;margin:0}.pe-add-step{align-self:center;min-width:180px}
@@ -29,3 +29,4 @@
 .pw-procedure-helper{border:1px solid #e7ecf3;border-radius:13px;padding:16px 18px}.pw-procedure-helper>div{display:flex;align-items:center;justify-content:space-between;gap:18px}.pw-procedure-helper h3{font-size:14px;font-weight:600;margin:0 0 5px;color:#405774}.pw-procedure-helper p{font-size:13px;color:#6b7e95;line-height:1.7;margin:0}.pw-procedure-helper .btn{flex-shrink:0;font-size:13px;min-height:36px}
 @media(max-width:760px){.pe-step{padding:17px}.pe-essential-fields{grid-template-columns:minmax(0,1fr)}.pe-step-heading{gap:8px;flex-wrap:wrap}.pe-step-heading h4{font-size:15px}.pe-disclosure>summary small{display:none}.pe-essential-readonly>div{grid-template-columns:45px minmax(0,1fr);gap:10px}.pw-procedure-helper>div,.pw-task-route,.pe-apply-bar{flex-direction:column;align-items:stretch}.pe-editor .pw-section-intro{flex-wrap:wrap}.pe-editor .pw-section-intro>.btn{width:auto}.pe-step-heading .pw-icon-button{width:30px;height:30px}.pe-step-controls{flex-basis:100%;justify-content:flex-end}.pe-move-buttons .btn{min-height:36px;padding:0 12px;font-size:13px}}
 @media(max-width:760px){.pe-participant-warning{flex-direction:column;align-items:stretch}.pe-participant-warning .btn{align-self:flex-start}}
+@media(max-width:760px){.pe-editor{--pe-diagram-height:min(260px,38dvh)}.pe-diagram-status{font-size:11px;padding:5px 10px}.pe-diagram-status>span{display:none}}

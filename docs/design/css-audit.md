@@ -12,8 +12,8 @@ node scripts/css-audit.mjs --self-test
 
 `--check`는 현재 소스로 다시 계산한 보고서와 이 파일이 같은지 확인하며 파일을 쓰지 않는다. `--self-test`는 주석·문자열·URL 오인과 import 도달 판정의 고정 사례를 검사하며 파일을 쓰지 않는다. `--json`은 같은 감사 데이터의 전체 빈도표를 표준 출력으로 제공한다. 추가 패키지 설치나 환경 파일 읽기, 네트워크 접속은 필요하지 않다.
 
-- CSS 원본 SHA-256: `d679f438fbf99b634bab1b73711eb2133f35040726ead8794d788fca79510f60`
-- 참조 분석에 사용한 src CSS·TS/TSX·JS/JSX 원본 SHA-256: `24aa0ac266fc3979746486da977f8e56971a7362c5eb10a4076389c345874fd0`
+- CSS 원본 SHA-256: `503922f37ccd0610f0a23e3c39b9c48fb77fbdabdf5bc9e0822a784145e518b9`
+- 참조 분석에 사용한 src CSS·TS/TSX·JS/JSX 원본 SHA-256: `8b25ee046d2c3b0c04441f890aed99e77ab38395b0958b85d9040e995843c7bb`
 - 파서: PostCSS 8.5.32, TypeScript 5.9.3, `next/dist/compiled/postcss-value-parser`
 - 생성 시각을 출력에 넣지 않아 같은 원본·도구에서는 반복 실행 결과가 같다. 값 빈도가 같으면 문자 코드 순으로 정렬한다.
 
@@ -31,33 +31,33 @@ node scripts/css-audit.mjs --self-test
 | 지표 | 전체 CSS | 참조됨 |
 |---|---:|---:|
 | 파일 | 38 | 37 |
-| UTF-8 바이트 | 362,239 | 356,052 |
-| 규칙 | 4,720 | 4,589 |
-| 선언 | 14,203 | 13,984 |
+| UTF-8 바이트 | 365,912 | 359,725 |
+| 규칙 | 4,757 | 4,626 |
+| 선언 | 14,333 | 14,114 |
 | !important 선언 | 145 | 140 |
-| hex 색 발생 / 종류 | 2,113 / 1,073 | 2,037 / 997 |
-| font-size 전체 값 발생 / 종류 | 1,744 / 41 | 1,645 / 39 |
-| font-size 내부 px 발생 / 종류 | 1,751 / 36 | 1,652 / 34 |
-| radius 전체 값 발생 / 종류 | 485 / 35 | 483 / 35 |
-| radius 내부 px 발생 / 종류 | 443 / 24 | 441 / 24 |
-| box/text-shadow 발생 / 종류 | 33 / 25 | 33 / 25 |
+| hex 색 발생 / 종류 | 2,137 / 1,086 | 2,061 / 1,010 |
+| font-size 전체 값 발생 / 종류 | 1,754 / 41 | 1,655 / 39 |
+| font-size 내부 px 발생 / 종류 | 1,761 / 36 | 1,662 / 34 |
+| radius 전체 값 발생 / 종류 | 490 / 35 | 488 / 35 |
+| radius 내부 px 발생 / 종류 | 448 / 24 | 446 / 24 |
+| box/text-shadow 발생 / 종류 | 34 / 26 | 34 / 26 |
 | z-index 발생 / 종류 | 16 / 11 | 16 / 11 |
-| line-height 발생 / 종류 | 538 / 18 | 538 / 18 |
-| 선언값 내부 전체 px 발생 / 종류 | 7,091 / 186 | 6,964 / 186 |
-| var() 참조 발생 / 종류 | 669 / 27 | 669 / 27 |
+| line-height 발생 / 종류 | 540 / 18 | 540 / 18 |
+| 선언값 내부 전체 px 발생 / 종류 | 7,168 / 187 | 7,041 / 187 |
+| var() 참조 발생 / 종류 | 671 / 28 | 671 / 28 |
 | 색 함수 발생 / 종류 | 5 / 5 | 5 / 5 |
 
 ### 상위 값 · 각 8개
 
 | 지표 | 전체 CSS | 참조됨 |
 |---|---|---|
-| hex 색 | `#ffffff` × 163 · `#52637a` × 157 · `#1863dc` × 65 · `#707070` × 37 · `#dce4ee` × 33 · `#172b4d` × 28 · `#141414` × 25 · `#f1f5ff` × 22 | `#ffffff` × 163 · `#52637a` × 157 · `#1863dc` × 65 · `#707070` × 37 · `#dce4ee` × 33 · `#172b4d` × 28 · `#141414` × 25 · `#f1f5ff` × 22 |
-| font-size 전체 값 | `14px` × 687 · `15px` × 592 · `13px` × 75 · `16px` × 65 · `12px` × 54 · `18px` × 35 · `17px` × 33 · `11px` × 29 | `14px` × 684 · `15px` × 591 · `13px` × 69 · `16px` × 63 · `18px` × 35 · `17px` × 33 · `12px` × 25 · `21px` × 15 |
-| font-size 내부 px | `14px` × 687 · `15px` × 592 · `13px` × 75 · `16px` × 65 · `12px` × 54 · `18px` × 35 · `17px` × 33 · `11px` × 29 | `14px` × 684 · `15px` × 591 · `13px` × 69 · `16px` × 63 · `18px` × 35 · `17px` × 33 · `12px` × 25 · `21px` × 16 |
-| radius 전체 값 | `12px` × 55 · `10px` × 44 · `14px` × 41 · `16px` × 39 · `9px` × 31 · `50%` × 30 · `13px` × 27 · `20px` × 25 | `12px` × 55 · `10px` × 43 · `14px` × 41 · `16px` × 38 · `9px` × 31 · `50%` × 30 · `13px` × 27 · `20px` × 25 |
-| radius 내부 px | `12px` × 55 · `10px` × 44 · `14px` × 41 · `16px` × 41 · `9px` × 33 · `13px` × 27 · `20px` × 27 · `8px` × 25 | `12px` × 55 · `10px` × 43 · `14px` × 41 · `16px` × 40 · `9px` × 33 · `13px` × 27 · `20px` × 27 · `8px` × 25 |
-| box/text-shadow | `none` × 8 · `0 10px 30px #172b4d14` × 2 · `0 0 0 100vmax #15243b80` × 1 · `0 0 0 1px #c64c3c` × 1 · `0 0 0 1px #dce9ff` × 1 · `0 0 0 2px #fff` × 1 · `0 0 0 3px #d9e9ff` × 1 · `0 0 0 3px #eaf1ff` × 1 | `none` × 8 · `0 10px 30px #172b4d14` × 2 · `0 0 0 100vmax #15243b80` × 1 · `0 0 0 1px #c64c3c` × 1 · `0 0 0 1px #dce9ff` × 1 · `0 0 0 2px #fff` × 1 · `0 0 0 3px #d9e9ff` × 1 · `0 0 0 3px #eaf1ff` × 1 |
-| z-index | `1` × 4 · `32` × 3 · `100` × 1 · `130` × 1 · `170` × 1 · `180` × 1 · `30` × 1 · `31` × 1 | `1` × 4 · `32` × 3 · `100` × 1 · `130` × 1 · `170` × 1 · `180` × 1 · `30` × 1 · `31` × 1 |
+| hex 색 | `#ffffff` × 164 · `#52637a` × 157 · `#1863dc` × 65 · `#707070` × 37 · `#dce4ee` × 33 · `#172b4d` × 28 · `#141414` × 25 · `#f1f5ff` × 22 | `#ffffff` × 164 · `#52637a` × 157 · `#1863dc` × 65 · `#707070` × 37 · `#dce4ee` × 33 · `#172b4d` × 28 · `#141414` × 25 · `#f1f5ff` × 22 |
+| font-size 전체 값 | `14px` × 688 · `15px` × 592 · `13px` × 78 · `16px` × 67 · `12px` × 56 · `18px` × 36 · `17px` × 34 · `11px` × 30 | `14px` × 685 · `15px` × 591 · `13px` × 72 · `16px` × 65 · `18px` × 36 · `17px` × 34 · `12px` × 27 · `21px` × 15 |
+| font-size 내부 px | `14px` × 688 · `15px` × 592 · `13px` × 78 · `16px` × 67 · `12px` × 56 · `18px` × 36 · `17px` × 34 · `11px` × 30 | `14px` × 685 · `15px` × 591 · `13px` × 72 · `16px` × 65 · `18px` × 36 · `17px` × 34 · `12px` × 27 · `21px` × 16 |
+| radius 전체 값 | `12px` × 54 · `10px` × 45 · `14px` × 43 · `16px` × 39 · `9px` × 31 · `50%` × 30 · `13px` × 28 · `20px` × 25 | `12px` × 54 · `10px` × 44 · `14px` × 43 · `16px` × 38 · `9px` × 31 · `50%` × 30 · `13px` × 28 · `20px` × 25 |
+| radius 내부 px | `12px` × 54 · `10px` × 45 · `14px` × 43 · `16px` × 41 · `9px` × 33 · `13px` × 28 · `20px` × 27 · `8px` × 26 | `12px` × 54 · `10px` × 44 · `14px` × 43 · `16px` × 40 · `9px` × 33 · `13px` × 28 · `20px` × 27 · `8px` × 26 |
+| box/text-shadow | `none` × 8 · `0 10px 30px #172b4d14` × 2 · `0 0 0 1px #c64c3c` × 1 · `0 0 0 1px #dce9ff` × 1 · `0 0 0 2px #e7f0ff` × 1 · `0 0 0 2px #fff` × 1 · `0 0 0 3px #d9e9ff` × 1 · `0 0 0 3px #eaf1ff` × 1 | `none` × 8 · `0 10px 30px #172b4d14` × 2 · `0 0 0 1px #c64c3c` × 1 · `0 0 0 1px #dce9ff` × 1 · `0 0 0 2px #e7f0ff` × 1 · `0 0 0 2px #fff` × 1 · `0 0 0 3px #d9e9ff` × 1 · `0 0 0 3px #eaf1ff` × 1 |
+| z-index | `1` × 4 · `32` × 3 · `100` × 1 · `12` × 1 · `130` × 1 · `180` × 1 · `30` × 1 · `31` × 1 | `1` × 4 · `32` × 3 · `100` × 1 · `12` × 1 · `130` × 1 · `180` × 1 · `30` × 1 · `31` × 1 |
 
 ## 참조 경로
 
@@ -102,10 +102,10 @@ node scripts/css-audit.mjs --self-test
 | [src/components/notification-focus.css](../../src/components/notification-focus.css) | 예 | 282 | 1 / 1 | 0 / 0 | 0 / 0 | 0 / 0 | 0 / 0 |
 | [src/components/organization-division.css](../../src/components/organization-division.css) | 예 | 4,897 | 35 / 16 | 18 / 6 | 6 / 5 | 1 / 1 | 0 / 0 |
 | [src/components/organization-person-picker.css](../../src/components/organization-person-picker.css) | 예 | 2,697 | 28 / 21 | 9 / 2 | 5 / 3 | 0 / 0 | 0 / 0 |
-| [src/components/personal-work.css](../../src/components/personal-work.css) | 예 | 53,921 | 344 / 171 | 238 / 15 | 74 / 20 | 5 / 3 | 0 / 0 |
+| [src/components/personal-work.css](../../src/components/personal-work.css) | 예 | 54,943 | 353 / 179 | 242 / 15 | 76 / 20 | 5 / 3 | 0 / 0 |
 | [src/components/personnel-handover.css](../../src/components/personnel-handover.css) | 예 | 17,321 | 83 / 73 | 71 / 8 | 18 / 10 | 2 / 2 | 1 / 1 |
-| [src/components/procedure-builder.css](../../src/components/procedure-builder.css) | 예 | 16,811 | 128 / 106 | 69 / 5 | 23 / 11 | 5 / 5 | 1 / 1 |
-| [src/components/procedure-editor.css](../../src/components/procedure-editor.css) | 예 | 5,066 | 33 / 30 | 27 / 6 | 9 / 7 | 0 / 0 | 0 / 0 |
+| [src/components/procedure-builder.css](../../src/components/procedure-builder.css) | 예 | 19,204 | 139 / 113 | 77 / 6 | 26 / 13 | 4 / 4 | 0 / 0 |
+| [src/components/procedure-editor.css](../../src/components/procedure-editor.css) | 예 | 5,324 | 37 / 34 | 25 / 6 | 9 / 6 | 2 / 2 | 1 / 1 |
 | [src/components/read-field.css](../../src/components/read-field.css) | 예 | 507 | 4 / 3 | 1 / 1 | 1 / 1 | 0 / 0 | 0 / 0 |
 | [src/components/task-budget.css](../../src/components/task-budget.css) | 예 | 6,640 | 56 / 51 | 32 / 9 | 11 / 6 | 0 / 0 | 0 / 0 |
 | [src/components/task-description-files.css](../../src/components/task-description-files.css) | 예 | 2,307 | 21 / 19 | 11 / 4 | 4 / 4 | 0 / 0 | 0 / 0 |
@@ -444,15 +444,15 @@ node scripts/css-audit.mjs --self-test
 
 ### src/components/personal-work.css
 
-참조됨: 예 · 규칙 704 · 선언 2,207 · !important 22
+참조됨: 예 · 규칙 715 · 선언 2,253 · !important 22
 
 | 지표 | 발생 | 종류 | 상위 값 |
 |---|---:|---:|---|
-| hex 색 | 344 | 171 | `#52637a` × 68 · `#ffffff` × 23 · `#172b4d` × 15 · `#1863dc` × 8 · `#eeeeee` × 8 · `#f3f3f3` × 7 · `#627084` × 5 · `#e2e8f0` × 5 |
-| font-size 전체 값 | 238 | 15 | `15px` × 128 · `14px` × 72 · `18px` × 9 · `16px` × 8 · `22px` × 4 · `17px` × 3 · `20px` × 3 · `24px` × 3 |
-| font-size 내부 px | 238 | 15 | `15px` × 128 · `14px` × 72 · `18px` × 9 · `16px` × 8 · `22px` × 4 · `17px` × 3 · `20px` × 3 · `24px` × 3 |
-| radius 전체 값 | 74 | 20 | `12px` × 9 · `9px` × 8 · `14px` × 7 · `16px` × 7 · `20px` × 7 · `10px` × 6 · `24px` × 5 · `50%` × 4 |
-| radius 내부 px | 68 | 16 | `12px` × 9 · `9px` × 8 · `14px` × 7 · `16px` × 7 · `20px` × 7 · `10px` × 6 · `24px` × 5 · `8px` × 4 |
+| hex 색 | 353 | 179 | `#52637a` × 68 · `#ffffff` × 24 · `#172b4d` × 15 · `#1863dc` × 8 · `#eeeeee` × 8 · `#f3f3f3` × 7 · `#627084` × 5 · `#e2e8f0` × 5 |
+| font-size 전체 값 | 242 | 15 | `15px` × 128 · `14px` × 74 · `16px` × 9 · `18px` × 9 · `17px` × 4 · `22px` × 4 · `20px` × 3 · `24px` × 3 |
+| font-size 내부 px | 242 | 15 | `15px` × 128 · `14px` × 74 · `16px` × 9 · `18px` × 9 · `17px` × 4 · `22px` × 4 · `20px` × 3 · `24px` × 3 |
+| radius 전체 값 | 76 | 20 | `12px` × 9 · `14px` × 8 · `9px` × 8 · `10px` × 7 · `16px` × 7 · `20px` × 7 · `24px` × 5 · `50%` × 4 |
+| radius 내부 px | 70 | 16 | `12px` × 9 · `14px` × 8 · `9px` × 8 · `10px` × 7 · `16px` × 7 · `20px` × 7 · `24px` × 5 · `8px` × 4 |
 | box/text-shadow | 5 | 3 | `none` × 3 · `0 1px 3px #16385d14` × 1 · `inset 0 0 0 2px #172b4d` × 1 |
 | z-index | 0 | 0 | 없음 |
 
@@ -472,31 +472,31 @@ node scripts/css-audit.mjs --self-test
 
 ### src/components/procedure-builder.css
 
-참조됨: 예 · 규칙 175 · 선언 654 · !important 7
+참조됨: 예 · 규칙 200 · 선언 729 · !important 7
 
 | 지표 | 발생 | 종류 | 상위 값 |
 |---|---:|---:|---|
-| hex 색 | 128 | 106 | `#ffffff` × 10 · `#dce5f1` × 5 · `#6e9eed` × 3 · `#2563c5` × 2 · `#4d617b` × 2 · `#53729b` × 2 · `#596b82` × 2 · `#6b788b` × 2 |
-| font-size 전체 값 | 69 | 5 | `14px` × 40 · `15px` × 21 · `13px` × 4 · `16px` × 3 · `18px` × 1 |
-| font-size 내부 px | 69 | 5 | `14px` × 40 · `15px` × 21 · `13px` × 4 · `16px` × 3 · `18px` × 1 |
-| radius 전체 값 | 23 | 11 | `9px` × 6 · `10px` × 3 · `12px` × 3 · `8px` × 3 · `13px` × 2 · `14px` × 1 · `18px` × 1 · `20px` × 1 |
-| radius 내부 px | 23 | 11 | `9px` × 6 · `10px` × 3 · `12px` × 3 · `8px` × 3 · `13px` × 2 · `14px` × 1 · `18px` × 1 · `20px` × 1 |
-| box/text-shadow | 5 | 5 | `0 0 0 100vmax #15243b80` × 1 · `0 0 0 3px #d9e9ff` × 1 · `0 2px 10px #34517118` × 1 · `0 2px 4px #1737610a` × 1 · `none` × 1 |
-| z-index | 1 | 1 | `170` × 1 |
+| hex 색 | 139 | 113 | `#ffffff` × 9 · `#dce5f1` × 5 · `#2563c5` × 4 · `#214f8d` × 3 · `#6e9eed` × 3 · `#4d617b` × 2 · `#53729b` × 2 · `#596b82` × 2 |
+| font-size 전체 값 | 77 | 6 | `14px` × 41 · `15px` × 21 · `13px` × 7 · `16px` × 4 · `12px` × 2 · `18px` × 2 |
+| font-size 내부 px | 77 | 6 | `14px` × 41 · `15px` × 21 · `13px` × 7 · `16px` × 4 · `12px` × 2 · `18px` × 2 |
+| radius 전체 값 | 26 | 13 | `9px` × 6 · `8px` × 4 · `10px` × 3 · `12px` × 3 · `13px` × 2 · `14px` × 1 · `18px` × 1 · `20px` × 1 |
+| radius 내부 px | 26 | 13 | `9px` × 6 · `8px` × 4 · `10px` × 3 · `12px` × 3 · `13px` × 2 · `14px` × 1 · `18px` × 1 · `20px` × 1 |
+| box/text-shadow | 4 | 4 | `0 0 0 3px #d9e9ff` × 1 · `0 2px 10px #34517118` × 1 · `0 2px 4px #1737610a` × 1 · `none` × 1 |
+| z-index | 0 | 0 | 없음 |
 
 ### src/components/procedure-editor.css
 
-참조됨: 예 · 규칙 67 · 선언 209 · !important 0
+참조됨: 예 · 규칙 68 · 선언 218 · !important 0
 
 | 지표 | 발생 | 종류 | 상위 값 |
 |---|---:|---:|---|
-| hex 색 | 33 | 30 | `#334962` × 2 · `#536880` × 2 · `#6b7a8d` × 2 · `#2b6b48` × 1 · `#315a94` × 1 · `#376cb8` × 1 · `#405774` × 1 · `#62758d` × 1 |
-| font-size 전체 값 | 27 | 6 | `14px` × 10 · `13px` × 7 · `15px` × 5 · `12px` × 3 · `16px` × 1 · `19px` × 1 |
-| font-size 내부 px | 27 | 6 | `14px` × 10 · `13px` × 7 · `15px` × 5 · `12px` × 3 · `16px` × 1 · `19px` × 1 |
-| radius 전체 값 | 9 | 7 | `13px` × 3 · `10px` × 1 · `12px` × 1 · `16px` × 1 · `4px` × 1 · `8px` × 1 · `9px` × 1 |
-| radius 내부 px | 9 | 7 | `13px` × 3 · `10px` × 1 · `12px` × 1 · `16px` × 1 · `4px` × 1 · `8px` × 1 · `9px` × 1 |
-| box/text-shadow | 0 | 0 | 없음 |
-| z-index | 0 | 0 | 없음 |
+| hex 색 | 37 | 34 | `#334962` × 2 · `#6b7a8d` × 2 · `#ffffff` × 2 · `#17376112` × 1 · `#2563c5` × 1 · `#2b6b48` × 1 · `#315a94` × 1 · `#405774` × 1 |
+| font-size 전체 값 | 25 | 6 | `14px` × 8 · `13px` × 7 · `15px` × 5 · `12px` × 3 · `11px` × 1 · `16px` × 1 |
+| font-size 내부 px | 25 | 6 | `14px` × 8 · `13px` × 7 · `15px` × 5 · `12px` × 3 · `11px` × 1 · `16px` × 1 |
+| radius 전체 값 | 9 | 6 | `13px` × 4 · `10px` × 1 · `14px` × 1 · `16px` × 1 · `8px` × 1 · `9px` × 1 |
+| radius 내부 px | 9 | 6 | `13px` × 4 · `10px` × 1 · `14px` × 1 · `16px` × 1 · `8px` × 1 · `9px` × 1 |
+| box/text-shadow | 2 | 2 | `0 0 0 2px #e7f0ff` × 1 · `0 5px 16px #17376112` × 1 |
+| z-index | 1 | 1 | `12` × 1 |
 
 ### src/components/read-field.css
 

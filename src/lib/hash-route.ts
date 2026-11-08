@@ -1,5 +1,5 @@
 const views = ['dashboard', 'personal', 'department', 'budgets', 'allocation', 'division', 'delegation', 'common', 'schedule', 'performance', 'handover', 'organization', 'admin'] as const;
-const taskTabs = ['overview', 'workflow', 'schedule', 'performance', 'references', 'budget', 'monthly'] as const;
+const taskTabs = ['overview', 'references', 'workflow', 'schedule', 'performance', 'budget', 'monthly'] as const;
 export type View = typeof views[number];
 export type TaskTab = typeof taskTabs[number];
 export type HashRoute = { view: View; taskId?: string; tab?: TaskTab; focus?: string };

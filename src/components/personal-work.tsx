@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useId, useRef, useState } from 'react';
 import { ArrowDownLeft, ArrowRight, CalendarDays, Check, CheckCircle2, ChevronDown, ChevronLeft, ChevronRight, Circle, Clock3, FileText, Folder, FolderPlus, Inbox, Pencil, RotateCcw, Landmark, Layers3, Link2, ListChecks, Plus, Search, Sparkles, Trash2, Trophy, UserRound, Wallet } from 'lucide-react';
 import type { Expense, Frequency, Task, TaskReference, Unit, WorkflowStep, Workspace } from '@/lib/types';
 import type { TaskTab } from '@/lib/hash-route';
@@ -364,6 +364,7 @@ function TaskEditor({ task, workspace: w, command: executeCommand, onClose, onWo
   const currentRunId = currentRun?.id || '';
   const previousRunId = useRef(currentRunId);
   const [showBuilder, setShowBuilder] = useState(false);
+  const procedureAiReasonId = useId();
   const divisionLocked = isDepartmentConfirmed(w, task.departmentId);
   const [unitId, setUnitId] = useState(task.unitId);
   const ownUnits = sortUnitsByImportance(w.units.filter(unit => !unit.deletedAt && unit.ownerId === w.currentUser.id));
@@ -430,10 +431,10 @@ function TaskEditor({ task, workspace: w, command: executeCommand, onClose, onWo
   const changeTab = (next: typeof tab) => { if (next !== tab) requestNavigation(() => { setTab(next); setHistoryViewing(false); setMessage(''); }, undefined, [taskDraftId]); };
   const detailTabs = useTabs<TaskTab>({ value: tab, onChange: changeTab, items: [
     { value: 'overview', label: <><FileText size={16} />업무 개요</> },
+    { value: 'references', label: <><Landmark size={16} />관련 근거</> },
     { value: 'workflow', label: <><ListChecks size={16} />절차</> },
     { value: 'schedule', label: <><CalendarDays size={16} />일정·수행</> },
     { value: 'performance', label: <><Trophy size={16} />성과</> },
-    { value: 'references', label: <><Landmark size={16} />관련 근거</> },
     { value: 'budget', label: <><Wallet size={16} />예산·집행</> },
     ...(directiveDistribution ? [{ value: 'monthly' as const, label: <><CalendarDays size={16} />월별 실적</> }] : []),
   ] });
@@ -556,6 +557,18 @@ function TaskEditor({ task, workspace: w, command: executeCommand, onClose, onWo
     }, undefined, [taskDraftId]);
   }
 
+  const procedureAiDisabledReason = unavailable ? '업무 접근 권한을 확인한 뒤 절차를 작성할 수 있습니다.'
+    : !mayEdit || historyViewing ? divisionLocked ? '업무분장이 확정되어 있습니다. 부서장의 재작성 허용 후 AI로 절차를 작성할 수 있습니다.' : '업무 기준을 수정할 수 있는 담당자만 AI로 절차를 작성할 수 있습니다.'
+    : revision.conflicted ? '최신 업무 내용을 확인한 뒤 다시 작성해 주세요. 현재 입력값은 유지됩니다.'
+    : busy || uploadBusy ? '저장 또는 파일 처리가 끝난 뒤 절차를 작성해 주세요.'
+    : formDirty ? '변경한 업무 개요·관련 근거·절차를 먼저 저장해 주세요. 저장된 내용을 기준으로 분석합니다.' : '';
+  function openProcedureBuilder() {
+    if (procedureAiDisabledReason) return;
+    requestNavigation(() => {
+      setMode('edit'); setShowBuilder(true); setMessage(''); setProcedureNotice('');
+    }, undefined, [taskDraftId]);
+  }
+
   async function copyVisibleDraft() {
     const values = Array.from(bodyRef.current?.querySelectorAll<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>('input, textarea, select') || []).filter(control => !['file', 'hidden', 'password'].includes(control.type) && !(['checkbox', 'radio'].includes(control.type) && !(control as HTMLInputElement).checked)).map(control => {
       const label = control.closest<HTMLElement>('[data-field-label]')?.dataset.fieldLabel || control.getAttribute('aria-label') || control.name || '입력 내용';
@@ -616,13 +629,18 @@ function TaskEditor({ task, workspace: w, command: executeCommand, onClose, onWo
       </div>}
 
       {tab === 'workflow' && <div className="form-stack">
-        {showBuilder && editable && <section className="pw-procedure-helper"><div><div><h3>절차 작성을 도와드릴까요?</h3><p>업무 개요와 첨부파일을 바탕으로 초안을 만들 수 있습니다.</p></div><Button variant="secondary" disabled={formDirty} onPointerEnter={() => void preloadProcedureBuilder()} onFocus={() => void preloadProcedureBuilder()} onClick={() => requestNavigation(() => { setShowBuilder(value => !value); setProcedureNotice(''); }, undefined, [taskDraftId])}><ListChecks size={15}/>{showBuilder ? '현재 절차로 돌아가기' : 'AI로 초안 만들기'}</Button></div></section>}
+        <section className="pw-procedure-ai-entry" aria-label="AI 절차 작성">
+          <div className="pw-procedure-ai-copy"><span><Sparkles size={20}/></span><div><h3>업무 개요에서 절차도로</h3><p>업무 개요와 첨부파일을 중심으로 분석하고, 관련 근거를 참고해 담당자·수행 단계·진행 순서를 작성합니다.</p></div></div>
+          {showBuilder ? <Button type="button" variant="secondary" disabled={busy || uploadBusy} onClick={() => requestNavigation(() => { setShowBuilder(false); setProcedureNotice(''); }, undefined, [taskDraftId])}>현재 절차로 돌아가기</Button>
+            : <Button type="button" disabled={!!procedureAiDisabledReason} aria-describedby={procedureAiDisabledReason ? procedureAiReasonId : undefined} onPointerEnter={() => void preloadProcedureBuilder()} onFocus={() => void preloadProcedureBuilder()} onClick={openProcedureBuilder}><Sparkles size={16}/>AI로 절차·절차도 작성</Button>}
+          {!showBuilder && procedureAiDisabledReason && <p className="pw-procedure-ai-reason" id={procedureAiReasonId}>{procedureAiDisabledReason}</p>}
+        </section>
         {formDirty && <p className="pw-form-note">작성한 절차와 파일 연결은 저장 후 반영됩니다.</p>}
         {procedureNotice && <p className="pw-procedure-notice" role="status"><CheckCircle2 size={17}/>{procedureNotice}</p>}{scheduleResetIds.length > 0 && <p className="pw-form-note" role="status">바뀐 순서와 날짜가 맞지 않는 절차({workflow.filter(step => scheduleResetIds.includes(step.id)).map(step => step.title || '새 절차').join(', ')})는 일정 미정으로 바뀝니다. 저장 후 일정·수행에서 날짜를 다시 정해 주세요.</p>}
         {showBuilder && (editable || unavailable) ? <ProcedureBuilder taskId={task.id} overview={{ title, description, completionCriteria: task.completionCriteria, descriptionAttachmentIds }} overviewAttachments={w.attachments.filter(file => descriptionAttachmentIds.includes(file.id))} disabled={formDirty || unavailable} workflow={workflow} references={references} participants={participants} hasSupport={task.supportIds.length > 0} requiredStepTitles={common?.requiredSteps} onApply={applyProcedure}/>
           : <ProcedureEditor hasReviewer={!!task.reviewerId} onStartEditing={mayEdit && !historyViewing ? () => changeMode('edit') : undefined} onOpenOrganization={() => navigateToView('organization')} workspace={w} taskId={task.id} command={command} onWorkspace={next => { if (!unavailableRef.current) onWorkspace?.(next); }} onBusyChange={setUploadBusy} workflow={workflow} originalWorkflow={task.workflow} participants={participants} hasSupport={task.supportIds.length > 0} hasChanges={formDirty} requiredStepTitles={common?.requiredSteps} editable={editable} busy={busy || uploadBusy || revision.conflicted} diagramChanged={diagramChanged} redrawKey={flowRevision} onApply={save} onChange={changeStep} onRemove={removeStep} onMove={moveStep} onAdd={addStep}/>
         }
-        {!showBuilder && <><div className="pw-task-route"><p>{formDirty ? '절차를 저장하면 각 절차에 일정을 등록할 수 있습니다.' : '절차가 준비되었다면 수행할 날짜를 정해 보세요.'}</p><Button type="button" variant={formDirty ? "accent" : "secondary"} disabled={busy || uploadBusy || revision.conflicted} onClick={async () => { if (formDirty) { const submitted = latestDraft.current; const submittedTab = activeTab.current; if (await save() && sameDraft(latestDraft.current, submitted) && activeTab.current === submittedTab) setTab('schedule'); } else setTab('schedule'); }}><CalendarDays size={16}/>{formDirty ? '저장하고 일정 등록' : '일정 등록'}<ArrowRight size={15}/></Button></div>{editable && <section className="pw-procedure-helper"><div><div><h3>절차 작성을 도와드릴까요?</h3><p>업무 개요와 첨부파일을 바탕으로 초안을 만들 수 있습니다.</p></div><Button variant="secondary" disabled={formDirty} onPointerEnter={() => void preloadProcedureBuilder()} onFocus={() => void preloadProcedureBuilder()} onClick={() => requestNavigation(() => { setShowBuilder(value => !value); setProcedureNotice(''); }, undefined, [taskDraftId])}><ListChecks size={15}/>{showBuilder ? '현재 절차로 돌아가기' : 'AI로 초안 만들기'}</Button></div></section>}</>}
+        {!showBuilder && <div className="pw-task-route"><p>{formDirty ? '절차를 저장하면 각 절차에 일정을 등록할 수 있습니다.' : '절차가 준비되었다면 수행할 날짜를 정해 보세요.'}</p><Button type="button" variant={formDirty ? "accent" : "secondary"} disabled={busy || uploadBusy || revision.conflicted} onClick={async () => { if (formDirty) { const submitted = latestDraft.current; const submittedTab = activeTab.current; if (await save() && sameDraft(latestDraft.current, submitted) && activeTab.current === submittedTab) setTab('schedule'); } else setTab('schedule'); }}><CalendarDays size={16}/>{formDirty ? '저장하고 일정 등록' : '일정 등록'}<ArrowRight size={15}/></Button></div>}
       </div>}
 
       {tab === 'schedule' && <><WorkCycles key={task.id} workspace={w} task={task} command={command} dirty={formDirty} unavailable={unavailable} onHistoryChange={setHistoryViewing}/>{!historyViewing && <Button type="button" variant="secondary" onPointerEnter={() => void preloadTaskPerformance()} onFocus={() => void preloadTaskPerformance()} onClick={() => changeTab('performance')}><Trophy size={16}/>업무 성과 입력<ArrowRight size={15}/></Button>}</>}
@@ -637,7 +655,7 @@ function TaskEditor({ task, workspace: w, command: executeCommand, onClose, onWo
       {!historyViewing && ['budget', 'references'].includes(tab) && !!task.recordHistory?.length && <details className="pw-record-history"><summary>수행 기록 변경 이력 · {task.recordHistory.length}건</summary>{[...task.recordHistory].sort((a, b) => b.recordedAt.localeCompare(a.recordedAt)).map(record => <article key={record.id}><strong>{formatDateTimeFull(record.recordedAt)}</strong><small> · {w.users.find(user => user.id === record.recordedBy)?.name || w.identities?.find(user => user.id === record.recordedBy)?.name || '이전 담당자'}</small><p>집행 합계 {money(record.expensesBefore.reduce((sum, item) => sum + item.amount, 0))}원 → {money(record.expensesAfter.reduce((sum, item) => sum + item.amount, 0))}원</p><p>이전 생산 문서: {record.documentsBefore.map(document => document.title).join(', ') || '없음'}</p><p>변경 후 생산 문서: {record.documentsAfter.map(document => document.title).join(', ') || '없음'}</p></article>)}</details>}
 
     </div>
-    {(['overview', 'workflow', 'schedule', 'performance', 'references', 'budget', ...(directiveDistribution ? ['monthly'] : [])] as TaskTab[]).filter(value => value !== tab).map(value => <div key={value} {...detailTabs.panelAttrs(value)} />)}
+    {(['overview', 'references', 'workflow', 'schedule', 'performance', 'budget', ...(directiveDistribution ? ['monthly'] : [])] as TaskTab[]).filter(value => value !== tab).map(value => <div key={value} {...detailTabs.panelAttrs(value)} />)}
     </fieldset>
     {message && <p className="pw-form-error" role="alert">{message}</p>}
     <div className="form-actions pw-editor-actions"><span className="pw-save-state" role="status">{historyViewing ? '지난 회차의 기록을 확인하고 있습니다. 현재 회차에서 업무를 이어갈 수 있습니다.' : tab === 'monthly' ? '월별 실적은 이 탭에서 별도로 저장합니다.' : tab === 'performance' ? '업무 성과는 이 탭에서 저장하고, 성과 · 평가에서 제출합니다.' : saved ? <><CheckCircle2 size={15} />변경사항을 저장했습니다.</> : tab === 'schedule' ? '일정과 수행 기록은 이 탭에서 별도로 저장합니다.' : recordsEditable ? '생산 문서와 집행 내역은 수행 기록 저장을 눌러 반영합니다.' : divisionLocked ? '업무 기준은 잠겨 있습니다. 수행 기록 입력으로 생산 문서·집행 내역을 추가할 수 있습니다.' : !mayEdit ? '업무 담당자가 내용을 수정할 수 있습니다.' : mode === 'view' ? "보기 모드입니다. '업무 기준 수정'을 눌러 내용을 바꿀 수 있습니다." : '변경한 내용은 저장 후 반영됩니다.'}</span><Button type="button" variant="secondary" onClick={closeEditor}>닫기</Button>{recordsEditable && (['references', 'budget'].includes(tab) || formDirty) && <Button type="button" variant="accent" disabled={busy || uploadBusy || revision.conflicted || !formDirty} onClick={saveRecords}>{busy ? '저장 중…' : '수행 기록 저장'}</Button>}{editable && (!['schedule', 'performance', 'monthly'].includes(tab) || formDirty) && <Button type="button" variant="accent" disabled={busy || uploadBusy || revision.conflicted || !formDirty || (tab === 'workflow' && showBuilder)} onClick={save}>{busy ? '저장 중…' : tab === 'workflow' ? '수정사항 저장·절차도 반영' : '변경사항 저장'}</Button>}</div>

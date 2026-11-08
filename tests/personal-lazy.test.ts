@@ -68,7 +68,7 @@ test('opening the performance route loads actual performance content without rep
   assert.equal(componentRequire.cache[modulePath('delegation-work')], undefined);
 });
 
-test('opening the procedure tab loads its manual form before the optional expanded diagram', async () => {
+test('opening the procedure tab shows its compact diagram before the manual form', async () => {
   const { workspace, task } = fixture();
   const workflow = await renderLoaded(createElement(personal.TaskPanel, { workspace, taskId: task.id, command, onClose() {}, routedTab: 'workflow' }));
   assert.match(workflow, /aria-label="현재 적용된 업무 절차"/);
@@ -78,13 +78,15 @@ test('opening the procedure tab loads its manual form before the optional expand
     participants: taskProcedureParticipants(workspace, task), editable: true, busy: false,
     diagramChanged: false, redrawKey: 0, onApply: async () => true, onChange() {}, onRemove() {}, onMove() {}, onAdd: () => undefined,
   };
-  const closed = renderToStaticMarkup(createElement(procedure.ProcedureEditor, props));
-  assert.match(closed, /수기로 절차 추가/);
-  assert.doesNotMatch(closed, /procedure-flow-section|lazy-screen/);
-  assert.equal(componentRequire.cache[modulePath('procedure-builder')], undefined);
-  const open = await renderLoaded(createElement(procedure.ProcedureEditor, { ...props, redrawKey: 1 }));
+  const open = await renderLoaded(createElement(procedure.ProcedureEditor, props));
+  assert.match(open, /수기로 절차 추가/);
+  assert.match(open, /procedure-flow-section is-compact/);
+  assert.ok(open.indexOf('class="pe-diagram"') < open.indexOf('class="pw-section-intro"'));
+  assert.doesNotMatch(open, /<details[^>]*pe-diagram/);
+  assert.ok(componentRequire.cache[modulePath('procedure-builder')]);
   assert.match(open, /aria-label="담당자·지원·검토 역할별 절차 흐름도"/);
-  assert.match(open, /절차 목록으로 보기/);
+  assert.match(open, /aria-label="절차 편집 위치 선택"/);
+  assert.match(open, /aria-haspopup="dialog"/);
   for (const step of task.workflow) assert.ok(open.includes(step.title));
 });
 
