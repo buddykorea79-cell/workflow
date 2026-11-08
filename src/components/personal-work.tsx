@@ -26,6 +26,8 @@ import { formatDate, formatDateFull as formatDeadline, formatDateTimeFull, isPas
 import { activeTaskDelegations, canActAsDeputy } from '@/lib/delegations';
 import { DeputyRequestFields, TaskDelegationSection } from './delegation-fields';
 import { deputyPayload, initialDeputyDraft, validDeputyDraft } from '@/lib/delegation-draft';
+import { DateInput } from './date-input';
+import { TaskAssignmentFields } from './task-assignment-fields';
 import { TaskDescriptionFiles } from './task-description-files';
 import { procedureErrors } from '@/lib/procedure-draft';
 import { appendProcedureStep, moveProcedureStep, removeProcedureStep, type ProcedureOrderChange } from '@/lib/procedure-order';
@@ -291,13 +293,15 @@ function CreateTask({ workspace: w, units, selectedUnitId, command, onClose, onW
   const [unitId, setUnitId] = useState(selectedUnitId || units[0]?.id || '');
   const [dueDate, setDueDate] = useState('');
   const [frequency, setFrequency] = useState<Frequency>('once');
+  const [supportIds, setSupportIds] = useState<string[]>([]);
+  const [cooperationDepartmentIds, setCooperationDepartmentIds] = useState<string[]>([]);
   const [budgetDraft, setBudgetDraft] = useState(() => taskBudgetDraft());
   const [budgetMessage, setBudgetMessage] = useState('');
   const [busy, setBusy] = useState(false);
   const [uploadBusy, setUploadBusy] = useState(false);
   const [includeDeputy, setIncludeDeputy] = useState(false);
   const [deputy, setDeputy] = useState(() => initialDeputyDraft(w));
-  const creationValues = { title, description, descriptionAttachmentIds, unitId, dueDate, frequency, budgetDraft, includeDeputy, deputy };
+  const creationValues = { supportIds, cooperationDepartmentIds, title, description, descriptionAttachmentIds, unitId, dueDate, frequency, budgetDraft, includeDeputy, deputy };
   const latestCreation = useRef(creationValues); latestCreation.current = creationValues;
   const [savedCreation, setSavedCreation] = useState(creationValues);
   const [createdTaskId, setCreatedTaskId] = useState('');
@@ -316,9 +320,9 @@ function CreateTask({ workspace: w, units, selectedUnitId, command, onClose, onW
       const submitted = latestCreation.current;
       const issue = taskBudgetIssue(submitted.budgetDraft); setBudgetMessage(issue); if (issue) return; setBusy(true); setCreationNotice('');
       const action = createdTaskId ? 'task.configure' : 'task.create'; let nextId = createdTaskId;
-      const details = { title: submitted.title, description: submitted.description, descriptionAttachmentIds: submitted.descriptionAttachmentIds, unitId: submitted.unitId, dueDate: submitted.dueDate, frequency: submitted.frequency, ...taskBudgetPayload(submitted.budgetDraft) };
+      const details = { supportIds: submitted.supportIds, cooperationDepartmentIds: submitted.cooperationDepartmentIds, title: submitted.title, description: submitted.description, descriptionAttachmentIds: submitted.descriptionAttachmentIds, unitId: submitted.unitId, dueDate: submitted.dueDate, frequency: submitted.frequency, ...taskBudgetPayload(submitted.budgetDraft) };
       try {
-        if (await revision.command(action, createdTaskId ? { taskId: createdTaskId, ...details } : { ...details, primaryId: w.currentUser.id, supportIds: [], priority: 'medium', expenses: [], references: [], ...(submitted.includeDeputy ? { deputy: deputyPayload(submitted.deputy) } : {}) }, { onSaved: result => { nextId = createdTaskId || savedCommandTarget(result, action, w.currentUser.id) || ''; } })) {
+        if (await revision.command(action, createdTaskId ? { taskId: createdTaskId, ...details } : { ...details, primaryId: w.currentUser.id, priority: 'medium', expenses: [], references: [], ...(submitted.includeDeputy ? { deputy: deputyPayload(submitted.deputy) } : {}) }, { onSaved: result => { nextId = createdTaskId || savedCommandTarget(result, action, w.currentUser.id) || ''; } })) {
           if (!mounted.current) return;
           setCreatedTaskId(nextId); setCreationCommitted(true); setSavedCreation(submitted);
           const deputyAtCreation = createdDeputy || { includeDeputy: submitted.includeDeputy, deputy: submitted.deputy };
@@ -331,7 +335,8 @@ function CreateTask({ workspace: w, units, selectedUnitId, command, onClose, onW
     }}>
       <div className="form-grid"><Field name="unitId" label="단위업무"><select required value={unitId} onChange={event => setUnitId(event.target.value)}><option value="">단위업무 선택</option>{units.map(unit => <option key={unit.id} value={unit.id}>{unit.title} · 중요도 {unitImportance(unit)}</option>)}</select></Field><Field label="업무 구분"><input value="개인이 등록하는 세부업무" disabled/></Field><Field name="title" label="세부업무 이름" span><input required maxLength={150} value={title} onChange={event => setTitle(event.target.value)} placeholder="예: 2027년 예산 요구자료 작성" autoFocus/></Field><Field name="description" label="업무 설명" span><textarea required maxLength={20000} rows={4} value={description} onChange={event => setDescription(event.target.value)} placeholder="업무의 목적, 수행 범위, 기대하는 결과를 적어 주세요."/></Field></div>
       <TaskDescriptionFiles workspace={w} taskId={createdTaskId || undefined} title={title} description={description} attachmentIds={descriptionAttachmentIds} onAttachmentsChange={setDescriptionAttachmentIds} onDescriptionChange={setDescription} onWorkspace={onWorkspace} onBusyChange={setUploadBusy}/>
-      <div className="form-grid"><Field name="dueDate" label="업무 마감일"><input required type="date" value={dueDate} onChange={event => setDueDate(event.target.value)}/>{isPastDate(dueDate, w.serverTime) && <small className="muted" role="status">오늘 이전 날짜입니다. 이미 지난 업무를 기록하는 경우에만 사용해 주세요.</small>}</Field><Field name="frequency" label="반복 주기"><select value={frequency} onChange={event => setFrequency(event.target.value as Frequency)}>{Object.entries(frequencyNames).map(([key, label]) => <option key={key} value={key}>{label}</option>)}</select></Field></div>
+      <div className="form-grid"><Field name="dueDate" label="업무 마감일"><DateInput required aria-label="업무 마감일" value={dueDate} onChange={setDueDate}/>{isPastDate(dueDate, w.serverTime) && <small className="muted" role="status">오늘 이전 날짜입니다. 이미 지난 업무를 기록하는 경우에만 사용해 주세요.</small>}</Field><Field name="frequency" label="반복 주기"><select value={frequency} onChange={event => setFrequency(event.target.value as Frequency)}>{Object.entries(frequencyNames).map(([key, label]) => <option key={key} value={key}>{label}</option>)}</select></Field></div>
+      <TaskAssignmentFields workspace={w} primaryId={w.currentUser.id} departmentId={w.currentUser.departmentId} supportIds={supportIds} cooperationDepartmentIds={cooperationDepartmentIds} onSupportChange={setSupportIds} onDepartmentsChange={setCooperationDepartmentIds}/>
       <TaskBudgetFields value={budgetDraft} onChange={value => { setBudgetDraft(value); setBudgetMessage(''); }} />
       {budgetMessage && <p className="pw-form-error" role="alert">{budgetMessage}</p>}
       <section className="task-delegation-section"><label className="delegation-opt-in"><input type="checkbox" checked={includeDeputy} onChange={event => setIncludeDeputy(event.target.checked)}/>업무대행자를 지정하고 부서장 승인을 요청합니다</label>{includeDeputy ? <DeputyRequestFields workspace={w} departmentId={w.currentUser.departmentId} fromId={w.currentUser.id} value={deputy} onChange={setDeputy}/> : <p className="delegation-empty">업무 등록 후에도 업무대행자를 지정할 수 있습니다.</p>}</section>
@@ -376,6 +381,9 @@ function TaskEditor({ task, workspace: w, command: executeCommand, onClose, onWo
   const [title, setTitle] = useState(task.title);
   const [dueDate, setDueDate] = useState(task.dueDate);
   const [frequency, setFrequency] = useState<Frequency>(task.frequency);
+  const [supportIds, setSupportIds] = useState<string[]>(task.supportIds);
+  const [cooperationDepartmentIds, setCooperationDepartmentIds] = useState<string[]>(task.cooperationDepartmentIds ?? []);
+  const [reviewRequired, setReviewRequired] = useState(task.commonId ? true : task.reviewRequired !== false);
   const [description, setDescription] = useState(task.description);
   const [descriptionAttachmentIds, setDescriptionAttachmentIds] = useState<string[]>(task.descriptionAttachmentIds ?? []);
   const [budgetDraft, setBudgetDraft] = useState(() => taskBudgetDraft(task));
@@ -420,10 +428,10 @@ function TaskEditor({ task, workspace: w, command: executeCommand, onClose, onWo
   const { overdue } = deadlineState({ taskDueDate: task.dueDate, cycleDueDate: workspaceTask?.cycleDueDate, progress, runStatus: execution.run?.status, taskStatus: task.status, deletedAt: task.deletedAt }, todayFor(w));
   const withoutDone = (steps: PlannedStep[]) => JSON.stringify(cleanWorkflow(steps).map(({ done: _done, ...rest }) => rest));
   const workflowDirty = withoutDone(workflow) !== withoutDone(task.workflow);
-  const participants = taskProcedureParticipants(w, task);
+  const participants = taskProcedureParticipants(w, { ...task, supportIds, cooperationDepartmentIds });
   const diagramChanged = JSON.stringify(workflow) !== drawnWorkflow;
   const savedReferences = referencesForSave(references);
-  const formDirty = workflowDirty || unitId !== task.unitId || title !== task.title || description !== task.description || JSON.stringify(descriptionAttachmentIds) !== JSON.stringify(task.descriptionAttachmentIds ?? []) || dueDate !== task.dueDate || frequency !== task.frequency || JSON.stringify(budgetDraft) !== JSON.stringify(taskBudgetDraft(task)) || JSON.stringify(expenses) !== JSON.stringify(task.expenses || []) || JSON.stringify(savedReferences) !== JSON.stringify(task.references || []);
+  const formDirty = JSON.stringify(supportIds) !== JSON.stringify(task.supportIds) || JSON.stringify(cooperationDepartmentIds) !== JSON.stringify(task.cooperationDepartmentIds ?? []) || reviewRequired !== (task.commonId ? true : task.reviewRequired !== false) || workflowDirty || unitId !== task.unitId || title !== task.title || description !== task.description || JSON.stringify(descriptionAttachmentIds) !== JSON.stringify(task.descriptionAttachmentIds ?? []) || dueDate !== task.dueDate || frequency !== task.frequency || JSON.stringify(budgetDraft) !== JSON.stringify(taskBudgetDraft(task)) || JSON.stringify(expenses) !== JSON.stringify(task.expenses || []) || JSON.stringify(savedReferences) !== JSON.stringify(task.references || []);
   const taskDraftId = useUnsavedChanges(formDirty, '업무·절차 수정');
   const { requestNavigation, requestWorkspaceNavigation } = useUnsavedNavigation();
   const closeEditor = () => requestNavigation(onClose);
@@ -442,7 +450,7 @@ function TaskEditor({ task, workspace: w, command: executeCommand, onClose, onWo
     ...(directiveDistribution ? [{ value: 'monthly' as const, label: <><CalendarDays size={16} />월별 실적</> }] : []),
   ] });
   const showValidation = (next: typeof tab, message: string) => { setMessage(message); requestNavigation(() => { setTab(next); setMessage(message); }, undefined, [taskDraftId]); };
-  const draftValues = { unitId, title, description, descriptionAttachmentIds, dueDate, frequency, budgetDraft, expenses, references, workflow };
+  const draftValues = { supportIds, cooperationDepartmentIds, reviewRequired, unitId, title, description, descriptionAttachmentIds, dueDate, frequency, budgetDraft, expenses, references, workflow };
   const latestDraft = useRef(draftValues); latestDraft.current = draftValues;
   const [saveAcknowledgement, setSaveAcknowledgement] = useState<{ revision: number; draft: typeof draftValues } | null>(null);
   useEffect(() => {
@@ -452,6 +460,9 @@ function TaskEditor({ task, workspace: w, command: executeCommand, onClose, onWo
     // Accept server normalization only for fields unchanged since submission.
     setUnitId(current => current === submitted.unitId ? task.unitId : current);
     setTitle(current => current === submitted.title ? task.title : current);
+    setSupportIds(current => sameDraft(current, submitted.supportIds) ? task.supportIds : current);
+    setCooperationDepartmentIds(current => sameDraft(current, submitted.cooperationDepartmentIds) ? task.cooperationDepartmentIds ?? [] : current);
+    setReviewRequired(current => current === submitted.reviewRequired ? task.commonId ? true : task.reviewRequired !== false : current);
     setDescription(current => current === submitted.description ? task.description : current);
     setDescriptionAttachmentIds(current => JSON.stringify(current) === JSON.stringify(submitted.descriptionAttachmentIds) ? task.descriptionAttachmentIds ?? [] : current);
     setDueDate(current => current === submitted.dueDate ? task.dueDate : current);
@@ -471,6 +482,9 @@ function TaskEditor({ task, workspace: w, command: executeCommand, onClose, onWo
     // unsaved definition edits in another tab.
     setWorkflow(current => withoutDone(current) === withoutDone(previous.workflow) ? structuredClone(task.workflow) : current);
     setDueDate(current => current === previous.dueDate ? task.dueDate : current);
+    setSupportIds(current => sameDraft(current, previous.supportIds) ? task.supportIds : current);
+    setCooperationDepartmentIds(current => sameDraft(current, previous.cooperationDepartmentIds ?? []) ? task.cooperationDepartmentIds ?? [] : current);
+    setReviewRequired(current => current === (previous.commonId ? true : previous.reviewRequired !== false) ? task.commonId ? true : task.reviewRequired !== false : current);
     setReferences(current => JSON.stringify(current) === JSON.stringify(previous.references || []) ? structuredClone(task.references || []) : current);
     setExpenses(current => JSON.stringify(current) === JSON.stringify(previous.expenses || []) ? structuredClone(task.expenses || []) : current);
     setBudgetDraft(current => JSON.stringify(current) === JSON.stringify(taskBudgetDraft(previous)) ? taskBudgetDraft(task) : current);
@@ -481,6 +495,7 @@ function TaskEditor({ task, workspace: w, command: executeCommand, onClose, onWo
     previousRunId.current = currentRunId;
     if (revision.conflicted || unavailable) return;
     if (formDirty) { setMessage('회차가 갱신되었습니다. 작성 중인 업무 변경사항은 유지했습니다.'); return; }
+    setSupportIds(task.supportIds); setCooperationDepartmentIds(task.cooperationDepartmentIds ?? []); setReviewRequired(task.commonId ? true : task.reviewRequired !== false);
     setWorkflow(structuredClone(task.workflow)); setDueDate(task.dueDate); setTitle(task.title); setDescription(task.description); setUnitId(task.unitId); setFrequency(task.frequency); setDescriptionAttachmentIds(task.descriptionAttachmentIds ?? []);
     setBudgetDraft(taskBudgetDraft(task)); setExpenses(structuredClone(task.expenses || [])); setReferences(structuredClone(task.references || []));
     setShowBuilder(false); setHistoryViewing(false); setMessage(''); setSaved(false); setProcedureNotice(''); setScheduleResetIds([]); setDrawnWorkflow(JSON.stringify(task.workflow)); setFlowRevision(value => value + 1);
@@ -491,7 +506,7 @@ function TaskEditor({ task, workspace: w, command: executeCommand, onClose, onWo
     setWorkflow(result.workflow); setSaved(false); setMessage(''); setProcedureNotice(notice);
     setScheduleResetIds(ids => [...new Set([...ids, ...result.clearedScheduleIds])].filter(id => result.workflow.some(step => step.id === id)));
   }
-  const moveStep = (id: string, direction: 'up' | 'down') => updateProcedureOrder(moveProcedureStep(workflow, id, direction), '순서를 변경했습니다. 저장·반영 버튼을 누르면 절차도와 수행 순서에 함께 적용됩니다.');
+  const moveStep = (id: string, direction: 'up' | 'down') => updateProcedureOrder(moveProcedureStep(workflow, id, direction), '표시 순서를 변경했습니다. 선행 관계와 병렬 일정은 유지됩니다.');
   const removeStep = (id: string) => updateProcedureOrder(removeProcedureStep(workflow, id), '절차를 삭제했습니다. 저장·반영 버튼을 눌러 적용해 주세요.');
   function addStep() {
     if (!editable || workflow.length >= 50) return;
@@ -527,6 +542,7 @@ function TaskEditor({ task, workspace: w, command: executeCommand, onClose, onWo
       { path: 'description', value: description, label: '업무 설명' },
     ];
     if (requiredFields.some(field => !field.value.trim())) {
+      if (activeTab.current === 'overview') { validateTextFields(requiredFields); return false; }
       requestNavigation(() => { setTab('overview'); setHistoryViewing(false); requestAnimationFrame(() => validateTextFields(requiredFields)); }, undefined, [taskDraftId]);
       return false;
     }
@@ -534,10 +550,10 @@ function TaskEditor({ task, workspace: w, command: executeCommand, onClose, onWo
     if (budgetError) { showValidation('budget', budgetError); return false; }
     if (savedReferences.some(item => !item.title.trim() || (!item.content.trim() && !item.attachmentId) || (item.url && !/^https?:\/\//i.test(item.url)))) { showValidation('references', '근거의 제목과 내용 또는 첨부파일을 입력하고, 링크는 http:// 또는 https://로 시작해 주세요.'); return false; }
     if (!workflow.length || workflow.some(step => !step.title.trim() || (step.startDate && step.dueDate && step.startDate > step.dueDate))) { showValidation('workflow', '각 절차의 이름을 입력하고 종료일을 시작일 이후로 설정해 주세요.'); return false; }
-    const workflowErrors = procedureErrors(cleanWorkflow(workflow));
+    const workflowErrors = procedureErrors(cleanWorkflow(workflow), { reviewRequired });
     if (workflowErrors.length) { showValidation('workflow', workflowErrors[0]); return false; }
     setBusy(true);
-    try { if (await revision.command('task.configure', { taskId: task.id, ...(unitId !== task.unitId ? { unitId } : {}), ...(!task.commonId ? { title, ...(dueDate !== task.dueDate ? { dueDate } : {}), frequency } : {}), description, descriptionAttachmentIds, ...taskBudgetPayload(budgetDraft), expenses, references: savedReferences, ...(workflowDirty ? { workflow: cleanWorkflow(workflow) } : {}) })) { setSaved(sameDraft(latestDraft.current, draftValues)); setSaveAcknowledgement({ revision: w.revision, draft: draftValues }); if (workflowDirty || tab === 'workflow') { setDrawnWorkflow(JSON.stringify(workflow)); setFlowRevision(value => value + 1); setProcedureNotice('수정한 절차와 순서를 저장하고 절차도에 반영했습니다.' + (scheduleResetIds.length ? ' 일정 미정으로 바뀐 절차의 날짜는 일정·수행에서 다시 등록해 주세요.' : '')); if (sameDraft(latestDraft.current.workflow, workflow)) setScheduleResetIds([]); } return true; } return false; }
+    try { if (await revision.command('task.configure', { taskId: task.id, supportIds, cooperationDepartmentIds, reviewRequired, ...(unitId !== task.unitId ? { unitId } : {}), ...(!task.commonId ? { title, ...(dueDate !== task.dueDate ? { dueDate } : {}), frequency } : {}), description, descriptionAttachmentIds, ...taskBudgetPayload(budgetDraft), expenses, references: savedReferences, ...(workflowDirty ? { workflow: cleanWorkflow(workflow) } : {}) })) { setSaved(sameDraft(latestDraft.current, draftValues)); setSaveAcknowledgement({ revision: w.revision, draft: draftValues }); if (workflowDirty || tab === 'workflow') { setDrawnWorkflow(JSON.stringify(workflow)); setFlowRevision(value => value + 1); setProcedureNotice('수정한 절차와 순서를 저장하고 절차도에 반영했습니다.' + (scheduleResetIds.length ? ' 일정 미정으로 바뀐 절차의 날짜는 일정·수행에서 다시 등록해 주세요.' : '')); if (sameDraft(latestDraft.current.workflow, workflow)) setScheduleResetIds([]); } return true; } return false; }
     finally { setBusy(false); }
   }
 
@@ -614,7 +630,7 @@ function TaskEditor({ task, workspace: w, command: executeCommand, onClose, onWo
         <div className="form-grid">
           {editable && !task.commonId ? <>
             <Field name="title" label="세부업무 이름" span><input required maxLength={150} value={title} onChange={e => { setTitle(e.target.value); setSaved(false); }} /></Field>
-            <Field name="dueDate" label="업무 마감일"><input required type="date" value={dueDate} onChange={e => { setDueDate(e.target.value); setSaved(false); }} />{isPastDate(dueDate, w.serverTime) && <small className="muted" role="status">오늘 이전 날짜입니다. 이미 지난 업무를 기록하는 경우에만 사용해 주세요.</small>}</Field>
+            <Field name="dueDate" label="업무 마감일"><DateInput required aria-label="업무 마감일" value={dueDate} onChange={value => { setDueDate(value); setSaved(false); }} />{isPastDate(dueDate, w.serverTime) && <small className="muted" role="status">오늘 이전 날짜입니다. 이미 지난 업무를 기록하는 경우에만 사용해 주세요.</small>}</Field>
             <Field name="frequency" label="반복 주기"><select value={frequency} onChange={e => { setFrequency(e.target.value as Frequency); setSaved(false); }}>{Object.entries(frequencyNames).map(([key, label]) => <option key={key} value={key}>{label}</option>)}</select></Field>
           </> : <>
             <ReadField label="세부업무 이름" value={title} span />
@@ -625,6 +641,7 @@ function TaskEditor({ task, workspace: w, command: executeCommand, onClose, onWo
         <div className="pw-facts"><div><span>담당자</span><strong>{w.users.find(user => user.id === task.primaryId)?.name || '배정 대기'}</strong></div><div><span>소속 부서</span><strong>{w.departments.find(dept => dept.id === task.departmentId)?.name || '부서'}</strong></div><div><span>업무대행</span><strong>{deputies.length ? deputies.map(item => w.users.find(user => user.id === item.toId)?.name || '대행자').join(', ') : '현재 대행자 없음'}</strong></div></div>
         {editable ? <Field name="description" label="업무 설명"><textarea rows={7} maxLength={20000} value={description} onChange={e => { setDescription(e.target.value); setSaved(false); }} /></Field> : <ReadField label="업무 설명" value={description} />}
         <TaskDescriptionFiles workspace={w} taskId={task.id} title={title} description={description} attachmentIds={descriptionAttachmentIds} onAttachmentsChange={ids => { if (unavailableRef.current) return; setDescriptionAttachmentIds(ids); setSaved(false); }} onDescriptionChange={value => { if (unavailableRef.current) return; setDescription(value); setSaved(false); }} onWorkspace={next => { if (!unavailableRef.current) onWorkspace?.(next); }} onBusyChange={setUploadBusy} disabled={!editable}/>
+        {editable ? <TaskAssignmentFields workspace={w} primaryId={task.primaryId} departmentId={task.departmentId} supportIds={supportIds} cooperationDepartmentIds={cooperationDepartmentIds} onSupportChange={ids => { setSupportIds(ids); setSaved(false); }} onDepartmentsChange={ids => { setCooperationDepartmentIds(ids); setSaved(false); }}/> : <ReadField label="협업·지원" value={participants.support}/>}
         <TaskDelegationSection workspace={w} command={command} task={task} disabled={formDirty || unavailable}/>
         <div className="pw-soft-block"><h3>완료 기준</h3><p>{task.completionCriteria}</p></div>
         {common && <div className="pw-source-origin"><Inbox size={19} /><div><strong>공통업무에서 이어진 일</strong><p>{common.title}{common.projectName ? ` · ${common.projectName}` : ''}</p>{common.kind === 'directive' && <p>지시자 {common.directiveIssuer ? directiveIssuerLabels[common.directiveIssuer] : '미입력'} · 지시일자 {formatDeadline(common.instructedOn)} · 완료 전까지 매월 실적 관리</p>}</div></div>}
@@ -638,10 +655,11 @@ function TaskEditor({ task, workspace: w, command: executeCommand, onClose, onWo
             : <Button type="button" disabled={!!procedureAiDisabledReason} aria-describedby={procedureAiDisabledReason ? procedureAiReasonId : undefined} onPointerEnter={() => void preloadProcedureBuilder()} onFocus={() => void preloadProcedureBuilder()} onClick={openProcedureBuilder}><Sparkles size={16}/>AI로 절차·절차도 작성</Button>}
           {!showBuilder && procedureAiDisabledReason && <p className="pw-procedure-ai-reason" id={procedureAiReasonId}>{procedureAiDisabledReason}</p>}
         </section>
+        {editable && <label className="task-review-option"><input type="checkbox" checked={reviewRequired} disabled={!!task.commonId} onChange={event => { setReviewRequired(event.target.checked); setSaved(false); }}/><span>필수 검토 단계 유지{task.commonId ? " · 공통업무의 필수 검토는 유지됩니다." : " · 해제하면 불필요한 검토 단계를 삭제할 수 있습니다."}</span></label>}
         {formDirty && <p className="pw-form-note">작성한 절차와 파일 연결은 저장 후 반영됩니다.</p>}
         {procedureNotice && <p className="pw-procedure-notice" role="status"><CheckCircle2 size={17}/>{procedureNotice}</p>}{scheduleResetIds.length > 0 && <p className="pw-form-note" role="status">바뀐 순서와 날짜가 맞지 않는 절차({workflow.filter(step => scheduleResetIds.includes(step.id)).map(step => step.title || '새 절차').join(', ')})는 일정 미정으로 바뀝니다. 저장 후 일정·수행에서 날짜를 다시 정해 주세요.</p>}
-        {showBuilder && (editable || unavailable) ? <ProcedureBuilder taskId={task.id} overview={{ title, description, completionCriteria: task.completionCriteria, descriptionAttachmentIds }} overviewAttachments={w.attachments.filter(file => descriptionAttachmentIds.includes(file.id))} disabled={formDirty || unavailable} workflow={workflow} references={references} participants={participants} hasSupport={task.supportIds.length > 0} requiredStepTitles={common?.requiredSteps} onApply={applyProcedure}/>
-          : <ProcedureEditor hasReviewer={!!task.reviewerId} onStartEditing={mayEdit && !historyViewing ? () => changeMode('edit') : undefined} onOpenOrganization={() => navigateToView('organization')} workspace={w} taskId={task.id} command={command} onWorkspace={next => { if (!unavailableRef.current) onWorkspace?.(next); }} onBusyChange={setUploadBusy} workflow={workflow} originalWorkflow={task.workflow} participants={participants} hasSupport={task.supportIds.length > 0} hasChanges={formDirty} requiredStepTitles={common?.requiredSteps} editable={editable} busy={busy || uploadBusy || revision.conflicted} diagramChanged={diagramChanged} redrawKey={flowRevision} onApply={save} onChange={changeStep} onRemove={removeStep} onMove={moveStep} onAdd={addStep}/>
+        {showBuilder && (editable || unavailable) ? <ProcedureBuilder taskId={task.id} overview={{ title, description, completionCriteria: task.completionCriteria, descriptionAttachmentIds, reviewRequired }} overviewAttachments={w.attachments.filter(file => descriptionAttachmentIds.includes(file.id))} disabled={formDirty || unavailable} workflow={workflow} references={references} participants={participants} hasSupport={supportIds.length > 0 || cooperationDepartmentIds.length > 0} reviewRequired={reviewRequired} requiredStepTitles={common?.requiredSteps} onApply={applyProcedure}/>
+          : <ProcedureEditor hasReviewer={!!task.reviewerId} onStartEditing={mayEdit && !historyViewing ? () => changeMode('edit') : undefined} onOpenOrganization={() => navigateToView('organization')} workspace={w} taskId={task.id} command={command} onWorkspace={next => { if (!unavailableRef.current) onWorkspace?.(next); }} onBusyChange={setUploadBusy} workflow={workflow} originalWorkflow={task.workflow} participants={participants} hasSupport={supportIds.length > 0 || cooperationDepartmentIds.length > 0} reviewRequired={reviewRequired} hasChanges={formDirty} requiredStepTitles={common?.requiredSteps} editable={editable} busy={busy || uploadBusy || revision.conflicted} diagramChanged={diagramChanged} redrawKey={flowRevision} onApply={save} onChange={changeStep} onRemove={removeStep} onMove={moveStep} onAdd={addStep}/>
         }
         {!showBuilder && <div className="pw-task-route"><p>{formDirty ? '절차를 저장하면 각 절차에 일정을 등록할 수 있습니다.' : '절차가 준비되었다면 수행할 날짜를 정해 보세요.'}</p><Button type="button" variant={formDirty ? "accent" : "secondary"} disabled={busy || uploadBusy || revision.conflicted} onClick={async () => { if (formDirty) { const submitted = latestDraft.current; const submittedTab = activeTab.current; if (await save() && sameDraft(latestDraft.current, submitted) && activeTab.current === submittedTab) setTab('schedule'); } else setTab('schedule'); }}><CalendarDays size={16}/>{formDirty ? '저장하고 일정 등록' : '일정 등록'}<ArrowRight size={15}/></Button></div>}
       </div>}

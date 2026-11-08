@@ -17,9 +17,10 @@ function send(state: WorkspaceData, actor: string, type: string, payload: Record
 }
 const rejects = (code: string, fn: () => unknown) => assert.throws(fn, error => error instanceof DomainError && error.code === code);
 
-test('concurrency: all 82 server commands are explicitly classified, including logical and no-target commands', () => {
+test('concurrency: all 83 server commands are explicitly classified, including logical and no-target commands', () => {
   const cases = [...readFileSync('src/lib/domain.ts', 'utf8').matchAll(/case '([^']+)':/g)].map(match => match[1]);
-  assert.equal(cases.length, 82); assert.deepEqual(Object.keys(COMMAND_TARGET_RULES).sort(), cases.sort());
+  assert.equal(cases.length, 83); assert.deepEqual(Object.keys(COMMAND_TARGET_RULES).sort(), cases.sort());
+  assert.equal(COMMAND_TARGET_RULES['run.correctOutput'], 'run');
   assert.equal(COMMAND_TARGET_RULES['work.import'], null);
   const context = { actorId: 'person', departmentId: 'department', delegations: [{ id: 'delegate', batchId: 'batch' }] };
   assert.deepEqual(commandTarget('department.confirm', {}, context), { kind: 'departmentPlan', id: 'department' });

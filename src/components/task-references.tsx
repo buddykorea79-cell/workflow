@@ -1,9 +1,9 @@
 'use client';
 
-import { useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Download, FileText, Landmark, Link2, Plus, Trash2, Upload } from 'lucide-react';
 import type { TaskReference, Workspace } from '@/lib/types';
-import { hasReferenceContent, referenceWithFile } from '@/lib/task-references';
+import { extractReferenceFile, hasReferenceContent, referenceDocumentFile, referenceWithFile } from '@/lib/task-references';
 import { canActAsDeputy } from '@/lib/delegations';
 import { uploadAttachment } from '@/lib/upload-attachment';
 import { Badge, Button, Field, ReadField } from './ui';
@@ -29,6 +29,8 @@ export function TaskReferences({ workspace, taskId, references, editable, docume
   const [pendingFile, setPendingFile] = useState<{ reference: TaskReference; file: { id: string; name: string }; content: string } | null>(null);
   const [verifiedPreviousText, setVerifiedPreviousText] = useState(false);
   const fileChoiceVersion = useRef(0);
+  const mounted = useRef(true);
+  useEffect(() => { mounted.current = true; return () => { mounted.current = false; fileChoiceVersion.current++; }; }, []);
   const blocked = uploading || !!pendingFile;
   const mayEdit = (reference: TaskReference) => editable && (!documentsOnly || reference.type === 'document');
   const files = workspace.attachments.filter(file => file.taskId === taskId);
@@ -38,6 +40,32 @@ export function TaskReferences({ workspace, taskId, references, editable, docume
   const latestReferences = useRef(displayedReferences); latestReferences.current = displayedReferences;
   const change = (id: string, patch: Partial<TaskReference>) => onChange(latestReferences.current.map(reference => reference.id === id ? { ...reference, ...patch } : reference));
   const chooseFile = (referenceId: string) => { uploadTargetId.current = referenceId; fileInput.current?.click(); };
+
+  async function readExistingFile(referenceId: string, attachmentId: string) {
+    if (blocked) return;
+    const target = latestReferences.current.find(reference => reference.id === referenceId);
+    const file = files.find(item => item.id === attachmentId);
+    if (!target || !file || !mayEdit(target)) return;
+    const requestVersion = ++fileChoiceVersion.current;
+    setUploading(true); onBusyChange(true); setError(''); setNotice('파일 본문을 읽고 있습니다.'); setExtractionWarnings([]);
+    let waitingForChoice = false;
+    try {
+      const extracted = await extractReferenceFile(taskId, file);
+      if (!mounted.current || fileChoiceVersion.current !== requestVersion) return;
+      const current = latestReferences.current.find(reference => reference.id === referenceId);
+      if (!current || !mayEdit(current) || !sameDraft(current, target)) {
+        setNotice('본문을 읽는 동안 근거가 변경되어 입력 내용을 유지했습니다. 파일을 다시 선택해 주세요.');
+        return;
+      }
+      setExtractionWarnings(extracted.warnings);
+      waitingForChoice = selectFile(current, file, extracted.text);
+      setNotice(`${extracted.notice || '보관 중인 파일에서 본문을 가져왔습니다.'} ${waitingForChoice ? '아래에서 사용할 본문을 확인해 주세요.' : '변경사항 저장을 눌러 반영하세요.'}`);
+    } catch (cause) {
+      if (mounted.current && fileChoiceVersion.current === requestVersion) { setNotice('기존 파일 연결과 입력 내용은 유지했습니다.'); setError(cause instanceof Error ? cause.message : '문서 본문을 읽지 못했습니다.'); }
+    } finally {
+      if (mounted.current) { setUploading(false); if (!waitingForChoice) onBusyChange(false); }
+    }
+  }
 
   function selectFile(reference: TaskReference, file: { id: string; name: string }, content: string) {
     fileChoiceVersion.current++;
@@ -83,13 +111,9 @@ export function TaskReferences({ workspace, taskId, references, editable, docume
       if (!attachment) throw new Error('첨부파일 정보를 확인하지 못했습니다. 다시 열어 확인해 주세요.');
       let content = ''; let extractionNotice = '';
       try {
-        if (/\.(pdf|hwp|hwpx|docx|xlsx|xls|pptx|txt|csv)$/i.test(file.name)) {
-          const extracted = await fetch('/api/procedure-extract', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ taskId, attachmentId: attachment.id }) });
-          const body = await extracted.json() as { text?: string; error?: string; warnings?: string[] };
-          if (!extracted.ok) throw new Error(body.error || '문서 본문을 읽지 못했습니다.');
-          content = body.text || '';
-          setExtractionWarnings((body.warnings || []).filter(warning => typeof warning === 'string'));
-        } else extractionNotice = '이미지는 OCR 처리한 문서로 올리거나 주요 내용을 직접 입력해 주세요.';
+        const extracted = await extractReferenceFile(taskId, attachment);
+        content = extracted.text; extractionNotice = extracted.notice;
+        setExtractionWarnings(extracted.warnings);
       } catch (cause) { extractionNotice = cause instanceof Error ? cause.message : '본문을 직접 입력해 주세요.'; }
       if (content.length > contentLimit) throw new Error('추출 본문이 20만 자를 넘었습니다. 필요한 부분으로 나누어 주세요.');
       const current = latestReferences.current.find(reference => reference.id === referenceId);
@@ -117,7 +141,7 @@ export function TaskReferences({ workspace, taskId, references, editable, docume
         {referenceEditable ? <Field label="제목"><input disabled={!referenceEditable} value={reference.title} maxLength={300} placeholder="법령명, 지침명 또는 생산 문서 제목" onChange={event => change(reference.id, { title: event.target.value })}/></Field> : <ReadField label="제목" value={reference.title} />}
         {referenceEditable ? <Field label={reference.type === 'document' ? '문서 내용 · 생산 결과' : '내용 및 적용 조항'} span><textarea rows={5} disabled={!referenceEditable} value={reference.content} maxLength={contentLimit} placeholder="AI가 분석할 본문이나 적용 조항을 입력해 주세요. 파일만 보관할 때에는 비워둘 수 있습니다." onChange={event => change(reference.id, { content: event.target.value })}/></Field> : <ReadField label={reference.type === 'document' ? '문서 내용 · 생산 결과' : '내용 및 적용 조항'} value={reference.content} span />}
         {referenceEditable ? <Field label="원문 링크 (선택)" span><input type="url" disabled={!referenceEditable} value={reference.url || ''} placeholder="https://" onChange={event => change(reference.id, { url: event.target.value })}/></Field> : <ReadField label="원문 링크 (선택)" value={reference.url} span />}
-        {files.length > 0 && (referenceEditable ? <Field label="연결할 첨부파일 (선택)" span><select disabled={!referenceEditable} value={reference.attachmentId || ''} onChange={event => { const selected = files.find(file => file.id === event.target.value); if (!selected) change(reference.id, { attachmentId: undefined }); else if (selected.id !== reference.attachmentId) { setExtractionWarnings([]); setNotice('보관 중인 파일을 연결합니다. 본문은 다시 추출하지 않았으므로 직접 입력하거나 일치 여부를 확인해 주세요.'); selectFile(reference, selected, ''); } }}><option value="">파일 연결 없음</option>{files.map(file => <option key={file.id} value={file.id}>{file.name}</option>)}</select></Field> : <ReadField label="연결할 첨부파일 (선택)" value={file?.name || (reference.attachmentId ? '연결된 파일을 조회할 수 없습니다.' : undefined)} span />)}
+        {files.length > 0 && (referenceEditable ? <Field label="연결할 첨부파일 (선택)" span><select disabled={!referenceEditable || blocked} value={reference.attachmentId || ''} onChange={event => { const selected = files.find(file => file.id === event.target.value); if (!selected) { fileChoiceVersion.current++; change(reference.id, { attachmentId: undefined }); } else if (selected.id !== reference.attachmentId) void readExistingFile(reference.id, selected.id); }}><option value="">파일 연결 없음</option>{files.map(file => <option key={file.id} value={file.id}>{file.name}</option>)}</select>{file && referenceDocumentFile(file.name) && <Button type="button" variant="ghost" disabled={blocked} onClick={() => void readExistingFile(reference.id, file.id)}>연결한 파일 본문 가져오기</Button>}</Field> : <ReadField label="연결할 첨부파일 (선택)" value={file?.name || (reference.attachmentId ? '연결된 파일을 조회할 수 없습니다.' : undefined)} span />)}
       </div>{canUpload && referenceEditable && <div className="pw-reference-attachment"><Button data-task-action="true" type="button" variant="secondary" disabled={blocked} aria-label={`${index + 1}번 근거 파일 ${file ? '변경' : '첨부'}`} onClick={() => chooseFile(reference.id)}><Upload size={15}/>{uploading && uploadTargetId.current === reference.id ? '파일 처리 중…' : file ? '첨부파일 변경' : '파일 첨부 · 선택'}</Button><p>최대 10MB. PDF·한글·Word·Excel·PowerPoint는 Kordoc으로 읽고, TXT·CSV도 본문을 가져옵니다.</p></div>}{file && <div className="pw-reference-file"><FileText size={17}/><span><strong>{file.name}</strong><small>{Math.ceil(file.size / 1024)} KB · {file.status === 'quarantined' ? '검사 대기' : '테스트 허용'}</small></span>{workspace.currentUser.role === 'admin' && file.status === 'quarantined' && <Button type="button" variant="secondary" disabled={blocked} onClick={() => void allowTestFile(file.id)}>테스트 파일 허용</Button>}{file.status === 'test_allowed' && <a href={`/api/attachments/${encodeURIComponent(file.id)}`} aria-label={`${file.name} 다운로드`}><Download size={17}/></a>}{referenceEditable && <button type="button" className="pw-icon-button" disabled={blocked} aria-label={`${file.name} 근거 연결 해제`} onClick={() => change(reference.id, { attachmentId: undefined })}><Trash2 size={16}/></button>}</div>}{reference.url && /^https?:\/\//i.test(reference.url) && <a className="pw-reference-link" href={reference.url} target="_blank" rel="noreferrer"><Link2 size={14}/>원문 열기</a>}</section>;
     })}</div>
     {!displayedReferences.length && <div className="pw-inline-empty"><Landmark size={25}/><p>등록된 관련 근거가 없습니다.</p><span>수정 화면에서 근거를 입력하고 필요하면 파일을 첨부할 수 있습니다.</span></div>}

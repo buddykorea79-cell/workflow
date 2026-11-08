@@ -95,7 +95,7 @@ test('AI rejects invented quotations, source IDs, graph cycles and missing requi
   assert.throws(() => parseAiProcedure(result, references), errorCode('AI_UNVERIFIED_EVIDENCE'));
   result = valid(); result.steps[0].dependsOn = ['review'];
   assert.throws(() => parseAiProcedure(result, references), errorCode('AI_INVALID_WORKFLOW'));
-  result = valid(); result.steps[1].required = false;
+  result = valid(); result.steps[1].role = 'primary';
   assert.throws(() => parseAiProcedure(result, references), errorCode('AI_INVALID_WORKFLOW'));
   result = valid(); result.steps[0].evidence.quote = '   ';
   assert.throws(() => parseAiProcedure(result, references), errorCode('AI_INVALID_STRUCTURE'));
@@ -228,7 +228,7 @@ test('BizRouter gives safe errors for upstream failure, truncation, invalid JSON
   await assert.rejects(generateAiProcedure(input, { apiKey: 'test', model, fetcher: async () => ++calls === 1 ? catalog() : completion(valid(), 'length') }), errorCode('AI_INCOMPLETE_RESPONSE'));
   calls = 0;
   await assert.rejects(generateAiProcedure(input, { apiKey: 'test', model, fetcher: async () => ++calls === 1 ? catalog() : new Response('not JSON') }), errorCode('AI_INVALID_JSON'));
-  await assert.rejects(generateAiProcedure(input, { apiKey: 'test', model, signal: AbortSignal.abort(), fetcher: async () => { throw new Error('aborted'); } }), errorCode('AI_TIMEOUT'));
+  await assert.rejects(generateAiProcedure(input, { apiKey: 'test', model, signal: AbortSignal.abort(), fetcher: async () => { throw new Error('aborted'); } }), errorCode('AI_CANCELLED'));
 });
 
 test('source fingerprints include content and attachment identity for save-first protection', () => {

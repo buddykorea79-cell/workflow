@@ -221,7 +221,7 @@ test('deadline integration: schedule preservation still rejects edits to a compl
   assert.equal(JSON.stringify(state), before);
 });
 
-test('deadline integration: procedure reordering still clears conflicting dates while keeping other schedules and memos', () => {
+test('deadline integration: procedure display reordering preserves execution dates, dependencies and memos', () => {
   const state = createSeed(now);
   const taskId = createTask(state, '2026-12-31');
   const [prepare, review] = taskOf(state, taskId).workflow;
@@ -237,7 +237,7 @@ test('deadline integration: procedure reordering still clears conflicting dates 
   const saved = structuredClone(runOf(state, taskId));
   const draft = getWorkspace(state, owner, now).tasks.find(task => task.id === taskId)!.workflow;
   const reordered = moveProcedureStep(draft, 'share', 'up');
-  assert.deepEqual(reordered.clearedScheduleIds, ['write']);
+  assert.deepEqual(reordered.clearedScheduleIds, []);
   dispatch(state, 'task.configure', { taskId, workflow: reordered.workflow });
   const run = runOf(state, taskId);
   assert.equal(run.startDate, saved.startDate);
@@ -245,8 +245,9 @@ test('deadline integration: procedure reordering still clears conflicting dates 
   assert.deepEqual(run.steps.map(step => step.stepId), ['prepare', 'share', 'write', 'review']);
   for (const step of saved.workflowSnapshot!) {
     const updated = run.workflowSnapshot!.find(item => item.id === step.id)!;
-    assert.equal(updated.startDate, step.id === 'write' ? undefined : step.startDate);
-    assert.equal(updated.dueDate, step.id === 'write' ? undefined : step.dueDate);
+    assert.equal(updated.startDate, step.startDate);
+    assert.equal(updated.dueDate, step.dueDate);
+    assert.deepEqual(updated.dependsOn, step.dependsOn);
     assert.equal(updated.scheduleDetails, step.scheduleDetails);
   }
 });

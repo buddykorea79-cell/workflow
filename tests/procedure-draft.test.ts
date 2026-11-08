@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { applyProcedureDraft, generateProcedureDraft, pdfEnvelopeError, procedureErrors, PROCEDURE_PDF_LIMIT, PROCEDURE_TEXT_LIMIT, validSourceUrl } from '../src/lib/procedure-draft';
+import { applyProcedureDraft, generateProcedureDraft, pdfEnvelopeError, procedureErrors, PROCEDURE_PDF_LIMIT, PROCEDURE_TEXT_LIMIT, replaceProcedureDraft, validSourceUrl } from '../src/lib/procedure-draft';
 import type { WorkflowStep } from '../src/lib/types';
 
 const step = (id: string, patch: Partial<WorkflowStep> = {}): WorkflowStep => ({ id, title: id, role: 'primary', description: '업무 절차', output: '결과물', required: true, dependsOn: [], checklist: ['확인'], done: false, ...patch });
@@ -104,4 +104,38 @@ test('PDF envelope requires correct size, file extension, declared MIME and actu
   assert.match(pdfEnvelopeError('guide.pdf', 'text/plain', bytes)!, /PDF 형식/);
   assert.match(pdfEnvelopeError('guide.pdf', 'application/pdf', new TextEncoder().encode('not-pdf'))!, /형식/);
   assert.match(pdfEnvelopeError('guide.pdf', 'application/pdf', new Uint8Array(PROCEDURE_PDF_LIMIT + 1))!, /10MB/);
+});
+
+test('evaluation metadata and scoring tables do not become procedures merely because they contain action words', () => {
+  const metadata = ['평가 개요: 정책 추진 수준', '평가 대상: 중앙행정기관', '평가 기간: 연간', '평가 방식: 서면 지표', '평가 배점: 총점 100점', '평가 등급: 우수, 보통, 미흡', '분석사례 지표 정의: 정책 활용 사례', '데이터 등록 지표 정의: 보유 목록', '제출자료 명칭: 실적표', '평가 인정 범위: 당해 연도', '교육 실적 평가 배점: 10점', '평가 산식: 이수 인원 비율', '평가 증빙 유형: 수료증', '평가 제외 대상: 중복 실적', '평가 참고사항: 단위 환산', '평가 용어 정의: 고가치 공유데이터'];
+  assert.throws(() => generateProcedureDraft({ ...source, text: metadata.map((text, index) => `${index + 1}. ${text}`).join('\n') }, 'metadata'), /절차로 추출할 문장/);
+  assert.throws(() => generateProcedureDraft({ ...source, text: Array.from({ length: 24 }, (_, index) => `${index + 1}. 평가 지표 ${index + 1}: 배점 5점, 대상 전체 기관`).join('\n') }, 'scores'), /절차로 추출할 문장/);
+  assert.throws(() => generateProcedureDraft({ ...source, text: '평가 목적은 기관의 실적을 확인하는 것이다.\n\n데이터를 분석하는 능력 평가' }, 'descriptive'), /절차로 추출할 문장/);
+});
+
+test('mixed manuals retain real action sentences and concise task headings without assigning evaluation keywords to reviewers', () => {
+  const draft = generateProcedureDraft({ ...source, text: [
+    '1. 평가 배점: 10점',
+    '2. AI·데이터 문해력 교육 이수 실적 관리',
+    '3. 담당자는 평가 실적표를 작성한다.',
+    '4. 데이터 분석사례 등록 및 증빙 정리',
+    '5. 검토 보고서 작성',
+    '6. 부서장은 실적과 증빙을 검토한다.',
+    '7. 평가 결과를 제출한다.',
+  ].join('\n') }, 'mixed');
+  assert.equal(draft.steps.length, 6);
+  assert.deepEqual(draft.steps.map(step => step.role), ['primary', 'primary', 'primary', 'primary', 'reviewer', 'primary']);
+  assert.equal(draft.evidence['mixed-1'].locator, '문단 2');
+  assert.equal(draft.evidence['mixed-6'].locator, '문단 7');
+});
+
+test('optional review policy generates and validates owner-only procedures while keeping graph validation', () => {
+  const draft = generateProcedureDraft({ ...source, text: '1. 자료를 작성한다.\n2. 결과를 제출한다.' }, 'owner', { reviewRequired: false });
+  assert.equal(draft.steps.length, 2);
+  assert.ok(draft.steps.every(step => step.role === 'primary'));
+  assert.deepEqual(procedureErrors(draft.steps, { reviewRequired: false }), []);
+  assert.ok(procedureErrors(draft.steps).some(error => /필수 검토/.test(error)));
+  assert.equal(replaceProcedureDraft(draft.steps, { reviewRequired: false }).length, 2);
+  assert.equal(applyProcedureDraft([], draft.steps, 'replace', true, { reviewRequired: false }).length, 2);
+  assert.ok(procedureErrors([step('a', { dependsOn: ['b'] }), step('b', { dependsOn: ['a'] })], { reviewRequired: false }).some(error => /순환/.test(error)));
 });

@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
 import { executeCommand, getWorkspace } from '../src/lib/domain';
 import { createSeed } from '../src/lib/seed';
-import { appendProcedureStep, canMoveProcedureStep, canRemoveProcedureStep, moveProcedureStep, procedureOrderStart, removeProcedureStep } from '../src/lib/procedure-order';
+import { appendProcedureStep, canMoveProcedureStep, canRemoveProcedureStep, canSetProcedureDependency, moveProcedureStep, procedureOrderStart, removeProcedureStep } from '../src/lib/procedure-order';
 import { runWorkflow } from '../src/lib/work-cycles';
 import type { WorkflowStep, WorkspaceData } from '../src/lib/types';
 
@@ -23,7 +23,7 @@ function fixture(scheduled = false) {
   return { state, task };
 }
 
-test('manual order persists as the procedure graph and execution order, without mutating the source draft', () => {
+test('manual display order persists without changing execution dependencies or the source draft', () => {
   const { state, task } = fixture(true);
   const draft = getWorkspace(state, owner, now).tasks.find(item => item.id === task.id)!.workflow;
   const before = structuredClone(draft);
@@ -31,7 +31,7 @@ test('manual order persists as the procedure graph and execution order, without 
   assert.equal(result.changed, true);
   assert.deepEqual(draft, before);
   assert.deepEqual(result.workflow.map(step => step.id), ['prepare', 'share', 'write', 'review']);
-  assert.deepEqual(result.workflow.map(step => step.dependsOn), [[], ['prepare'], ['share'], ['write']]);
+  assert.deepEqual(result.workflow.map(step => step.dependsOn), [[], ['write'], ['prepare'], ['share']]);
   dispatch(state, 'task.configure', { taskId: task.id, workflow: result.workflow });
   const run = state.runs.find(run => run.taskId === task.id)!;
   assert.deepEqual(run.steps.map(step => step.stepId), result.workflow.map(step => step.id));
@@ -76,35 +76,35 @@ test('completed prefix remains fixed even when a legacy parallel step in the pre
   assert.equal(removeProcedureStep(draft, 'prepare').changed, false);
   const result = moveProcedureStep(draft, 'review', 'up');
   assert.deepEqual(result.workflow.slice(0, 2), draft.slice(0, 2));
-  assert.deepEqual(result.workflow.slice(2).map(step => step.dependsOn), [['write'], ['review']]);
+  assert.deepEqual(result.workflow.slice(2).map(step => step.dependsOn), [['share'], ['write']]);
 });
 
-test('only schedules conflicting with the new order are cleared and reported; other dates and memos stay attached to their steps', () => {
+test('display ordering preserves every schedule and memo because execution dependencies are unchanged', () => {
   const { state, task } = fixture(true);
   const draft = getWorkspace(state, owner, now).tasks.find(item => item.id === task.id)!.workflow;
   const before = structuredClone(draft);
   const result = moveProcedureStep(draft, 'share', 'up');
-  assert.deepEqual(result.clearedScheduleIds, ['write']);
+  assert.deepEqual(result.clearedScheduleIds, []);
   for (const step of result.workflow) {
     const previous = before.find(item => item.id === step.id)!;
     assert.equal(step.scheduleDetails, previous.scheduleDetails);
-    assert.equal(step.startDate, step.id === 'write' ? undefined : previous.startDate);
-    assert.equal(step.dueDate, step.id === 'write' ? undefined : previous.dueDate);
+    assert.equal(step.startDate, previous.startDate);
+    assert.equal(step.dueDate, previous.dueDate);
   }
   dispatch(state, 'task.configure', { taskId: task.id, workflow: result.workflow });
   const run = state.runs.find(item => item.taskId === task.id)!;
   assert.equal(run.startDate, '2026-11-01'); assert.equal(run.dueDate, '2026-11-30');
-  assert.equal(run.workflowSnapshot!.find(step => step.id === 'write')!.startDate, undefined);
+  assert.equal(run.workflowSnapshot!.find(step => step.id === 'write')!.startDate, '2026-11-03');
   dispatch(state, 'run.schedule', { taskId: task.id, runId: run.id, startDate: run.startDate, dueDate: run.dueDate, steps: result.workflow.map(step => ({ stepId: step.id, startDate: step.startDate, dueDate: step.dueDate, scheduleDetails: step.scheduleDetails })) });
 });
 
-test('manual additions and removals reconnect the saved sequence without removing unrelated metadata', () => {
+test('manual additions honor explicit dependencies and removals reconnect only the affected children', () => {
   const { state, task } = fixture();
   const added = appendProcedureStep(task.workflow, { id: 'followup', title: '후속 안내', role: 'primary', description: '결과를 안내합니다.', output: '', required: true, checklist: [], dependsOn: [], attachmentIds: [] });
-  assert.equal(added.changed, true); assert.deepEqual(added.workflow.at(-1)!.dependsOn, ['review']);
+  assert.equal(added.changed, true); assert.deepEqual(added.workflow.at(-1)!.dependsOn, []);
   const removed = removeProcedureStep(added.workflow, 'write');
   assert.deepEqual(removed.workflow.map(step => step.id), ['prepare', 'share', 'review', 'followup']);
-  assert.deepEqual(removed.workflow.map(step => step.dependsOn), [[], ['prepare'], ['share'], ['review']]);
+  assert.deepEqual(removed.workflow.map(step => step.dependsOn), [[], ['prepare'], ['share'], []]);
   dispatch(state, 'task.configure', { taskId: task.id, workflow: removed.workflow });
   assert.deepEqual(task.workflow.map(step => step.dependsOn), removed.workflow.map(step => step.dependsOn));
   assert.equal(appendProcedureStep(task.workflow, task.workflow[0]).changed, false);
@@ -113,13 +113,40 @@ test('manual additions and removals reconnect the saved sequence without removin
   assert.equal(moveProcedureStep(task.workflow, 'followup', 'down').changed, false);
 });
 
-test('manual ordering handles one-sided dates and enforces the procedure count limit', () => {
+test('manual ordering retains one-sided dates and enforces the procedure count limit', () => {
   const draft = workflow();
   draft[1].startDate = '2026-11-02'; draft[2].dueDate = '2026-11-05';
   const result = moveProcedureStep(draft, 'share', 'up');
-  assert.deepEqual(result.clearedScheduleIds, ['write']);
+  assert.deepEqual(result.clearedScheduleIds, []);
+  assert.equal(result.workflow.find(step => step.id === 'write')!.startDate, '2026-11-02');
   assert.equal(result.workflow.find(step => step.id === 'share')!.dueDate, '2026-11-05');
   const full = Array.from({ length: 50 }, (_, index) => ({ ...draft[0], id: `full-${index}` }));
   assert.equal(appendProcedureStep(full, { ...draft[0], id: 'overflow' }).changed, false);
   assert.equal(canRemoveProcedureStep([draft[0]], draft[0].id), false);
+});
+
+test('parallel branches retain their links and overlapping dates through adding, moving and removing steps', () => {
+  const draft = workflow();
+  draft[1].dependsOn = ['prepare']; draft[2].dependsOn = ['prepare']; draft[3].dependsOn = ['write', 'share'];
+  draft[1].startDate = draft[2].startDate = '2026-11-05'; draft[1].dueDate = draft[2].dueDate = '2026-11-10';
+  const before = structuredClone(draft);
+  const appended = appendProcedureStep(draft, { ...draft[1], id: 'extra', dependsOn: [] });
+  assert.deepEqual(appended.workflow.slice(0, 4), before);
+  const moved = moveProcedureStep(appended.workflow, 'share', 'up');
+  for (const prior of before) assert.deepEqual(moved.workflow.find(step => step.id === prior.id), prior);
+  const removed = removeProcedureStep(moved.workflow, 'write');
+  assert.deepEqual(removed.workflow.find(step => step.id === 'review')!.dependsOn, ['prepare', 'share']);
+  assert.deepEqual(removed.workflow.find(step => step.id === 'share'), before[2]);
+  assert.deepEqual(removed.workflow.find(step => step.id === 'extra')!.dependsOn, []);
+  assert.deepEqual(draft, before);
+});
+
+test('prerequisite selection blocks self references, indirect cycles and edits to completed steps', () => {
+  const draft = workflow();
+  assert.equal(canSetProcedureDependency(draft, 'share', 'prepare'), true);
+  assert.equal(canSetProcedureDependency(draft, 'prepare', 'review'), false);
+  assert.equal(canSetProcedureDependency(draft, 'write', 'write'), false);
+  assert.equal(canSetProcedureDependency(draft, 'write', 'missing'), false);
+  draft[1].done = true;
+  assert.equal(canSetProcedureDependency(draft, 'write', 'prepare'), false);
 });

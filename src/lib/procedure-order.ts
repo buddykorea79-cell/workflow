@@ -1,11 +1,10 @@
 import type { WorkflowStep } from './types';
-import { procedureScheduleConflicts } from './procedure-schedule';
 
 export type ProcedureMoveDirection = 'up' | 'down';
 export interface ProcedureOrderChange {
   workflow: WorkflowStep[];
   changed: boolean;
-  /** Dates cleared because they contradicted the newly chosen order. Show these changes before saving. */
+  /** Retained for callers that show explicit schedule changes. Display ordering never clears dates. */
   clearedScheduleIds: string[];
 }
 
@@ -28,25 +27,25 @@ export function canRemoveProcedureStep(workflow: WorkflowStep[], id: string): bo
 
 const unchanged = (workflow: WorkflowStep[]): ProcedureOrderChange => ({ workflow, changed: false, clearedScheduleIds: [] });
 
-/** Array order is the execution order for a manual edit; historical definitions remain untouched. */
+/** A display-order edit must never serialize independent branches or discard their dates. */
 function orderedChange(workflow: WorkflowStep[]): ProcedureOrderChange {
-  const ordered = structuredClone(workflow);
-  const start = procedureOrderStart(ordered);
-  const clearedScheduleIds: string[] = [];
-  for (let index = start; index < ordered.length; index++) {
-    const step = ordered[index];
-    const previous = ordered[index - 1];
-    step.dependsOn = previous ? [previous.id] : [];
+  return { workflow: structuredClone(workflow), changed: true, clearedScheduleIds: [] };
+}
+
+/** Selecting a prerequisite is safe only when it does not depend on the edited step. */
+export function canSetProcedureDependency(workflow: WorkflowStep[], stepId: string, prerequisiteId: string): boolean {
+  const step = workflow.find(item => item.id === stepId);
+  if (!step || step.done || stepId === prerequisiteId || !workflow.some(item => item.id === prerequisiteId)) return false;
+  const pending = [prerequisiteId];
+  const seen = new Set<string>();
+  while (pending.length) {
+    const id = pending.pop()!;
+    if (id === stepId) return false;
+    if (seen.has(id)) continue;
+    seen.add(id);
+    pending.push(...(workflow.find(item => item.id === id)?.dependsOn ?? []));
   }
-  const conflictingIds = new Set(procedureScheduleConflicts(ordered, ordered.map(step => ({ ...step, stepId: step.id }))).map(issue => issue.stepId));
-  for (const step of ordered.slice(start)) {
-    if (conflictingIds.has(step.id)) {
-      delete step.startDate;
-      delete step.dueDate;
-      clearedScheduleIds.push(step.id);
-    }
-  }
-  return { workflow: ordered, changed: true, clearedScheduleIds };
+  return true;
 }
 
 export function moveProcedureStep(workflow: WorkflowStep[], id: string, direction: ProcedureMoveDirection): ProcedureOrderChange {
@@ -65,5 +64,10 @@ export function appendProcedureStep(workflow: WorkflowStep[], step: WorkflowStep
 
 export function removeProcedureStep(workflow: WorkflowStep[], id: string): ProcedureOrderChange {
   if (!canRemoveProcedureStep(workflow, id)) return unchanged(workflow);
-  return orderedChange(workflow.filter(step => step.id !== id));
+  const removed = workflow.find(step => step.id === id)!;
+  // Only children of the removed node inherit its prerequisites. Other branches stay independent.
+  return orderedChange(workflow.filter(step => step.id !== id).map(step => ({
+    ...step,
+    dependsOn: [...new Set(step.dependsOn.flatMap(dependency => dependency === id ? removed.dependsOn : [dependency]))],
+  })));
 }

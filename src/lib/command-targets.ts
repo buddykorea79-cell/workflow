@@ -14,7 +14,7 @@ export const COMMAND_TARGET_RULES = {
   'task.procedure.replace': 'task', 'task.configure': 'task', 'task.setProgress': null,
   'task.update': 'task', 'task.submit': 'task', 'task.confirm': 'task', 'task.revise': 'task', 'task.archive': 'task',
   'run.schedule': 'runOrTask', 'run.completeCycle': 'runOrTask', 'run.nextCycle': 'task', 'run.create': 'task',
-  'run.check': null, 'run.completeStep': 'run', 'run.note': null,
+  'run.correctOutput': 'run', 'run.check': null, 'run.completeStep': 'run', 'run.note': null,
   'handover.create': null, 'handover.approve': 'handover', 'handover.check': null, 'handover.accept': 'handover',
   'handover.requestChanges': 'handover', 'handover.cancel': 'handover', 'handover.apply': 'handover', 'handover.update': 'handover',
   'common.assignTeam': 'common', 'common.assignPerson': 'common', 'common.register': 'common', 'common.assign': 'common', 'common.distribute': 'common',

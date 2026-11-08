@@ -118,7 +118,7 @@ test('view mode enters the existing task procedure builder without creating work
   const view = editor({ workspace }); assert.equal(view.builder(), undefined);
   view.button().onClick?.(); view.render();
   const builder = view.builder(); assert.ok(builder);
-  assert.deepEqual(builder.props.overview, { title: task.title, description: task.description, completionCriteria: task.completionCriteria, descriptionAttachmentIds: task.descriptionAttachmentIds || [] });
+  assert.deepEqual(builder.props.overview, { title: task.title, description: task.description, completionCriteria: task.completionCriteria, descriptionAttachmentIds: task.descriptionAttachmentIds || [], reviewRequired: true });
   assert.deepEqual(builder.props.workflow, task.workflow);
   assert.equal(builder.props.disabled, false); assert.equal(view.commands, 0);
   const rendered = await view.html();

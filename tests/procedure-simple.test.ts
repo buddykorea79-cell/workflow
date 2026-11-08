@@ -125,3 +125,37 @@ test('missing reviewer follows automatic department-head assignment without offe
   assert.match(admin, />조직 · 구성원 확인<\/button>/);
   assert.doesNotMatch(renderToStaticMarkup(createElement(editorUi.ProcedureEditor, { ...props, hasReviewer: true })), /class="pe-participant-warning"/);
 });
+
+test('review policy allows removing the last optional reviewer but retains common and completed protections', () => {
+  const state = createSeed(new Date('2026-11-07T03:00:00Z'));
+  const workspace = getWorkspace(state, 'u-support-member', new Date('2026-11-07T03:00:00Z'));
+  const task = workspace.tasks.find(item => item.id === 'task-data')!;
+  const workflow = defaultWorkflow().map(step => ({ ...step, done: false }));
+  const props: Parameters<typeof editorUi.ProcedureEditor>[0] = {
+    workspace, taskId: task.id, workflow, originalWorkflow: workflow, participants: taskProcedureParticipants(workspace, task),
+    command: async () => true, editable: true, busy: false, hasSupport: false, diagramChanged: false, redrawKey: 0,
+    onApply: async () => true, onChange: () => undefined, onRemove: () => undefined, onMove: () => undefined, onAdd: () => undefined,
+  };
+  const render = (overrides: Partial<typeof props>) => renderToStaticMarkup(createElement(editorUi.ProcedureEditor, { ...props, ...overrides }));
+  assert.doesNotMatch(render({ reviewRequired: true }), /aria-label="내부 검토 절차 삭제"/);
+  assert.match(render({ reviewRequired: true }), /마지막 검토 단계입니다/);
+  assert.match(render({ reviewRequired: false }), /aria-label="내부 검토 절차 삭제"/);
+  assert.doesNotMatch(render({ reviewRequired: false, requiredStepTitles: ['내부 검토'] }), /aria-label="내부 검토 절차 삭제"/);
+  assert.doesNotMatch(render({ reviewRequired: false, workflow: workflow.map(step => ({ ...step, done: step.role === 'reviewer' })), originalWorkflow: workflow.map(step => ({ ...step, done: step.role === 'reviewer' })) }), /aria-label="내부 검토 절차 삭제"/);
+});
+
+test('prerequisite controls expose parallel execution and disable choices that would create a cycle', () => {
+  const state = createSeed(new Date('2026-11-07T03:00:00Z'));
+  const workspace = getWorkspace(state, 'u-support-member', new Date('2026-11-07T03:00:00Z'));
+  const task = workspace.tasks.find(item => item.id === 'task-data')!;
+  const workflow = defaultWorkflow().map(step => ({ ...step, done: false }));
+  const html = renderToStaticMarkup(createElement(editorUi.ProcedureEditor, {
+    workspace, taskId: task.id, workflow, originalWorkflow: workflow, participants: taskProcedureParticipants(workspace, task),
+    command: async () => true, editable: true, busy: false, diagramChanged: false, redrawKey: 0,
+    onApply: async () => true, onChange: () => undefined, onRemove: () => undefined, onMove: () => undefined, onAdd: () => undefined,
+  }));
+  assert.match(html, /선택하지 않으면 다른 절차와 병행할 수 있습니다/);
+  assert.match(html, /aria-label="자료 준비 선행: 내부 검토" disabled=""/);
+  assert.match(html, /aria-label="내용 검증 선행: 자료 준비" checked=""/);
+  assert.doesNotMatch(html, /aria-label="자료 준비 선행: 자료 준비"/);
+});

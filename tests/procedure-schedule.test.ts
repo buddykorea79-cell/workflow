@@ -20,15 +20,16 @@ test('schedule checks follow every prerequisite across undated intermediate proc
   assert.doesNotThrow(() => procedureScheduleConflicts(cycle, [{ stepId: 'a', startDate: '2026-11-01' }]));
 });
 
-test('manual sequencing clears a transitive conflict but preserves unrelated dates and completed history', () => {
+test('adding a manual step preserves parallel dates and completed history', () => {
   const steps = workflow().map(step => ({ ...step, ...schedules().find(item => item.stepId === step.id), dependsOn: [] as string[], scheduleDetails: `${step.id} 일정 메모` }));
   steps[0].done = true;
   const change = appendProcedureStep(steps, { ...workflow()[0], id: 'followup', title: '후속' });
-  assert.deepEqual(change.clearedScheduleIds, ['c']);
+  assert.deepEqual(change.clearedScheduleIds, []);
   assert.deepEqual(change.workflow[0], steps[0]);
-  assert.equal(change.workflow.find(step => step.id === 'c')!.startDate, undefined);
+  assert.equal(change.workflow.find(step => step.id === 'c')!.startDate, '2026-11-05');
   assert.equal(change.workflow.find(step => step.id === 'c')!.scheduleDetails, 'c 일정 메모');
   assert.equal(change.workflow.find(step => step.id === 'review')!.dueDate, '2026-11-20');
+  assert.deepEqual(change.workflow.slice(0, 4).map(step => step.dependsOn), [[], [], [], []]);
 });
 
 test('the server rejects a transitive schedule conflict without changing an occurrence', () => {

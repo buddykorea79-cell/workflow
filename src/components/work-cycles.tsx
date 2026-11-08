@@ -5,6 +5,8 @@ import { commonDeadline } from '@/lib/common-deadline';
 import { currentPeriod } from '@/lib/schedule';
 import { formatDateFull as displayDate, formatDateTimeFull as displayTime } from '@/lib/date-format';
 
+import { DateInput } from './date-input';
+import { RunOutputCorrectionForm, RunOutputCorrectionHistory } from './run-output-correction';
 import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { ArrowRight, CalendarDays, Check, CheckCircle2, ChevronDown, FileText, History, LoaderCircle, LockKeyhole, MessageSquare, Pencil, RotateCcw, Save, UserRound, X } from 'lucide-react';
 import type { Run, RunProcedureHistory, Task, WorkflowStep, Workspace } from '@/lib/types';
@@ -95,6 +97,7 @@ export function WorkCycles({ workspace: w, task, command, dirty, unavailable = f
 
 function CycleScheduleForm({ workspace: w, task, latest, cycleNumber, mode, command, disabled, onSavedRunId, onClose }: { workspace: Workspace; task: Task; latest?: Run; cycleNumber: number; mode: 'current' | 'next'; command: CommandFn; disabled: boolean; onSavedRunId: (runId: string) => void; onClose: () => void }) {
   const { requestNavigation } = useUnsavedNavigation();
+  const formRef = useRef<HTMLFormElement>(null);
   const mounted = useRef(true);
   useEffect(() => { mounted.current = true; return () => { mounted.current = false; }; }, []);
   const isNext = mode === 'next';
@@ -142,6 +145,7 @@ function CycleScheduleForm({ workspace: w, task, latest, cycleNumber, mode, comm
   }
   async function saveSchedule() {
     if (disabled || saving || revision.conflicted) return;
+    if (formRef.current && !formRef.current.reportValidity()) return;
     const message = validate(); setError(message); if (message) return;
     setSaving(true); setSaveNotice('');
     try {
@@ -159,8 +163,9 @@ function CycleScheduleForm({ workspace: w, task, latest, cycleNumber, mode, comm
       } else setError('일정을 저장하지 못했습니다. 표시된 안내와 현재 회차 상태를 확인해 주세요.');
     } catch (cause) { setError(cause instanceof Error ? cause.message : '일정을 저장하지 못했습니다.'); } finally { setSaving(false); }
   }
-  return <form className="wc-next-form" aria-label={isNext ? '다음 업무 회차 일정' : '현재 업무 회차 일정 등록'} onSubmit={event => {
+  return <form ref={formRef} className="wc-next-form" aria-label={isNext ? '다음 업무 회차 일정' : '현재 업무 회차 일정 등록'} onSubmit={event => {
     event.preventDefault(); if (disabled || saving || revision.conflicted) return;
+    if (!event.currentTarget.reportValidity()) return;
     const message = validate(); setError(message); if (message) return;
     if (exceedsTaskDeadline) setConfirmDeadline(true); else void saveSchedule();
   }}>
@@ -170,7 +175,7 @@ function CycleScheduleForm({ workspace: w, task, latest, cycleNumber, mode, comm
     {deadline && <p className={validDate(dueDate) && dueDate > deadline ? "wc-warning" : "wc-note"} role="status">중앙 제출기한: {deadline}. {validDate(dueDate) && dueDate > deadline ? "내부 종료일이 중앙 제출기한을 넘습니다. 저장해도 제출기한은 연장되지 않고 중앙 기준으로 지연 표시됩니다." : "회차 일정을 수정해도 중앙 제출기한은 유지됩니다."}</p>}
     <fieldset disabled={disabled} className="wc-form-fields">
     <div className="wc-schedule-summary" aria-live="polite"><CalendarDays size={19}/><div><span>전체 일정</span><strong>{dates.length ? `${displayDate(startDate)} — ${displayDate(dueDate)}` : '절차의 날짜를 입력해 주세요'}</strong></div><span>{scheduledCount} / {workflow.length}개 설정</span></div>
-    <div className="wc-date-steps">{workflow.map((step, index) => { const stepDates = steps.find(item => item.stepId === step.id)!; return <section key={step.id} aria-label={`${index + 1}. ${step.title} 일정`}><div><span>{String(index + 1).padStart(2, '0')}</span><div><h4>{step.title}</h4><small><UserRound size={13}/>{participants[step.role]}</small></div></div><div className="wc-procedure-dates"><Field label="시작일"><input aria-label={`${step.title} 시작일`} type="date" value={stepDates.startDate} onChange={event => { setSteps(items => items.map(item => item.stepId === step.id ? { ...item, startDate: event.target.value } : item)); setError(''); }} /></Field><span aria-hidden="true">—</span><Field label="종료일"><input aria-label={`${step.title} 종료일`} type="date" min={stepDates.startDate || undefined} value={stepDates.dueDate} onChange={event => { setSteps(items => items.map(item => item.stepId === step.id ? { ...item, dueDate: event.target.value } : item)); setError(''); }} /></Field></div>{step.dependsOn.length > 0 && <p className="wc-step-dependencies"><ArrowRight size={13}/>{step.dependsOn.map(id => workflow.find(item => item.id === id)?.title).filter(Boolean).join(', ')} 완료 후 시작</p>}<details className="wc-schedule-extra"><summary><span>진행 방법 · 일정 메모{stepDates.scheduleDetails ? ' 있음' : ' (선택)'}</span><ChevronDown size={15}/></summary>{step.description && <p className="wc-step-description">{step.description}</p>}<Field label="일정 메모"><textarea aria-label={`${step.title} 일정 메모`} rows={2} maxLength={5000} value={stepDates.scheduleDetails} placeholder="이번 일정에 필요한 장소, 준비 사항 등을 적어 주세요." onChange={event => setSteps(items => items.map(item => item.stepId === step.id ? { ...item, scheduleDetails: event.target.value } : item))} /></Field></details></section>; })}</div>
+    <div className="wc-date-steps">{workflow.map((step, index) => { const stepDates = steps.find(item => item.stepId === step.id)!; return <section key={step.id} aria-label={`${index + 1}. ${step.title} 일정`}><div><span>{String(index + 1).padStart(2, '0')}</span><div><h4>{step.title}</h4><small><UserRound size={13}/>{participants[step.role]}</small></div></div><div className="wc-procedure-dates"><Field label="시작일"><DateInput aria-label={`${step.title} 시작일`} value={stepDates.startDate} onChange={value => { setSteps(items => items.map(item => item.stepId === step.id ? { ...item, startDate: value } : item)); setError(''); }} /></Field><span aria-hidden="true">—</span><Field label="종료일"><DateInput aria-label={`${step.title} 종료일`} min={stepDates.startDate || undefined} value={stepDates.dueDate} onChange={value => { setSteps(items => items.map(item => item.stepId === step.id ? { ...item, dueDate: value } : item)); setError(''); }} /></Field></div>{step.dependsOn.length > 0 && <p className="wc-step-dependencies"><ArrowRight size={13}/>{step.dependsOn.map(id => workflow.find(item => item.id === id)?.title).filter(Boolean).join(', ')} 완료 후 시작</p>}<details className="wc-schedule-extra"><summary><span>진행 방법 · 일정 메모{stepDates.scheduleDetails ? ' 있음' : ' (선택)'}</span><ChevronDown size={15}/></summary>{step.description && <p className="wc-step-description">{step.description}</p>}<Field label="일정 메모"><textarea aria-label={`${step.title} 일정 메모`} rows={2} maxLength={5000} value={stepDates.scheduleDetails} placeholder="이번 일정에 필요한 장소, 준비 사항 등을 적어 주세요." onChange={event => setSteps(items => items.map(item => item.stepId === step.id ? { ...item, scheduleDetails: event.target.value } : item))} /></Field></details></section>; })}</div>
     <details className="wc-schedule-extra wc-cycle-memo"><summary><span>전체 일정 메모{scheduleDetails ? ' 있음' : ' (선택)'}</span><ChevronDown size={15}/></summary><Field label="전체 일정 메모"><textarea rows={2} maxLength={5000} value={scheduleDetails} placeholder="전체 절차에 공통으로 적용할 안내가 있으면 적어 주세요." onChange={event => setScheduleDetails(event.target.value)}/></Field></details>
     </fieldset>
     <p className="wc-note">날짜가 정해진 절차부터 등록할 수 있습니다. 비워 둔 절차는 ‘일정 미정’으로 표시됩니다.</p>
@@ -237,6 +242,7 @@ function CurrentCycleSteps({ workspace: w, task, run, command, disabled, hideCom
           {run && (mayComplete || output.length > 0) && <Field label={`${step.title} 수행 결과`}><textarea rows={2} maxLength={5000} disabled={structuralLock || !ready} value={output} placeholder="완료한 내용과 생산 문서 등을 기록하세요." onChange={event => setOutputs(items => ({ ...items, [step.id]: event.target.value }))} /></Field>}
           <div className="wc-step-actions">{mayComplete ? <><span>{!ready ? '선행 절차를 먼저 완료해 주세요.' : execution?.checklist.some(item => !item.done) ? '체크리스트를 모두 확인한 뒤 완료하세요.' : run && !output.trim() ? '수행 결과를 입력한 뒤 완료하세요.' : step.role === 'reviewer' ? '검토 결과를 확인하고 완료하세요.' : '수행한 내용을 확인하고 완료하세요.'}</span><Button data-task-action="true" variant="secondary" disabled={structuralLock || saving || !ready || !!execution?.checklist.some(item => !item.done) || !!run && !output.trim()} onClick={() => void perform(run ? 'run.completeStep' : 'task.setProgress', run ? { runId: run.id, stepId: step.id, output: output.trim() } : { taskId: task.id, stepId: step.id, done: true }, step.id)}><CheckCircle2 size={15} />{pendingKeys.has(`step:${step.id}`) ? '저장 중…' : step.role === 'reviewer' ? '검토 완료' : '절차 완료'}</Button></> : <span>{step.role === 'reviewer' ? '지정된 검토자 또는 부서장이 완료합니다.' : '지정된 업무 담당자가 수행합니다.'}</span>}</div>
         </>}
+        {completed && run && execution && <RunOutputCorrectionForm workspace={w} task={task} run={run} step={execution} command={command} disabled={disabled || saving || run.status === 'paused'}/>}
         {completed && output.length > 0 && <div className="wc-output-draft">
           <p className="wc-warning" role="status">절차 완료를 요청한 뒤 추가로 입력한 내용입니다. 완료 기록은 보존되며, 이 내용은 보완 메모로 저장할 수 있습니다.</p>
           <Field label={`${step.title} 추가 작성 내용`}><textarea rows={3} maxLength={5000} value={output} onChange={event => setOutputs(items => ({ ...items, [step.id]: event.target.value }))}/></Field>
@@ -244,6 +250,7 @@ function CurrentCycleSteps({ workspace: w, task, run, command, disabled, hideCom
         </div>}
       </article>;
     })}</div>
+    {run && <RunOutputCorrectionHistory workspace={w} run={run}/>}
     {run && <ProcedureRevisionHistory workspace={w} task={task} run={run}/>}
     {error && <p className="wc-error" role="alert">{error}</p>}
   </section>;
@@ -319,6 +326,7 @@ function CycleHistory({ workspace: w, task, run, number }: { workspace: Workspac
       </article>;
     })}</div>
     {run.notes.length > 0 && <div className="wc-history-notes"><h4><FileText size={16} />회차 메모</h4>{run.notes.map(note => <article key={note.id}><header><strong>{nameOf(w, note.authorId)}</strong><time>{displayTime(note.createdAt)}</time></header>{note.stepId && <small>{workflow.find(step => step.id === note.stepId)?.title || run.steps.find(step => step.stepId === note.stepId)?.title || '연결된 절차'}</small>}<p>{note.body}</p></article>)}</div>}
+    <RunOutputCorrectionHistory workspace={w} run={run}/>
     <ProcedureRevisionHistory workspace={w} task={task} run={run}/>
   </section>;
 }

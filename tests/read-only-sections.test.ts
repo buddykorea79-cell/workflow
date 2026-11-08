@@ -119,26 +119,32 @@ function* elementTree(node: ReactNode): Generator<ReactElement<NodeProps>> {
   yield* elementTree(node.props.children);
 }
 
-test('switching reference inputs to text retains the pending attachment choice and cancel callback', () => {
+test('switching reference inputs to text retains the pending attachment choice and cancel callback', async () => {
   const slots: unknown[] = [], changes: TaskReference[][] = [], busy: boolean[] = [];
   const props = referenceProps({ editable: true, onChange: next => changes.push(next), onBusyChange: next => busy.push(next) });
   props.references[0].attachmentId = undefined;
   const react = componentRequire('react') as typeof import('react');
   function render() {
-    const previous = { useState: react.useState, useRef: react.useRef }; let index = 0;
+    const previous = { useState: react.useState, useRef: react.useRef, useEffect: react.useEffect }; let index = 0;
     react.useState = ((initial: unknown) => {
       const slot = index++; if (!(slot in slots)) slots[slot] = initial;
       return [slots[slot], (next: unknown) => { slots[slot] = typeof next === 'function' ? next(slots[slot]) : next; }];
     }) as typeof react.useState;
     react.useRef = ((initial: unknown) => { const slot = index++; if (!(slot in slots)) slots[slot] = { current: initial }; return slots[slot]; }) as typeof react.useRef;
+    react.useEffect = (() => { index++; }) as typeof react.useEffect;
     try { return referencesUi.TaskReferences(props); }
     finally { Object.assign(react, previous); }
   }
   const initial = render();
   const attachmentSelect = [...elementTree(initial)].find(node => node.type === 'select' && node.props.value === '');
   assert.ok(attachmentSelect?.props.onChange);
-  attachmentSelect.props.onChange({ target: { value: 'attachment-test' } });
-  assert.deepEqual(busy, [true]); assert.equal(changes.length, 0);
+  const originalFetch = globalThis.fetch;
+  try {
+    globalThis.fetch = async () => Response.json({ text: '새 파일에서 읽은 본문' });
+    attachmentSelect.props.onChange({ target: { value: 'attachment-test' } });
+    assert.deepEqual(busy, [true]); assert.equal(changes.length, 0);
+    await new Promise<void>(resolve => setImmediate(resolve));
+  } finally { globalThis.fetch = originalFetch; }
   props.editable = false;
   const viewing = render(), html = renderToStaticMarkup(viewing);
   assert.match(html, /aria-label="첨부파일 본문 확인"/);
@@ -146,6 +152,6 @@ test('switching reference inputs to text retains the pending attachment choice a
   assert.match(html, /data-read-label="제목"/);
   const cancel = [...elementTree(viewing)].find(node => node.props.children === '파일 연결 변경 취소');
   assert.ok(cancel?.props.onClick); cancel.props.onClick();
-  assert.deepEqual(busy, [true, false]); assert.equal(changes.length, 0);
+  assert.deepEqual(busy, [true, true, false]); assert.equal(changes.length, 0);
   assert.doesNotMatch(renderToStaticMarkup(render()), /aria-label="첨부파일 본문 확인"/);
 });

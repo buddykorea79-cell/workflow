@@ -4,14 +4,14 @@ import { assertSameOrigin, currentUserId } from '@/lib/auth';
 import { activeUser, assertDefinitionWritable, assertTaskWritable, canReadTask, DomainError } from '@/lib/domain';
 import { transaction } from '@/lib/store';
 import { apiError, json } from '@/lib/api';
-import { readProcedureDocuments, readProcedureOverviewDocuments } from '@/lib/procedure-documents';
-import { generateAiProcedure } from '@/lib/bizrouter';
+import { readProcedureDocuments, readProcedureOverviewDocuments, type ProcedureDocumentOptions } from '@/lib/procedure-documents';
+import { generateAiProcedure, procedureAbortError, withProcedureSignal } from '@/lib/bizrouter';
 import { assertUserRateLimit } from '@/lib/rate-limit';
-import { AI_REFERENCE_LIMIT, procedureOverviewFingerprint, procedureReferenceFingerprint } from '@/lib/procedure-ai-input';
+import { AI_REFERENCE_LIMIT, AI_PROCEDURE_TIMEOUT_MS, procedureOverviewFingerprint, procedureReferenceFingerprint } from '@/lib/procedure-ai-input';
 
 export const runtime = 'nodejs';
-export const maxDuration = 70;
-const bodySchema = z.object({ taskId: z.string().min(1).max(150), overviewFingerprint: z.string().max(100_000), referenceIds: z.array(z.string().min(1).max(150)).max(AI_REFERENCE_LIMIT), referencesFingerprint: z.string().max(4_100_000), readAttachments: z.boolean().default(true) }).strict();
+export const maxDuration = 100;
+const bodySchema = z.object({ taskId: z.string().min(1).max(150), overviewFingerprint: z.string().max(100_000), overviewAttachmentIds: z.array(z.string().min(1).max(150)).max(10).optional(), referenceIds: z.array(z.string().min(1).max(150)).max(AI_REFERENCE_LIMIT), referencesFingerprint: z.string().max(4_100_000), readAttachments: z.boolean().default(true) }).strict();
 const activeRequests = new Set<string>();
 
 async function boundedJson(request: NextRequest) {
@@ -33,6 +33,7 @@ async function boundedJson(request: NextRequest) {
 
 export async function POST(request: NextRequest) {
   let requestKey: string | undefined;
+  const signal = AbortSignal.any([request.signal, AbortSignal.timeout(AI_PROCEDURE_TIMEOUT_MS)]);
   try {
     assertSameOrigin(request);
     const userId = await currentUserId(request);
@@ -47,7 +48,9 @@ export async function POST(request: NextRequest) {
       if (user.id !== task.primaryId && user.role !== 'admin' && !(user.departmentId === task.departmentId && ['manager', 'head'].includes(user.role))) throw new DomainError(403, 'PROCEDURE_EDIT_DENIED', '담당자 또는 부서 관리자만 절차를 분석할 수 있습니다.');
       assertDefinitionWritable(state, user, task.departmentId);
       if (procedureOverviewFingerprint(task) !== input.overviewFingerprint) throw new DomainError(409, 'AI_OVERVIEW_CHANGED', '업무 개요 또는 붙임 파일이 저장된 내용과 다릅니다. 변경사항을 저장한 뒤 다시 분석해 주세요.');
-      const overviewAttachments = (task.descriptionAttachmentIds ?? []).map(id => {
+      const overviewIds = input.overviewAttachmentIds ?? task.descriptionAttachmentIds ?? [];
+      if (new Set(overviewIds).size !== overviewIds.length || overviewIds.some(id => !task.descriptionAttachmentIds?.includes(id))) throw new DomainError(409, 'AI_OVERVIEW_CHANGED', '분석할 파일은 저장된 업무 개요의 붙임 파일에서 선택해 주세요.');
+      const overviewAttachments = overviewIds.map(id => {
         const file = state.attachments.find(file => file.id === id && file.taskId === task.id);
         if (!file) throw new DomainError(409, 'AI_ATTACHMENT_MISSING', '업무 개요의 붙임 파일 연결을 확인해 주세요.');
         return file;
@@ -57,22 +60,22 @@ export async function POST(request: NextRequest) {
       const saved = references.filter(reference => reference !== undefined);
       if (procedureReferenceFingerprint(saved) !== input.referencesFingerprint) throw new DomainError(409, 'AI_REFERENCES_CHANGED', '관련 근거가 저장된 내용과 다릅니다. 변경사항을 먼저 저장하고 다시 분석해 주세요.');
       const attachments = saved.flatMap(reference => {
-        if (!reference.attachmentId) return [];
+        if (!input.readAttachments || !reference.attachmentId) return [];
         const file = state.attachments.find(file => file.id === reference.attachmentId && file.taskId === task.id);
         if (!file) throw new DomainError(409, 'AI_ATTACHMENT_MISSING', '이 업무의 첨부파일 연결을 확인해 주세요.');
         return [file];
       });
-      return structuredClone({ hasSupport: task.supportIds.length > 0, title: task.title, description: task.description, completionCriteria: task.completionCriteria, overviewAttachments, references: saved, attachments, requiredStepTitles: state.commonTasks.find(common => common.id === task.commonId)?.requiredSteps });
+      return structuredClone({ hasSupport: task.supportIds.length > 0 || !!task.cooperationDepartmentIds?.length, reviewRequired: !!task.commonId || task.reviewRequired !== false, title: task.title, description: task.description, completionCriteria: task.completionCriteria, overviewAttachments, references: saved, attachments, requiredStepTitles: state.commonTasks.find(common => common.id === task.commonId)?.requiredSteps });
     });
     if (activeRequests.has(userId)) throw new DomainError(429, 'AI_ALREADY_RUNNING', '진행 중인 AI 분석이 끝난 뒤 다시 요청해 주세요.');
     assertUserRateLimit(userId);
     activeRequests.add(userId); requestKey = userId;
-    // Overview files are the primary input and are always read. This switch only controls reference files.
-    const overview = await readProcedureOverviewDocuments(source.overviewAttachments);
-    const prepared = input.readAttachments ? await readProcedureDocuments(source.references, source.attachments) : { references: source.references, warnings: [] };
-    const result = await generateAiProcedure({ hasSupport: source.hasSupport, title: source.title, description: source.description, completionCriteria: source.completionCriteria, documents: overview.documents, references: prepared.references, requiredStepTitles: source.requiredStepTitles }, { signal: request.signal });
+    const documentsOptions: ProcedureDocumentOptions = { signal, cache: new Map() };
+    const overview = await withProcedureSignal(() => readProcedureOverviewDocuments(source.overviewAttachments, undefined, documentsOptions), signal);
+    const prepared = input.readAttachments ? await withProcedureSignal(() => readProcedureDocuments(source.references, source.attachments, undefined, { ...documentsOptions, primaryDocuments: overview.documents }), signal) : { references: source.references, warnings: [] };
+    const result = await withProcedureSignal(() => generateAiProcedure({ hasSupport: source.hasSupport, reviewRequired: source.reviewRequired, title: source.title, description: source.description, completionCriteria: source.completionCriteria, documents: overview.documents, references: prepared.references, requiredStepTitles: source.requiredStepTitles }, { signal }), signal);
     result.draft.warnings.push(...overview.warnings, ...prepared.warnings);
     return json(result);
-  } catch (error) { return apiError(error); }
+  } catch (error) { return apiError(signal.aborted ? procedureAbortError(signal) : error); }
   finally { if (requestKey) activeRequests.delete(requestKey); }
 }

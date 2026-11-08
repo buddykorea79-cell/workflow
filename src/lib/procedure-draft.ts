@@ -8,10 +8,27 @@ export interface ProcedureSource { title: string; text: string; type: TaskRefere
 export interface ProcedureEvidence { sourceTitle: string; locator: string; excerpt: string }
 export interface ProcedureAnalysis { summary: string; sources: Array<{ referenceId: string; sourceTitle: string; summary: string; locator: string; excerpt: string }> }
 export interface ProcedureDraft { steps: WorkflowStep[]; references: TaskReference[]; evidence: Record<string, ProcedureEvidence>; warnings: string[]; analysis?: ProcedureAnalysis }
-export interface ProcedureGenerationOptions { hasSupport?: boolean }
+export interface ProcedureGenerationOptions { hasSupport?: boolean; reviewRequired?: boolean }
 
 const numbered = /^(?:제\s*\d+\s*조(?:의\s*\d+)?(?:\([^)]*\))?|\d{1,3}[.)]\s*|[가-하][.)]\s*|[①-⑳]\s*|[-•○]\s*)/;
-const actions = /접수|신청|제출|검토|승인|심사|확인|작성|통보|배정|등록|취합|협의|지급|정산|보고|분석|처리|평가|결정|수집/;
+const actionWords = '접수|신청|제출|검토|승인|심사|확인|작성|통보|배정|등록|취합|협의|지급|정산|보고|분석|처리|평가|결정|수집|이수|정리|요청|개선|보완|발굴|관리|실시|수행';
+const actionPredicate = new RegExp(`(?:${actionWords})(?:하(?:고|여|며|도록|라|다)|한다|합니다|해야|하여야|할\\s*것|하기[.。]?$|함(?=[.。\\s]|$))`);
+const actionHeading = /(?:접수|신청|제출|검토|승인|심사|확인|작성|통보|배정|등록|취합|협의|지급|정산|보고|분석|처리|결정|수집|이수|정리|요청|개선|보완|발굴|관리|실시|수행|추진)(?:\s*\([^)]*\))?[.。]?$/;
+const metadata = /목차|배점|산식|평가\s*등급|(?:용어|지표)\s*정의|제출\s*자료\s*명칭|평가\s*(?:개요|대상|기간|방식|목적|항목)|인정\s*범위|증빙\s*유형|참고\s*사항|제외\s*대상/;
+
+/** Prefer an actual action predicate, or a short action heading; keywords alone are not procedures. */
+function isProcedureParagraph(value: string): boolean {
+  const text = value.replace(numbered, '').trim();
+  if (/(?:목적|정의|개요)(?:은|는|란|\s*[:：]).*(?:것이다|의미한다|위함이다)/.test(text)) return false;
+  if (actionPredicate.test(text)) return true;
+  if (!text || text.length > 150 || metadata.test(text) || /[:：]|\.{3,}|…/.test(text)) return false;
+  return actionHeading.test(text);
+}
+
+function reviewerAction(text: string): boolean {
+  return /(?:검토|승인|심사)(?:하(?:고|여|며|도록)|한다|합니다|해야|하여야|\s*(?:및\s*(?:검토|승인|심사))?[.。]?$)/.test(text)
+    || /(?:부서장|검토자|승인권자)(?:은|는|이|가)?.*(?:평가|결정)(?:한다|합니다|하)/.test(text);
+}
 export function validSourceUrl(value: string): boolean {
   if (!value.trim()) return true;
   try { return ['http:', 'https:'].includes(new URL(value).protocol); } catch { return false; }
@@ -32,26 +49,26 @@ function paragraphs(text: string): string[] {
   return result.length === 1 && !numbered.test(result[0]) ? result[0].split(/(?<=[.!?。])\s+/).filter(Boolean) : result;
 }
 
-export function generateProcedureDraft(source: ProcedureSource, idPrefix: string, { hasSupport = false }: ProcedureGenerationOptions = {}): ProcedureDraft {
+export function generateProcedureDraft(source: ProcedureSource, idPrefix: string, { hasSupport = false, reviewRequired = true }: ProcedureGenerationOptions = {}): ProcedureDraft {
   if (!source.title.trim()) throw new Error('자료 제목을 입력해 주세요.');
   if (!validSourceUrl(source.url || '')) throw new Error('원문 주소는 HTTP 또는 HTTPS 주소로 입력해 주세요.');
   if (!source.text.trim() && !source.pages?.some(page => page.text.trim())) throw new Error('절차를 만들 본문을 입력해 주세요.');
   const pageTextLength = source.pages?.reduce((sum, page) => sum + page.text.length, 0) ?? 0;
   if (source.text.length > PROCEDURE_TEXT_LIMIT || pageTextLength > PROCEDURE_TEXT_LIMIT) throw new Error('본문은 20만 자 이하로 입력해 주세요.');
   const groups = source.pages?.length ? source.pages : [{ page: 0, text: source.text }];
-  const candidates = groups.flatMap(group => paragraphs(group.text).map((text, index) => ({ text, locator: `${group.page ? `${group.page}쪽 · ` : ''}문단 ${index + 1}` }))).filter(item => actions.test(item.text));
-  const warnings = ['번호·문단 순서로 연결한 규칙 기반 초안입니다. 실제 담당 역할, 선행 조건과 원문 근거를 검토해 주세요.'];
+  const candidates = groups.flatMap(group => paragraphs(group.text).map((text, index) => ({ text, locator: `${group.page ? `${group.page}쪽 · ` : ''}문단 ${index + 1}` }))).filter(item => isProcedureParagraph(item.text));
+  const warnings = ['수행 문장과 짧은 행동 항목을 골라 번호·문단 순서로 연결한 규칙 기반 초안입니다. 병행할 절차는 선행 절차를 해제하고 담당 역할과 원문 근거를 검토해 주세요.'];
   if (!candidates.length) throw new Error('절차로 추출할 문장을 찾지 못했습니다. 신청·검토·제출 등 수행 내용이 있는 본문을 붙여 넣어 주세요.');
   if (candidates.length > PROCEDURE_STEP_LIMIT) warnings.push(`후보 ${candidates.length}개 중 앞의 ${PROCEDURE_STEP_LIMIT}개를 가져왔습니다. 나머지 본문은 별도로 검토해 주세요.`);
   const evidence: Record<string, ProcedureEvidence> = {};
   const steps = candidates.slice(0, PROCEDURE_STEP_LIMIT).map((item, index): WorkflowStep => {
     const id = `${idPrefix}-${index + 1}`;
     const title = item.text.replace(numbered, '').trim().slice(0, 90) || `절차 ${index + 1}`;
-    const role = /검토|승인|심사|평가|결정/.test(title) ? 'reviewer' : hasSupport && /취합|수집|지원|협조/.test(title) ? 'support' : 'primary';
+    const role = reviewerAction(title) ? 'reviewer' : hasSupport && /취합|수집|지원|협조/.test(title) ? 'support' : 'primary';
     evidence[id] = { sourceTitle: source.title.trim(), locator: item.locator, excerpt: item.text };
     return { id, title, role, description: item.text.replace(numbered, '').trim().slice(0, 5000), output: '', required: true, dependsOn: index ? [`${idPrefix}-${index}`] : [], checklist: [], done: false };
   });
-  if (!steps.some(step => step.role === 'reviewer')) {
+  if (reviewRequired && !steps.some(step => step.role === 'reviewer')) {
     const id = `${idPrefix}-review`;
     steps.push({ id, title: '절차 및 결과 검토', role: 'reviewer', description: '원문에서 직접 추출한 단계가 아닙니다. 실제 검토자가 업무 절차와 처리 결과가 원문에 맞는지 확인합니다.', output: '', required: true, dependsOn: [steps.at(-1)!.id], checklist: [], done: false });
     evidence[id] = { sourceTitle: source.title.trim(), locator: '검토용 추가 단계 · 직접 근거 없음', excerpt: '' };
@@ -62,14 +79,14 @@ export function generateProcedureDraft(source: ProcedureSource, idPrefix: string
   return { steps, evidence, warnings, references: [{ id: `${idPrefix}-source`, type: source.type, title: source.title.trim().slice(0, 300), content: `절차 초안에 사용한 자료 · 원문 적용 여부 검토 필요\n${referenceText.slice(0, 9800)}`, ...(source.url?.trim() ? { url: source.url.trim() } : {}) }] };
 }
 
-export function procedureErrors(steps: WorkflowStep[]): string[] {
+export function procedureErrors(steps: WorkflowStep[], { reviewRequired = true }: ProcedureGenerationOptions = {}): string[] {
   const errors: string[] = []; const ids = new Set(steps.map(step => step.id));
   if (!steps.length || steps.length > 50) errors.push('절차는 1개 이상 50개 이하로 구성해 주세요.');
   if (ids.size !== steps.length) errors.push('절차 ID가 중복되었습니다.');
   if (steps.some(step => !step.title.trim() || step.title.length > 150)) errors.push('각 절차의 이름은 1~150자로 입력해 주세요.');
   if (steps.some(step => step.description.length > 5000)) errors.push('절차 설명은 5,000자 이하로 입력해 주세요.');
   if (steps.some(step => step.output.length > 1000 || step.checklist.length > 50 || step.checklist.some(item => !item.trim() || item.length > 5000))) errors.push('결과물과 확인 항목의 길이를 확인해 주세요.');
-  if (!steps.some(step => step.role === 'reviewer' && step.required)) errors.push('필수 검토·승인 절차를 하나 이상 지정해 주세요.');
+  if (reviewRequired && !steps.some(step => step.role === 'reviewer' && step.required)) errors.push('필수 검토·승인 절차를 하나 이상 지정해 주세요.');
   if (steps.some(step => step.dependsOn.some(id => id === step.id || !ids.has(id)) || new Set(step.dependsOn).size !== step.dependsOn.length)) errors.push('선행 절차가 없거나 자기 자신·중복 항목을 참조합니다.');
   const visited = new Set<string>(); const visiting = new Set<string>();
   const visit = (id: string): boolean => {
@@ -84,23 +101,23 @@ export function procedureErrors(steps: WorkflowStep[]): string[] {
 }
 
 /** A reviewed final draft is one procedure. Execution history is preserved by the server command. */
-export function replaceProcedureDraft(draft: WorkflowStep[]): WorkflowStep[] {
-  const errors = procedureErrors(draft); if (errors.length) throw new Error(errors[0]);
+export function replaceProcedureDraft(draft: WorkflowStep[], options: ProcedureGenerationOptions = {}): WorkflowStep[] {
+  const errors = procedureErrors(draft, options); if (errors.length) throw new Error(errors[0]);
   return structuredClone(draft).map(step => ({ ...step, done: false }));
 }
 
 /** Legacy merge by identity, preserving every existing step and its completed state. */
-export function applyProcedureDraft(current: WorkflowStep[], draft: WorkflowStep[], mode: 'append' | 'replace', canReplace = false): WorkflowStep[] {
+export function applyProcedureDraft(current: WorkflowStep[], draft: WorkflowStep[], mode: 'append' | 'replace', canReplace = false, options: ProcedureGenerationOptions = {}): WorkflowStep[] {
   if (mode === 'replace' && (!canReplace || current.some(step => step.done))) throw new Error('완료한 절차가 없는 개인업무만 전체 교체할 수 있습니다.');
   if (mode === 'replace') {
-    const errors = procedureErrors(draft); if (errors.length) throw new Error(errors[0]);
+    const errors = procedureErrors(draft, options); if (errors.length) throw new Error(errors[0]);
     return structuredClone(draft).map(step => ({ ...step, done: false }));
   }
   const taken = new Set(current.map(step => step.id)); const mapping = new Map<string, string>();
   for (const step of draft) { let id = step.id; let suffix = 2; while (taken.has(id)) id = `${step.id}-${suffix++}`; mapping.set(step.id, id); taken.add(id); }
   const terminals = current.filter(step => !current.some(other => other.dependsOn.includes(step.id))).map(step => step.id);
   const appended = draft.map(step => ({ ...structuredClone(step), id: mapping.get(step.id)!, done: false, dependsOn: step.dependsOn.length ? step.dependsOn.map(id => mapping.get(id) || id) : terminals }));
-  const merged = [...structuredClone(current), ...appended]; const errors = procedureErrors(merged);
+  const merged = [...structuredClone(current), ...appended]; const errors = procedureErrors(merged, options);
   if (errors.length) throw new Error(errors[0]);
   return merged;
 }

@@ -1,0 +1,14 @@
+.date-input{position:relative;min-width:0;display:flex;flex-direction:column;gap:5px}
+.date-input-controls{display:flex;align-items:center;gap:6px;min-width:0;padding:4px 7px;border:1px solid var(--line,#deded8);border-radius:10px;background:var(--surface,#fff)}
+.date-input-controls:focus-within{outline:2px solid var(--accent,#567568);outline-offset:1px}
+.date-input .date-input-part{display:flex;align-items:center;gap:3px;min-width:0;color:var(--muted,#666);font-size:13px}
+.date-input .date-input-part input{width:2.5ch;min-width:0;height:32px;min-height:32px;padding:3px 1px;border:0;box-shadow:none;border-radius:3px;text-align:center;font-variant-numeric:tabular-nums;background:transparent;outline:none;font-size:14px}
+.date-input .date-input-year input{width:4.8ch}
+.date-input .date-input-part input:focus{background:var(--sage-light,#edf2ee)}
+.date-input .date-input-part input:disabled{color:var(--muted,#666);background:transparent}
+.date-input-calendar,.date-input-clear{display:inline-flex;align-items:center;justify-content:center;flex-shrink:0;width:27px;height:30px;padding:0;border:0;background:transparent;color:var(--muted,#666);cursor:pointer}
+.date-input-calendar{margin-left:auto}
+.date-input-calendar:focus-visible,.date-input-clear:focus-visible{outline:2px solid var(--accent,#567568);outline-offset:1px;border-radius:4px}
+.date-input-calendar:disabled,.date-input-clear:disabled{cursor:default;opacity:.5}
+.date-input .date-input-calendar-native{position:absolute;right:0;bottom:0;width:1px;height:1px;min-height:0;padding:0;border:0;opacity:0;pointer-events:none}
+.date-input .date-input-calendar-fallback{width:100%;min-width:0}
