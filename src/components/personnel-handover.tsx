@@ -35,7 +35,7 @@ function custodyItems(workspace: Workspace, transfer: WorkTransfer) {
 
 export function PersonnelHandover({ workspace, command, busy = false, onOpenTask, focusId, focusToken }: { workspace: Workspace; command: CommandFn; busy?: boolean; onOpenTask: (id: string) => void; focusId?: string; focusToken?: number }) {
   const user = workspace.currentUser;
-  const help = useHelpControls(user.id);
+  const help = useHelpControls(user.id, ['handover.remaining-roles', 'handover.emergency']);
   const canManage = user.role === 'manager' || user.role === 'admin';
   const canViewDepartment = canManage || user.role === 'head';
   const [departmentId, setDepartmentId] = useState(user.departmentId);
@@ -89,9 +89,9 @@ export function PersonnelHandover({ workspace, command, busy = false, onOpenTask
     <header className="page-heading"><div><p className="eyebrow">업무의 맥락을 다음 담당자에게</p><div className="help-title"><h1>인수인계</h1><HelpButton controls={help} label="인수인계 도움말 다시 보기" /></div><p>{department?.name} · 업무를 맡기고, 승인하고, 이어받은 기록을 남깁니다.</p></div><div className="handover-heading-actions"><Button variant="secondary" disabled={busy} onClick={() => command('workspace.refresh', {})}><RefreshCw size={15}/>현황 새로고침</Button>{canRequest && <Button disabled={busy} onClick={() => setComposer({ mode: 'request' })}><ArrowLeftRight size={16}/>인수인계 요청</Button>}<Button variant="secondary" disabled={busy} onClick={() => setRoleComposer(true)}>남은 역할 정리</Button>{canManage && <Button variant="secondary" disabled={busy} onClick={() => setComposer({ mode: 'emergency' })}>긴급 인사이동<ArrowRight size={15}/></Button>}</div></header>
 
     {user.role === 'admin' && <div className="handover-department"><Field label="관리할 부서"><select value={departmentId} onChange={event => { setDepartmentId(event.target.value); setSearch(''); setDetailId(null); }}>{workspace.departments.map(item => <option key={item.id} value={item.id}>{item.name}</option>)}</select></Field><p>이관 요청과 긴급 보관을 관리합니다. 최종 배정 승인은 해당 부서장이 처리합니다.</p></div>}
-    <HelpCallout controls={help} id="handover.remaining-roles" summary="지원·검토·총괄 역할도 후임에게 이관할 수 있습니다."><p>공통업무 총괄과 배정 대기 역할까지 후임에게 요청하고 부서장 승인을 받습니다. 선택한 대행 권한은 승인 후 해제합니다.</p></HelpCallout>
+    <HelpCallout controls={help} id="handover.remaining-roles" summary="지원·검토·총괄 역할도 후임에게 이관할 수 있습니다."><p>남은 역할 정리에서 지원·검토·공통업무 총괄·배정 대기 역할과 후임을 선택해 부서장 승인을 요청합니다. 대행 권한 해제는 기존 대행을 종료하는 기능이며 후임에게 새 대행 권한을 부여하지 않습니다.</p></HelpCallout>
 
-    <HelpCallout controls={help} id="handover.emergency" summary="담당자가 정해지기 전에는 부서 보관으로 업무를 이어갑니다."><p>긴급 인사이동 시 업무를 부서담당자에게 먼저 모읍니다. 새 담당자가 정해지면 전체 또는 일부를 선택해 부서장 승인을 받고 배정합니다. 후임이 정해져 있으면 직접 인수인계를 요청할 수 있습니다.</p><p>승인 대기 중에도 현재 담당자는 체크리스트와 일정을 기록할 수 있으며, 승인 시 최신 진행 상태로 인계됩니다.</p></HelpCallout>
+    <HelpCallout controls={help} id="handover.emergency" summary="담당자가 정해지기 전에는 부서 보관으로 업무를 이어갑니다."><p>부서 담당자·관리자는 긴급 인사이동으로 업무를 부서 담당자에게 즉시 보관할 수 있습니다. 새 담당자가 정해지면 전체 또는 일부 업무의 배정을 요청하고 부서장 승인을 받습니다. 후임이 정해져 있으면 직접 인수인계를 요청할 수 있습니다.</p><p>일반 인수인계 요청의 승인 대기 중에는 현재 담당자가 일정과 수행 결과를 계속 기록할 수 있으며, 승인 시 최신 진행 상태로 인계됩니다.</p></HelpCallout>
 
     <div className="handover-summary" aria-label="인수인계 요약"><div><Clock3 size={18}/><span>{user.role === 'head' ? '내 승인 대기' : '승인 대기'}</span><strong>{user.role === 'head' ? reviewablePending.length : pending.length}<small>건</small></strong></div>{canViewDepartment && <div><Inbox size={18}/><span>부서 보관</span><strong>{custody.length}<small>건</small></strong></div>}<div><History size={18}/><span>처리 이력</span><strong>{history.length}<small>건</small></strong></div></div>
 

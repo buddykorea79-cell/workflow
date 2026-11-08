@@ -89,7 +89,7 @@ export function CommonWork({ workspace: w, command, onOpenTask, onRefresh, onGoP
   const [metadata, setMetadata] = useState<CommonTask | null>(null);
   const [refreshing, setRefreshing] = useState(false);
   const [refreshError, setRefreshError] = useState('');
-  const help = useHelpControls(w.currentUser.id);
+  const help = useHelpControls(w.currentUser.id, ['common.approval-flow', 'common.assignment-flow', 'common.metrics', 'common.additional-distribution']);
   const approvalTabs = useTabs({ value: approvalFilter, onChange: setApprovalFilter, items: [
     { value: 'pending', label: '승인 대기' }, { value: 'rejected', label: '반려' }, { value: 'all', label: '요청·처리 이력' },
   ] });

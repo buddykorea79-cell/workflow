@@ -23,12 +23,17 @@ export type CommandFn = (type: string, payload: Record<string, unknown>, options
 
 export type HelpControls = { userId: string; reopenToken: number; triggerRef: RefObject<HTMLButtonElement | null>; reopen: () => void };
 
-export function useHelpControls(userId: string): HelpControls {
+export function useHelpControls(userId: string, helpIds: readonly string[] = []): HelpControls {
   const [request, setRequest] = useState({ userId, token: 0 });
   const triggerRef = useRef<HTMLButtonElement>(null);
   return {
     userId, reopenToken: request.userId === userId ? request.token : 0, triggerRef,
-    reopen: () => setRequest(previous => ({ userId, token: previous.userId === userId ? previous.token + 1 : 1 })),
+    reopen: () => {
+      // Conditional help may be unmounted in the current tab/filter. Restore its
+      // preference too, while allowing a later explicit dismissal to win.
+      for (const id of helpIds) writeHelpPreference(helpStorageKey(userId, id), 'expanded', helpStorage);
+      setRequest(previous => ({ userId, token: previous.userId === userId ? previous.token + 1 : 1 }));
+    },
   };
 }
 

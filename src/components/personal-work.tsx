@@ -1,10 +1,10 @@
 'use client';
 
 import { useEffect, useId, useRef, useState } from 'react';
-import { ArrowDownLeft, ArrowRight, CalendarDays, Check, CheckCircle2, ChevronDown, ChevronLeft, ChevronRight, Circle, Clock3, FileText, Folder, FolderPlus, Inbox, Pencil, RotateCcw, Landmark, Layers3, Link2, ListChecks, Plus, Search, Sparkles, Trash2, Trophy, UserRound, Wallet } from 'lucide-react';
+import { ArrowDownLeft, ArrowRight, CalendarDays, Check, CheckCircle2, ChevronDown, ChevronLeft, ChevronRight, Circle, CircleHelp, Clock3, FileText, Folder, FolderPlus, Inbox, Pencil, RotateCcw, Landmark, Layers3, Link2, ListChecks, Plus, Search, Sparkles, Trash2, Trophy, UserRound, Wallet } from 'lucide-react';
 import type { Expense, Frequency, Task, TaskReference, Unit, WorkflowStep, Workspace } from '@/lib/types';
 import type { TaskTab } from '@/lib/hash-route';
-import { Badge, Button, EmptyState, Field, HelpButton, HelpCallout, Modal, Progress, ReadField, Tabs, useTabs, useHelpControls, validateTextFields, type CommandFn } from './ui';
+import { Badge, Button, EmptyState, Field, Modal, Progress, ReadField, Tabs, useTabs, validateTextFields, type CommandFn } from './ui';
 import { sameDraft, savedCommandTarget } from '@/lib/pending-draft';
 import { useRevisionCommand } from './command-revision';
 import { useNotificationFocus } from './notification-focus';
@@ -88,7 +88,7 @@ export function PersonalWork({ workspace: w, command, onOpenTask, onWorkspace, f
   const [registering, setRegistering] = useState<{ commonId: string; distributionId: string; title: string } | null>(null);
   const [registerUnit, setRegisterUnit] = useState('');
   const [aiRegistration, setAiRegistration] = useState(false);
-  const help = useHelpControls(w.currentUser.id);
+  const [helpOpen, setHelpOpen] = useState(false);
   const focusProps = useNotificationFocus(focusId, focusToken, id => {
     const unit = w.units.find(item => item.id === id && canSelectPersonalUnit(w, item));
     if (!unit) return;
@@ -129,14 +129,10 @@ export function PersonalWork({ workspace: w, command, onOpenTask, onWorkspace, f
   return <>
     <div className="pw-page">
     <div className="page-heading">
-      <div><p className="eyebrow">나의 업무 공간</p><div className="help-title"><h1>개인업무</h1><HelpButton controls={help} label="개인업무 도움말 다시 보기" /></div><p className="muted">단위업무를 펼쳐 세부업무와 진행 상황을 확인하세요.</p></div>
+      <div><p className="eyebrow">나의 업무 공간</p><div className="help-title"><h1>개인업무</h1><button type="button" className="help-button" aria-label="개인업무 도움말" aria-haspopup="dialog" onClick={() => setHelpOpen(true)}><CircleHelp size={17} aria-hidden="true"/><span>도움말</span></button></div><p className="muted">단위업무는 업무 묶음, 세부업무는 실제 수행할 과제입니다.</p></div>
       <div className="pw-page-actions"><Button variant="accent" disabled={!definitionEditable || w.currentUser.role === 'head'} onClick={() => setAiRegistration(true)}><Sparkles size={17} />AI 업무등록</Button><Button variant="secondary" disabled={!definitionEditable} onClick={() => setCreate('unit')}><FolderPlus size={17} />단위업무 추가</Button><Button disabled={!definitionEditable} onClick={() => beginTask()}><Plus size={17} />세부업무 추가</Button></div>
     </div>
     {!definitionEditable && <div className="pw-division-lock" role="status"><CheckCircle2 size={20}/><div><strong>부서 업무분장이 확정되었습니다.</strong><p>단위·세부업무의 추가, 수정, 삭제는 부서장의 재작성 허용 후 가능합니다. 진행 체크와 성과 기록은 계속할 수 있습니다.</p></div></div>}
-    <HelpCallout controls={help} id="personal.hierarchy" summary="단위업무에 세부업무를 묶어 관리하세요.">
-      단위업무는 업무 묶음, 세부업무는 실제 수행할 과제입니다.
-    </HelpCallout>
-
     {!inTrash && inbox.length > 0 && <details className="pw-inbox pw-inbox-collapsible">
       <summary><Inbox size={20}/><strong>공통업무 등록 대기 <b>{inbox.length}건</b></strong><span>목록 보기</span><ChevronDown size={18}/></summary>
       <p className="pw-inbox-help">배정받은 공통업무를 내 단위업무에 연결하면 세부업무로 등록됩니다.</p>
@@ -187,6 +183,13 @@ export function PersonalWork({ workspace: w, command, onOpenTask, onWorkspace, f
     </div>
     </div>
 
+    {helpOpen && <Modal title="개인업무 도움말" onClose={() => setHelpOpen(false)}><div className="form-stack">
+      <section><h3>업무 만들기</h3><p>단위업무를 만든 뒤 그 안에 세부업무를 추가하세요. 단위업무 중요도는 1~10이며 기본값은 5입니다. 중요도가 높은 업무가 먼저 표시됩니다.</p></section>
+      <section><h3>AI 업무등록과 AI 절차 작성</h3><p>개인업무의 ‘AI 업무등록’은 설명과 인수인계 파일로 단위·세부업무 초안을 만듭니다. 세부업무의 ‘AI로 절차·절차도 작성’은 저장한 업무 개요·첨부파일을 중심으로 관련 근거를 참고해 절차를 만듭니다. 초안을 확인한 뒤 적용하세요.</p></section>
+      <section><h3>절차·일정·성과 기록</h3><p>절차는 누가·무엇을·어떻게를 입력하고 순서를 조정한 뒤 ‘수정사항 저장·절차도 반영’을 누릅니다. 일정·수행에서 만들어진 절차별 일정을 등록하고, 성과 탭에는 500자 이내의 성과 내용과 참고 파일을 저장하세요.</p></section>
+      <section><h3>수정 버튼이 보이지 않을 때</h3><p>세부업무의 ‘업무 기준 수정’을 먼저 선택하세요. 부서 업무분장이 확정되면 부서장의 재작성 허용이 필요합니다. 수행 기록은 해당 담당자의 권한으로 계속 입력할 수 있습니다.</p></section>
+      <div className="form-actions"><Button variant="secondary" onClick={() => setHelpOpen(false)}>도움말 닫기</Button></div>
+    </div></Modal>}
     {aiRegistration && <AiWorkRegistrationDialog key={w.currentUser.id} workspace={w} command={command} onWorkspace={onWorkspace} onClose={() => setAiRegistration(false)} />}
     {create === 'unit' && <UnitForm workspace={w} command={command} onClose={() => setCreate(null)} onCreated={title => setPendingUnitTitle(title)} />}
     {editingUnit && <UnitForm key={editingUnit.id} unit={editingUnit} workspace={w} command={command} onClose={() => setEditingUnitId(null)} />}

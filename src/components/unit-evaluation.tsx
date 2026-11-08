@@ -46,7 +46,7 @@ function metrics(items: Performance[]) {
 }
 
 export function PerformanceView({ workspace: w, command, onOpenTask, initialSelection }: Props) {
-  const help = useHelpControls(w.currentUser.id);
+  const help = useHelpControls(w.currentUser.id, ['performance.process', 'performance.scoring']);
   const now = new Date(w.serverTime);
   const periods = halfYearOptions(now, [...w.performances.map(item => item.period), ...(w.unitScorePlans || []).map(item => item.period), ...(w.unitEvaluations || []).map(item => item.period), ...(w.performanceSubmissionStatuses || []).map(item => item.period)]);
   const [period, setPeriod] = useState(initialSelection?.period && periods.includes(initialSelection.period) ? initialSelection.period : currentHalf(now));
@@ -88,12 +88,12 @@ export function PerformanceView({ workspace: w, command, onOpenTask, initialSele
   const unavailableHalves = ['H1', 'H2'].map(half => `${period.slice(0, 4)}-${half}`).filter(value => !periods.includes(value));
 
   return <div className="ue-view">
-    <div className="page-heading"><div><p className="eyebrow">성과와 평가</p><div className="help-title"><h1>{isReviewer ? '개인별 성과와 평가' : '나의 성과와 평가'}</h1><HelpButton controls={help} label="성과·평가 도움말 다시 보기" /></div><p>세부업무의 성과를 단위업무별로 모아 보고, 업무 비중을 정해 부서장에게 제출합니다.</p></div><div className="ue-heading-actions">{!isReviewer && ownUnits.length > 0 && <Button variant="secondary" disabled={futurePeriod || !!ownEvaluation || !!ownPlan?.submittedAt} onClick={() => { if (!futurePeriod) setWeightsOpen(true); }}><SlidersHorizontal size={16} />업무 비중 설정</Button>}{canEdit && <Button onClick={() => setEditing('new')}><Plus size={17} />반기 성과 입력</Button>}</div></div>
+    <div className="page-heading"><div><p className="eyebrow">성과와 평가</p><div className="help-title"><h1>{isReviewer ? '개인별 성과와 평가' : '나의 성과와 평가'}</h1><HelpButton controls={help} label="성과·평가 도움말 다시 보기" /></div><p>{isReviewer ? '직원이 제출한 단위업무별 성과와 참고 파일을 확인하고 평가합니다.' : '세부업무의 성과를 단위업무별로 모아 보고, 업무 비중을 정해 부서장에게 제출합니다.'}</p></div><div className="ue-heading-actions">{!isReviewer && ownUnits.length > 0 && <Button variant="secondary" disabled={futurePeriod || !!ownEvaluation || !!ownPlan?.submittedAt} onClick={() => { if (!futurePeriod) setWeightsOpen(true); }}><SlidersHorizontal size={16} />업무 비중 설정</Button>}{canEdit && <Button onClick={() => setEditing('new')}><Plus size={17} />반기 성과 입력</Button>}</div></div>
     <div className="ue-period-bar"><span><CalendarDays size={18} />평가 기간</span><select aria-label="성과 평가 연도" value={period.slice(0, 4)} onChange={event => changeYear(event.target.value)}>{years.map(value => <option key={value} value={value}>{value}년</option>)}</select><div className="tabs" role="group" aria-label="성과 평가 반기"><button type="button" className={period.endsWith('H1') ? 'active' : ''} aria-pressed={period.endsWith('H1')} disabled={!periods.includes(`${period.slice(0, 4)}-H1`)} onClick={() => changePeriod(`${period.slice(0, 4)}-H1`)}>상반기 <small>01–06월</small></button><button type="button" className={period.endsWith('H2') ? 'active' : ''} aria-pressed={period.endsWith('H2')} disabled={!periods.includes(`${period.slice(0, 4)}-H2`)} onClick={() => changePeriod(`${period.slice(0, 4)}-H2`)}>하반기 <small>07–12월</small></button></div>{user.role === 'admin' && <select aria-label="성과 평가 부서" value={scopeDepartment} onChange={event => changeDepartment(event.target.value)}>{w.departments.map(department => <option key={department.id} value={department.id}>{department.name}</option>)}</select>}<Badge tone="info">업무 비중 합계 50점</Badge></div>
     {unavailableHalves.some(value => isFutureHalf(value, now)) && <p className="ue-validation">아직 시작하지 않은 반기는 선택할 수 없습니다. 기존 기록이 있는 반기는 조회만 가능합니다.</p>}
     {unavailableHalves.some(value => !isFutureHalf(value, now)) && <p className="ue-validation">최근 2년보다 오래된 연도는 기존 기록이 있는 반기만 조회할 수 있습니다.</p>}
     {futurePeriod && <div className="ue-notice ue-notice-warning" role="status"><LockKeyhole size={18} /><div><strong>아직 시작하지 않은 반기입니다.</strong><p>기존 성과와 업무 비중은 조회할 수 있지만 저장·제출은 반기가 시작된 후 가능합니다. 이미 제출한 기록의 회수와 부서장 평가는 가능합니다.</p></div></div>}
-    <HelpCallout controls={help} id="performance.process" summary="성과를 작성하고 업무 비중 50점을 정해 제출하세요."><p>세부업무의 성과 탭에서 저장한 내용이 단위업무별로 모입니다. 업무 비중과 성과를 확인해 제출하면 부서장이 평가합니다.</p></HelpCallout>
+    <HelpCallout controls={help} id="performance.process" summary={isReviewer ? '제출 완료된 직원의 성과를 확인하고 평가하세요.' : '성과를 작성하고 업무 비중 합계 50점을 정해 제출하세요.'}>{isReviewer ? <p>직원을 선택해 제출 당시 성과와 참고 파일을 확인합니다. 각 단위업무의 비중 이내에서 점수·의견을 입력하고 평가를 확정합니다. 업무 비중 설정과 제출은 직원 본인이 진행합니다.</p> : <><p>세부업무의 성과 탭에 500자 이내 성과와 참고 파일을 저장합니다. 성과 저장과 반기 제출은 별도입니다.</p><p>업무 비중은 중요도를 기준으로 제안하며 직접 조정할 수 있습니다. 모든 평가 대상 단위업무에 최소 1점씩 정수로 배분해 합계를 50점으로 맞춘 뒤 제출합니다.</p></>}</HelpCallout>
     {user.role === 'manager' && <SubmissionStatusPanel workspace={w} period={period} />}
     {isReviewer && <section className="ue-stats" aria-label="개인별 평가 요약"><div><span>평가 대상</span><strong>{people.length}<small>명</small></strong></div><div><span>등록된 성과</span><strong>{totalPerformanceCount}<small>건</small></strong></div><div><span>제출 완료 · 평가 대기</span><strong>{ready}<small>명</small></strong></div><div><span>평가 완료</span><strong>{evaluated}<small>명</small></strong></div></section>}
     <div className={`ue-layout ${isReviewer ? 'ue-with-people' : ''}`}>
@@ -226,7 +226,7 @@ function PersonPerformance({ workspace: w, command, onOpenTask, person, period, 
       {error && <p className="form-error" role="alert">{error}</p>}
       <footer><p className="ue-footnote">{futurePeriod ? '아직 시작하지 않은 반기에는 성과와 업무 비중을 저장하거나 제출할 수 없습니다.' : '제출 전에는 저장한 성과와 업무 비중을 수정할 수 있습니다.'}</p><Button disabled={!canSubmit || saving || revision.conflicted} onClick={() => void changeSubmission(false)}><Send size={17} />{saving ? '제출 중…' : '제출하기'}</Button></footer>
     </section>}
-    {summary.performances.length > 0 && <HelpCallout controls={help} id="performance.scoring" summary="반기 평가는 단위업무별 점수를 합산해 50점으로 계산합니다."><p>같은 지표명·단위의 수치는 합산하고, 비율·평균·점수는 개별 값으로 표시합니다. 세부업무별 과거 100점 평가는 이번 50점 총점에 포함하지 않습니다.</p></HelpCallout>}
+    {summary.performances.length > 0 && <HelpCallout controls={help} id="performance.scoring" summary="반기 평가 총점은 단위업무별 평가 점수의 합계로, 최대 50점입니다."><p>업무 비중은 각 단위업무의 만점입니다. 평가자는 제출 당시 비중 이내에서 점수를 입력하며, 평가 확정 후 성과와 비중은 보존됩니다.</p><p>기존 수치 지표는 참고용으로 집계합니다. 같은 지표명·단위의 수치는 합산하고 비율·평균·점수는 개별 표시하며, 과거 100점 평가 점수는 반기 총점에 더하지 않습니다.</p></HelpCallout>}
   </section>;
 }
 
