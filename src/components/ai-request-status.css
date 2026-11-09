@@ -1,0 +1,6 @@
+.ai-request-status { display: flex; align-items: center; gap: 16px; padding: 12px 0; }
+.ai-request-status > div { flex: 1; min-width: 0; }
+.ai-request-status strong { display: flex; align-items: center; gap: 6px; font-size: 13px; }
+.ai-request-status p { margin: 6px 0 0; color: var(--muted); font-size: 12px; line-height: 1.6; }
+.ai-request-status > button { flex-shrink: 0; }
+@media (max-width: 640px) { .ai-request-status { align-items: flex-start; flex-direction: column; } }

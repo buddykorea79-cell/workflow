@@ -1,23 +1,30 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createSeed } from '../src/lib/seed';
-import { getWorkspace } from '../src/lib/domain';
+import { canReadAttachment, executeCommand, getWorkspace } from '../src/lib/domain';
 import { buildOrganizationDivision, filterOrganizationDivision, organizationDivisionRows } from '../src/lib/organization-division';
 import type { Delegation } from '../src/lib/types';
 
 const now = new Date('2026-11-06T03:00:00Z');
 
-test('department members share their department titles while administrators retain organization access', () => {
+test('all roles can read foreign assignment titles without gaining task bodies or attachment access', () => {
   const state = createSeed(now);
   const privateTask = state.tasks.find(task => task.id === 'task-data')!;
   privateTask.description = 'PRIVATE-BODY-ORGANIZATION'; privateTask.code = 'PRIVATE-CODE-ORGANIZATION'; privateTask.references = [{ id: 'private-file', type: 'document', title: 'PRIVATE-DOCUMENT-NAME', content: 'PRIVATE-DOCUMENT-CONTENT', attachmentId: 'PRIVATE-FILE-ID' }];
+  const attachment = { id: 'PRIVATE-FILE-ID', taskId: privateTask.id, name: 'PRIVATE-FILE-NAME.txt', size: 10, mime: 'text/plain', sha256: 'private-hash', storageKey: 'private-object', status: 'test_allowed' as const, uploadedBy: privateTask.primaryId, createdAt: now.toISOString() };
+  state.attachments.push(attachment);
   const expected = buildOrganizationDivision(state, now);
   for (const role of ['member', 'lead', 'manager', 'head', 'admin']) {
     const user = state.users.find(item => item.departmentId === 'dept-plan' && item.role === role)!;
     const workspace = getWorkspace(state, user.id, now);
-    assert.deepEqual(workspace.organizationDivision, role === 'admin' ? expected : { ...expected, departments: expected.departments.filter(department => department.id === user.departmentId) });
-    if (role !== 'admin') assert.deepEqual(workspace.organizationDivision?.departments.map(item => item.id), [user.departmentId]);
-    if (role !== 'admin') assert.equal(workspace.tasks.some(task => task.id === privateTask.id), false);
+    assert.deepEqual(workspace.organizationDivision, expected);
+    assert.ok(organizationDivisionRows(workspace.organizationDivision!).some(row => row.taskId === privateTask.id));
+    if (role !== 'admin') {
+      assert.equal(workspace.tasks.some(task => task.id === privateTask.id), false);
+      assert.equal(workspace.attachments.some(file => file.id === attachment.id), false);
+      assert.equal(canReadAttachment(state, user, attachment, now), false);
+      assert.throws(() => executeCommand(structuredClone(state), user.id, { type: 'task.configure', payload: { taskId: privateTask.id, description: 'not allowed' }, expectedRevision: state.revision, requestId: `foreign-division-${role}` }, now), { status: 403, code: role === 'head' ? 'HEAD_DEFINITION_DENIED' : 'TASK_ACCESS_DENIED' });
+    }
   }
   assert.equal(expected.departments.length, state.departments.length);
   const serialized = JSON.stringify(expected);

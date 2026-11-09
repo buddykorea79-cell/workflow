@@ -132,6 +132,38 @@ test('division focus clears filters and chooses the owner occurrence without dup
   assert.equal(anchors.length, new Set(anchors).size);
 });
 
+test('division opens on every roles own department with an enabled department selector', () => {
+  const now = new Date('2026-11-09T03:00:00Z');
+  const state = createSeed(now);
+  for (const role of ['member', 'lead', 'manager', 'head', 'admin']) {
+    const user = state.users.find(item => item.departmentId === 'dept-plan' && item.role === role)!;
+    const workspace = getWorkspace(state, user.id, now);
+    const html = renderWithPreviousState(createElement(division.OrganizationDivision, { workspace }));
+    const selector = html.match(/<select[^>]*aria-label="전체 업무분장표 부서"[^>]*>/)?.[0];
+    assert.ok(selector); assert.doesNotMatch(selector, /disabled/);
+    assert.ok(html.includes(`value="${user.departmentId}" selected=""`));
+    const departmentTables = html.slice(html.indexOf('<div class="od-departments">'));
+    for (const department of state.departments) {
+      assert.ok(html.includes(`<option value="${department.id}"`));
+      assert.equal(departmentTables.includes(`<h2>${department.name}</h2>`), department.id === user.departmentId);
+    }
+  }
+});
+
+test('a department member can select another departments assignment table without opening task details', () => {
+  const workspace = fixture();
+  const foreign = workspace.organizationDivision!.departments.find(department => department.id !== workspace.currentUser.departmentId && department.people.some(person => person.units.some(unit => unit.tasks.length)))!;
+  const html = renderWithPreviousState(createElement(division.OrganizationDivision, { workspace }), [foreign.id, 'all', '']);
+  assert.ok(html.includes(`value="${foreign.id}" selected=""`));
+  const departmentTables = html.slice(html.indexOf('<div class="od-departments">'));
+  assert.ok(departmentTables.includes(`<h2>${foreign.name}</h2>`));
+  assert.equal(departmentTables.includes(`<h2>${workspace.departments.find(department => department.id === workspace.currentUser.departmentId)!.name}</h2>`), false);
+  const task = foreign.people.flatMap(person => person.units.flatMap(unit => unit.tasks))[0];
+  assert.ok(departmentTables.includes(task.title));
+  assert.equal(workspace.tasks.some(item => item.id === task.id), false);
+  assert.doesNotMatch(departmentTables, /href=.*task|업무 기준 수정|수행 기록 입력/);
+});
+
 test('missing division focus keeps filters and an unavailable model remains a loading state', () => {
   const workspace = fixture('u-admin');
   const state = ['all', 'all', 'preserved division search'];

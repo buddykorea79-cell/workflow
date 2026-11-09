@@ -1,10 +1,11 @@
 import type { TaskReference } from './types';
+import { AI_GENERATION_TIMEOUT_MS } from './ai-generation-policy';
 
 export const AI_REFERENCE_LIMIT = 20;
 export const AI_REFERENCE_TEXT_LIMIT = 60_000;
 export const AI_DESCRIPTION_DOCUMENT_LIMIT = 10;
 export const AI_PROCEDURE_SOURCE_LIMIT = AI_REFERENCE_LIMIT + AI_DESCRIPTION_DOCUMENT_LIMIT + 1;
-export const AI_PROCEDURE_TIMEOUT_MS = 90_000;
+export const AI_PROCEDURE_TIMEOUT_MS = AI_GENERATION_TIMEOUT_MS;
 
 export interface ProcedureOverviewInput { title: string; description: string; completionCriteria?: string; descriptionAttachmentIds?: string[]; reviewRequired?: boolean }
 

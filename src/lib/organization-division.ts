@@ -60,10 +60,9 @@ export function buildOrganizationDivision(state: WorkspaceData, now = new Date()
   };
 }
 
-/** Scope at the server boundary; hiding a department in the browser is not access control. */
-export function organizationDivisionForUser(state: WorkspaceData, user: User, now = new Date()): OrganizationDivisionReadModel {
-  const model = buildOrganizationDivision(state, now);
-  return user.role === 'admin' ? model : { ...model, departments: model.departments.filter(department => department.id === user.departmentId) };
+/** Authenticated colleagues share assignment titles only; task and attachment access stays separate. */
+export function organizationDivisionForUser(state: WorkspaceData, _user: User, now = new Date()): OrganizationDivisionReadModel {
+  return buildOrganizationDivision(state, now);
 }
 
 /** Shared by browser and downloads so filters cannot change export semantics. */

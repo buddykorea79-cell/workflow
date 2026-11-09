@@ -9,8 +9,24 @@ import { buildOrganizationDivision, filterOrganizationDivision, type Organizatio
 import { exportOrganizationDivisionPdf, exportOrganizationDivisionXlsx } from '../src/lib/organization-division-export';
 import { signSession } from '../src/lib/auth';
 import { GET } from '../src/app/api/organization-division/export/route';
+import { GET as downloadAttachment } from '../src/app/api/attachments/[id]/route';
 
 const now = new Date('2026-11-06T03:00:00Z');
+
+async function attachmentText(bytes: Buffer, format: 'xlsx' | 'pdf') {
+  if (format === 'xlsx') {
+    const book = new ExcelJS.Workbook(); await book.xlsx.load(bytes as never);
+    return JSON.stringify(book.getWorksheet(1)!.getSheetValues());
+  }
+  const { getDocument } = await import('pdfjs-dist/legacy/build/pdf.mjs');
+  const loading = getDocument({ data: new Uint8Array(bytes), useSystemFonts: false });
+  const pdf = await loading.promise;
+  try {
+    let text = '';
+    for (let page = 1; page <= pdf.numPages; page++) text += (await (await pdf.getPage(page)).getTextContent()).items.map(item => 'str' in item ? item.str : '').join('');
+    return text;
+  } finally { await loading.destroy(); }
+}
 
 test('Excel is a real workbook with four Korean columns and literal user-entered text', async () => {
   const model = buildOrganizationDivision(createSeed(now), now);
@@ -46,30 +62,51 @@ test('PDF embeds Korean text and paginates long task names without losing the fi
   } finally { await loading.destroy(); }
 });
 
-test('the download route requires authentication and returns filtered Korean Excel/PDF attachments', async () => {
+test('all roles default exports to their department and can export a filtered foreign division without private data', async () => {
   const qaRoot = path.resolve(process.cwd(), '.qa-data'); await mkdir(qaRoot, { recursive: true });
   const directory = await mkdtemp(path.join(qaRoot, 'organization-export-test-'));
-  const keys = ['DATABASE_URL', 'NEON_AUTH_BASE_URL', 'VERCEL', 'IEUM_DATA_DIR', 'IEUM_SESSION_SECRET'] as const;
+  const keys = ['DATABASE_URL', 'NEON_AUTH_BASE_URL', 'VERCEL', 'IEUM_DATA_DIR', 'IEUM_SESSION_SECRET', 'IEUM_STORE'] as const;
   const previous = Object.fromEntries(keys.map(key => [key, process.env[key]]));
-  process.env.DATABASE_URL = ''; process.env.NEON_AUTH_BASE_URL = ''; process.env.VERCEL = ''; process.env.IEUM_DATA_DIR = directory; process.env.IEUM_SESSION_SECRET = 'isolated-organization-export-test-secret';
+  process.env.DATABASE_URL = ''; process.env.NEON_AUTH_BASE_URL = ''; process.env.VERCEL = ''; process.env.IEUM_DATA_DIR = directory; process.env.IEUM_SESSION_SECRET = 'isolated-organization-export-test-secret'; process.env.IEUM_STORE = 'local';
   try {
-    const state = createSeed(); await writeFile(path.join(directory, 'workspace.json'), JSON.stringify(state), 'utf8');
+    const state = createSeed();
+    const privateTask = state.tasks.find(task => task.id === 'task-data')!;
+    privateTask.description = 'PRIVATE-TASK-BODY'; privateTask.references = [{ id: 'private-reference', type: 'document', title: 'PRIVATE-DOCUMENT-TITLE', content: 'PRIVATE-DOCUMENT-CONTENT', attachmentId: 'private-file' }];
+    state.attachments.push({ id: 'private-file', taskId: privateTask.id, name: 'PRIVATE-FILE-NAME.txt', size: 10, mime: 'text/plain', sha256: 'private-hash', storageKey: 'private-object', status: 'test_allowed', uploadedBy: privateTask.primaryId, createdAt: new Date().toISOString() });
+    await writeFile(path.join(directory, 'workspace.json'), JSON.stringify(state), 'utf8');
     const endpoint = 'http://127.0.0.1:3001/api/organization-division/export';
     assert.equal((await GET(new NextRequest(`${endpoint}?format=xlsx`))).status, 401);
-    const user = state.users.find(item => item.role === 'member')!;
-    const headers = { Cookie: `ieum_demo_session=${signSession(user.id)}` };
-    assert.equal((await GET(new NextRequest(`${endpoint}?format=csv`, { headers }))).status, 422);
-    const foreignDepartment = state.departments.find(item => item.id !== user.departmentId)!;
-    for (const format of ['xlsx', 'pdf']) {
-      const response = await GET(new NextRequest(`${endpoint}?format=${format}&departmentId=${foreignDepartment.id}`, { headers }));
-      assert.equal(response.status, 403);
-      const ownResponse = await GET(new NextRequest(`${endpoint}?format=${format}`, { headers }));
-      assert.equal(ownResponse.status, 200); assert.match(ownResponse.headers.get('content-disposition')!, /attachment;.*filename\*=UTF-8''/); assert.equal(ownResponse.headers.get('cache-control'), 'no-store, private');
-      const bytes = Buffer.from(await ownResponse.arrayBuffer()); assert.ok(bytes.length > 1000);
-      if (format === 'xlsx') { const book = new ExcelJS.Workbook(); await book.xlsx.load(bytes as never); const cells = JSON.stringify(book.getWorksheet(1)!.getSheetValues()); assert.ok(cells.includes(state.departments.find(item => item.id === user.departmentId)!.name)); assert.equal(cells.includes(foreignDepartment.name), false); }
-      const admin = state.users.find(item => item.role === 'admin')!;
-      assert.equal((await GET(new NextRequest(`${endpoint}?format=${format}&departmentId=${foreignDepartment.id}`, { headers: { Cookie: `ieum_demo_session=${signSession(admin.id)}` } }))).status, 200);
-      assert.equal(bytes.subarray(0, format === 'pdf' ? 5 : 2).toString(), format === 'pdf' ? '%PDF-' : 'PK');
+    const model = buildOrganizationDivision(state);
+    const foreignDepartment = model.departments.find(item => item.id === privateTask.departmentId)!;
+    const foreignOwner = foreignDepartment.people.find(person => person.id === privateTask.primaryId)!;
+    for (const role of ['member', 'lead', 'manager', 'head', 'admin']) {
+      const user = state.users.find(item => item.departmentId === 'dept-plan' && item.role === role)!;
+      const headers = { Cookie: `ieum_demo_session=${signSession(user.id)}` };
+      assert.equal((await GET(new NextRequest(`${endpoint}?format=csv`, { headers }))).status, 422);
+      assert.equal((await GET(new NextRequest(`${endpoint}?format=xlsx&departmentId=missing`, { headers }))).status, 422);
+      for (const format of ['xlsx', 'pdf'] as const) {
+        const ownResponse = await GET(new NextRequest(`${endpoint}?format=${format}`, { headers }));
+        assert.equal(ownResponse.status, 200); assert.match(ownResponse.headers.get('content-disposition')!, /attachment;.*filename\*=UTF-8''/); assert.equal(ownResponse.headers.get('cache-control'), 'no-store, private');
+        const ownText = await attachmentText(Buffer.from(await ownResponse.arrayBuffer()), format);
+        assert.ok(ownText.includes(state.departments.find(item => item.id === user.departmentId)!.name));
+        assert.equal(ownText.includes(foreignDepartment.name), false);
+        const query = new URLSearchParams({ format, departmentId: foreignDepartment.id, team: foreignOwner.team, name: foreignOwner.name });
+        const response = await GET(new NextRequest(`${endpoint}?${query}`, { headers }));
+        assert.equal(response.status, 200);
+        const text = await attachmentText(Buffer.from(await response.arrayBuffer()), format);
+        assert.ok(text.includes(foreignDepartment.name)); assert.ok(text.includes(privateTask.title));
+        assert.equal(text.includes('PRIVATE-'), false);
+        const excluded = foreignDepartment.people.find(person => person.id !== foreignOwner.id && person.units.some(unit => unit.tasks.length));
+        assert.ok(excluded); assert.equal(text.includes(excluded.name), false);
+      }
+      const allResponse = await GET(new NextRequest(`${endpoint}?format=xlsx&departmentId=all`, { headers }));
+      assert.equal(allResponse.status, 200);
+      const allText = await attachmentText(Buffer.from(await allResponse.arrayBuffer()), 'xlsx');
+      assert.equal(allText.includes(foreignDepartment.name), role === 'admin');
+      if (role !== 'admin') {
+        const fileResponse = await downloadAttachment(new NextRequest('http://127.0.0.1:3001/api/attachments/private-file', { headers }), { params: Promise.resolve({ id: 'private-file' }) });
+        assert.equal(fileResponse.status, 403); assert.equal((await fileResponse.json()).code, 'DOWNLOAD_DENIED');
+      }
     }
   } finally {
     for (const key of keys) { if (previous[key] === undefined) delete process.env[key]; else process.env[key] = previous[key]; }

@@ -100,10 +100,48 @@ test('abort returns a safe error but retains exclusion until a non-abortable par
   const process = createWorkRegistrationProcessor({ checkSharedRate: () => undefined, readState: async () => state, readBytes: async () => bytes, extract: async () => { await gate; return { text: 'parsed', format: 'txt', warnings: [] }; } });
   const pending = process('u-jiho', { action: 'extract', attachmentId: attachment.id }, controller.signal);
   await new Promise(done => setImmediate(done)); controller.abort();
-  await assert.rejects(pending, errorCode('AI_TIMEOUT'));
+  await assert.rejects(pending, errorCode('AI_CANCELLED'));
   await assert.rejects(process('u-jiho', generation), errorCode('AI_ALREADY_RUNNING'));
   resolve(); await new Promise(done => setImmediate(done));
   assert.ok('document' in await process('u-jiho', { action: 'extract', attachmentId: attachment.id }));
+});
+
+test('the generation deadline includes initial authorization and never starts a model after it expires', async t => {
+  const { state } = fixture();
+  t.mock.timers.enable({ apis: ['setTimeout'] });
+  let finish!: () => void; let calls = 0;
+  const gate = new Promise<void>(resolve => { finish = resolve; });
+  const process = createWorkRegistrationProcessor({ readState: async () => { await gate; return state; }, generate: async () => { calls++; return { preview, model: 'mock' }; }, checkSharedRate: () => undefined });
+  const pending = process('u-jiho', generation);
+  t.mock.timers.tick(180_000);
+  await assert.rejects(pending, errorCode('AI_TIMEOUT'));
+  finish(); await new Promise(done => setImmediate(done));
+  assert.equal(calls, 0);
+});
+
+test('timed-out unabortable upstream calls keep the per-user lock until actual settlement', async t => {
+  const { state } = fixture();
+  t.mock.timers.enable({ apis: ['setTimeout'] });
+  let complete!: (response: Response) => void; let started!: () => void; let completions = 0;
+  const ready = new Promise<void>(resolve => { started = resolve; });
+  const response = () => Response.json({ model: 'mock', choices: [{ finish_reason: 'stop', message: { content: JSON.stringify(preview) } }] });
+  const fetcher: typeof fetch = async url => {
+    if (String(url).endsWith('/models')) return Response.json({ models: [{ id: 'mock', response_format_modes: ['json_schema'] }] });
+    completions++;
+    if (completions > 1) return response();
+    started();
+    return new Promise<Response>(resolve => { complete = resolve; }); // Deliberately ignores AbortSignal.
+  };
+  const process = createWorkRegistrationProcessor({ readState: async () => state, generate: (input, options) => generateWorkRegistrationPreview(input, { ...options, apiKey: 'mock', model: 'mock', fetcher }), checkRate: () => undefined, checkSharedRate: () => undefined });
+  const pending = process('u-jiho', generation);
+  await ready;
+  t.mock.timers.tick(180_000);
+  await assert.rejects(pending, errorCode('AI_TIMEOUT'));
+  await assert.rejects(process('u-jiho', generation), errorCode('AI_ALREADY_RUNNING'));
+  assert.equal(completions, 1, 'another paid completion must not start while the original call remains pending');
+  complete(response()); await new Promise(done => setImmediate(done));
+  assert.ok('preview' in await process('u-jiho', generation));
+  assert.equal(completions, 2, 'a fresh request is allowed only after the original call settles');
 });
 
 test('structured BizRouter transport sends only provided draft data and rejects non-stop, invalid or oversized output', async () => {
@@ -122,6 +160,6 @@ test('structured BizRouter transport sends only provided draft data and rejects 
     const failing: typeof fetch = async url => String(url).endsWith('/models') ? Response.json({ models: [{ id: 'mock-model', response_format_modes: ['json_schema'] }] }) : failure === 'oversize' ? new Response('x'.repeat(1_048_577)) : Response.json({ choices: [{ finish_reason: failure === 'incomplete' ? 'length' : 'stop', message: { content: failure === 'invalid' ? '{oops' : JSON.stringify(preview) } }] });
     await assert.rejects(generateWorkRegistrationPreview(input, { apiKey: 'mock', model: 'mock-model', fetcher: failing }), errorCode(failure === 'oversize' ? 'AI_RESPONSE_TOO_LARGE' : failure === 'incomplete' ? 'AI_INCOMPLETE_RESPONSE' : 'AI_INVALID_STRUCTURE'));
   }
-  await assert.rejects(generateWorkRegistrationPreview(input, { apiKey: 'mock', model: 'mock-model', fetcher, signal: AbortSignal.abort() }), errorCode('AI_TIMEOUT'));
+  await assert.rejects(generateWorkRegistrationPreview(input, { apiKey: 'mock', model: 'mock-model', fetcher, signal: AbortSignal.abort() }), errorCode('AI_CANCELLED'));
   await assert.rejects(generateWorkRegistrationPreview(input, { apiKey: 'mock', model: 'mock-model', fetcher: async () => new Response('never expose upstream body', { status: 429 }) }), errorCode('AI_RATE_LIMITED'));
 });

@@ -9,6 +9,9 @@ import { WORK_IMPORT_LIMITS, validateWorkImport, type WorkImportInput } from '@/
 import { failedRegistration, registrationAttempt, registrationPayload, registrationPreview, registrationSnapshot, registrationText, type AnalysisUnit, type RegistrationAttempt, type RegistrationSnapshot, type RegistrationSource, type RegistrationUnit } from '@/lib/work-registration-draft';
 import { Button, ConfirmDialog, Field, commandErrorTarget, showCommandError, type CommandFailure } from './ui';
 import { useUnsavedChanges, useUnsavedNavigation } from './unsaved-changes';
+import { AiRequestStatus, useAiRequest } from './ai-request-status';
+import { aiRequestError } from '@/lib/ai-request-lifecycle';
+import { AI_GENERATION_CLIENT_TIMEOUT_MS } from '@/lib/ai-generation-policy';
 import type { AiWorkRegistrationProps } from './ai-work-registration-dialog';
 import './ai-work-registration.css';
 
@@ -16,11 +19,18 @@ const frequencies = { once: '한 번', monthly: '매월', quarterly: '분기별'
 const priorities = { low: '낮음', medium: '보통', high: '높음' };
 const emptyUnit = () => registrationPreview([{ title: '', description: '', tasks: [{ title: '', description: '' }] }])[0];
 
-async function analyzeRequest<T>(payload: unknown, signal: AbortSignal): Promise<T> {
-  const response = await fetch('/api/work-registration', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload), signal });
-  const body = await response.json().catch(() => null);
-  if (!response.ok || !body) throw new Error(body?.error || '분석 결과를 받지 못했습니다. 입력 내용을 유지했으니 다시 시도해 주세요.');
-  return body as T;
+async function analyzeRequest<T>(payload: unknown, signal: AbortSignal, extractionTimeoutMs?: number): Promise<T> {
+  const timeout = new AbortController();
+  const timer = extractionTimeoutMs ? setTimeout(() => timeout.abort(), extractionTimeoutMs) : undefined;
+  try {
+    const response = await fetch('/api/work-registration', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload), signal: extractionTimeoutMs ? AbortSignal.any([signal, timeout.signal]) : signal });
+    const body = await response.json().catch(() => null);
+    if (!response.ok || !body) throw new Error(body?.error || '분석 결과를 받지 못했습니다. 입력 내용을 유지했으니 다시 시도해 주세요.');
+    return body as T;
+  } catch (cause) {
+    if (timeout.signal.aborted && !signal.aborted) throw new Error('이 파일의 본문 읽기 대기 시간이 지났습니다. 다른 파일과 작성 내용은 유지됩니다. 파일을 다시 선택하거나 설명에 본문을 입력해 주세요.');
+    throw cause;
+  } finally { clearTimeout(timer); }
 }
 
 export function AiWorkRegistration({ workspace: w, command, onClose, onWorkspace }: AiWorkRegistrationProps) {
@@ -45,6 +55,7 @@ export function AiWorkRegistration({ workspace: w, command, onClose, onWorkspace
   const [savedSnapshot, setSavedSnapshot] = useState(snapshot);
   const mounted = useRef(true);
   const request = useRef<AbortController | null>(null);
+  const aiRequest = useAiRequest();
   const executing = useRef(false);
   const fileInput = useRef<HTMLInputElement>(null);
   const now = new Date(w.serverTime);
@@ -82,8 +93,8 @@ export function AiWorkRegistration({ workspace: w, command, onClose, onWorkspace
           onWorkspace?.(updated);
           const attachment = updated.attachments.find(file => file.taskId === draftTaskId);
           if (!attachment) throw new Error('올린 파일을 확인하지 못했습니다. 다시 선택해 주세요.');
-          const result = await analyzeRequest<{ document: { text: string; warnings?: string[] } }>({ action: 'extract', attachmentId: attachment.id }, controller.signal);
-          if (!mounted.current || !permission.current) break;
+          const result = await analyzeRequest<{ document: { text: string; warnings?: string[] } }>({ action: 'extract', attachmentId: attachment.id }, controller.signal, AI_GENERATION_CLIENT_TIMEOUT_MS);
+          if (!mounted.current || !permission.current || controller.signal.aborted || request.current !== controller) break;
           setDocuments(previous => previous.map(document => document.key === item.document.key ? { ...document, attachmentId: attachment.id, text: result.document.text, warnings: result.document.warnings || [], loading: false } : document));
         } catch (cause) {
           if (!mounted.current || controller.signal.aborted) break;
@@ -91,8 +102,10 @@ export function AiWorkRegistration({ workspace: w, command, onClose, onWorkspace
         }
       }
     } finally {
-      executing.current = false;
-      if (mounted.current) { setReading(false); setDocuments(previous => previous.map(document => document.loading ? { ...document, loading: false, error: '파일 읽기가 중단되었습니다. 다시 선택해 주세요.' } : document)); }
+      if (request.current === controller) {
+        request.current = null; executing.current = false;
+        if (mounted.current) { setReading(false); setDocuments(previous => previous.map(document => document.loading ? { ...document, loading: false, error: '파일 읽기가 중단되었습니다. 다시 선택해 주세요.' } : document)); }
+      }
     }
   }
 
@@ -102,16 +115,16 @@ export function AiWorkRegistration({ workspace: w, command, onClose, onWorkspace
     const ready = submitted.documents.filter(document => document.attachmentId && document.text.trim());
     if (!submitted.description.trim() && !ready.length) { setError('업무 설명을 입력하거나 읽을 수 있는 파일을 선택해 주세요.'); return; }
     if (textCount > WORK_IMPORT_LIMITS.totalText) { setError('업무 설명과 분석 자료의 본문을 합쳐 6만 자 이내로 줄여 주세요.'); return; }
+    const controller = aiRequest.start(); if (!controller) return;
     executing.current = true; setAnalyzing(true); setError(''); setNotice('');
-    const controller = new AbortController(); request.current = controller;
     try {
       const result = await analyzeRequest<{ preview: { units: AnalysisUnit[] } }>({ action: 'generate', description: submitted.description, documents: ready.map(document => ({ attachmentId: document.attachmentId, text: document.text })) }, controller.signal);
-      if (!mounted.current || !permission.current) return;
+      if (!mounted.current || !permission.current || !aiRequest.accepts(controller)) return;
       const preview = registrationPreview(result.preview.units);
       if (registrationSnapshot(latest.current) !== basis || submitted.units.length) { setPendingPreview(preview); setNotice('현재 작성 내용은 유지했습니다. 새 분석 결과를 확인한 뒤 적용할 수 있습니다.'); }
       else { setUnits(preview); setPendingPreview(null); setNotice('초안을 만들었습니다. 내용과 업무 구분을 확인하고 마감일을 직접 입력해 주세요.'); }
-    } catch (cause) { if (mounted.current && !controller.signal.aborted) setError(cause instanceof Error ? cause.message : '분석하지 못했습니다. 입력은 유지됩니다.'); }
-    finally { executing.current = false; if (mounted.current) setAnalyzing(false); }
+    } catch (cause) { if (mounted.current && aiRequest.owns(controller)) setError(aiRequestError(controller, cause, '분석하지 못했습니다. 입력은 유지됩니다.')); }
+    finally { if (aiRequest.finish(controller)) { executing.current = false; if (mounted.current) setAnalyzing(false); } }
   }
 
   async function save() {
@@ -155,10 +168,12 @@ export function AiWorkRegistration({ workspace: w, command, onClose, onWorkspace
     <section className="air-source"><h3>1. 업무 설명과 참고 파일</h3><Field name="description" label="담당 업무 설명"><textarea rows={5} maxLength={60000} value={description} onChange={event => setDescription(event.target.value)} placeholder="맡고 있는 업무의 목적, 주요 내용과 업무별 구분을 적어 주세요."/></Field>
       <div className="air-file-actions"><Button variant="secondary" disabled={busy || !allowed || !!completed || documents.length >= 10} onClick={() => fileInput.current?.click()}><Upload size={16}/>인수인계·참고 파일 선택</Button><small>최대 10개 · 파일당 10MB</small><input ref={fileInput} hidden type="file" multiple accept=".pdf,.hwp,.hwpx,.docx,.xlsx,.xls,.pptx,.txt,.csv" aria-label="AI 업무 분석 파일" onChange={event => { const files = Array.from(event.target.files || []); event.target.value = ''; void readFiles(files); }}/></div>
       <p className="air-hint">파일은 분석용으로 보관되며 세부업무에 자동 첨부되지 않습니다. 읽은 본문을 확인한 뒤 분석해 주세요.</p>
+      {reading && <div className="air-analysis-actions"><p role="status">파일을 차례로 읽고 있습니다. 완료된 본문은 유지됩니다.</p><Button variant="secondary" onClick={() => { const controller = request.current; if (!controller) return; request.current = null; controller.abort(); executing.current = false; setReading(false); setDocuments(previous => previous.map(document => document.loading ? { ...document, loading: false, error: '파일 읽기를 중단했습니다. 필요한 파일만 다시 선택해 주세요.' } : document)); setNotice('파일 읽기를 중단했습니다. 이미 읽은 본문과 작성 내용은 유지됩니다.'); }}>파일 읽기 중단</Button></div>}
       {documents.map(document => <details className="air-document" key={document.key} open={!!document.error}><summary><FileText size={16}/><span>{document.name}</span><small>{document.loading ? '읽는 중…' : document.error ? '읽기 실패' : `${document.text.length.toLocaleString('ko-KR')}자`}</small></summary><Button variant="ghost" aria-label={`${document.name} 분석 목록에서 제거`} onClick={() => setDocuments(previous => previous.filter(item => item.key !== document.key))}><Trash2 size={15}/>목록에서 제거</Button>{document.error && <p className="air-error" role="alert">{document.error}</p>}{document.warnings?.map((warning, index) => <p className="air-hint" key={index}>{warning}</p>)}{document.attachmentId && <Field label={`${document.name} 분석 본문`}><textarea rows={5} value={document.text} onChange={event => setDocuments(previous => previous.map(item => item.key === document.key ? { ...item, text: event.target.value } : item))}/></Field>}</details>)}
       <p className="air-hint">입력한 설명과 선택한 문서 본문을 BizRouter로 보내 분석합니다.</p>
       {textCount > 60000 && <p className="air-error" role="alert">설명과 자료 본문을 합쳐 6만 자 이내로 줄여야 분석할 수 있습니다.</p>}
       <div className="air-analysis-actions"><span>{textCount.toLocaleString('ko-KR')} / 60,000자</span><Button disabled={busy || !allowed || !!completed || textCount > 60000} onClick={() => void analyze()}><Sparkles size={16}/>{reading ? '파일 읽는 중…' : analyzing ? '업무 분석 중…' : 'AI로 업무 초안 만들기'}</Button></div>
+      <AiRequestStatus startedAt={aiRequest.startedAt} onCancel={() => { if (aiRequest.cancel()) { executing.current = false; setAnalyzing(false); setNotice('AI 분석을 취소했습니다. 입력과 기존 초안은 유지됩니다. 다시 시도할 때 이전 요청이 처리 중이면 잠시 기다려 주세요.'); } }}/>
     </section>
     {pendingPreview && <section className="air-pending" role="status"><strong>새 분석 결과 · 단위업무 {pendingPreview.length}개 · 세부업무 {pendingPreview.reduce((sum, unit) => sum + unit.tasks.length, 0)}개</strong><p>적용하면 아래 미리보기를 새 결과로 바꿉니다. 입력한 업무 설명과 자료 본문은 유지됩니다.</p><details><summary>새 분석 결과 먼저 확인</summary>{pendingPreview.map(unit => <article key={unit.key}><h4>{unit.title}</h4><p>{unit.description}</p>{unit.tasks.map(task => <div key={task.key}><strong>{task.title}</strong><p>{task.description}</p></div>)}</article>)}</details><Button variant="secondary" disabled={busy || !!completed} onClick={() => setReplacementPreview(structuredClone(pendingPreview))}>새 분석 결과 적용</Button></section>}
     <section className="air-preview"><div className="air-section-heading"><h3>2. 업무 내용 검토</h3><span>단위업무 {units.length}/10 · 세부업무 {taskCount}/30</span></div><p className="air-hint">AI 초안은 원문과 다를 수 있습니다. 업무 구분과 내용을 확인하세요. 마감일은 추정하지 않으며 직접 입력해야 합니다.</p>

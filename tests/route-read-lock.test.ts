@@ -93,11 +93,12 @@ test('read-only routes use the committed local snapshot while a writer holds the
       assert.equal(providerCalls, 1);
       await unchanged();
     });
-    await context.test('organization export renders from the snapshot and retains department access', async () => {
+    await context.test('organization export renders selected department assignments without joining the writer queue', async () => {
       const response = await divisionExportGet(request('/api/organization-division/export?format=xlsx'));
       assert.equal(response.status, 200); assert.ok((await response.arrayBuffer()).byteLength > 0);
       const foreign = state.departments.find(department => department.id !== member.departmentId)!;
-      assert.equal((await divisionExportGet(request(`/api/organization-division/export?format=xlsx&departmentId=${foreign.id}`))).status, 403);
+      const foreignExport = await divisionExportGet(request(`/api/organization-division/export?format=xlsx&departmentId=${foreign.id}`));
+      assert.equal(foreignExport.status, 200); assert.ok((await foreignExport.arrayBuffer()).byteLength > 0);
       await unchanged();
     });
     await context.test('attachment download keeps file quarantine checks before reading bytes', async () => {

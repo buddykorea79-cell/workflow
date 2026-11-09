@@ -50,6 +50,7 @@ function host(command: CommandFn) {
     },
     button(label: string) { const result = find(tree, props => !!props.onClick && textOf(props.children) === label); assert.ok(result, label); return result; },
     click(label: string) { return this.button(label).onClick?.(); },
+    cancelAnalysis() { const status = find(tree, props => typeof props.startedAt === 'number' && typeof props.onCancel === 'function'); assert.ok(status); (status.onCancel as () => void)(); },
     confirmation() { const result = find(tree, props => props.title === '새 분석 결과로 바꿀까요?' && typeof props.onConfirm === 'function'); assert.ok(result); return result as NodeProps & { onConfirm: () => void; onCancel: () => void }; },
     change(name: string, value: string) { const field = find(tree, props => props.name === name); assert.ok(field, name); const control = find(field.children, props => !!props.onChange); assert.ok(control, name); control.onChange?.({ target: { value } }); },
   };
@@ -122,5 +123,26 @@ test('late analysis preserves changed input and provides inspectable results bef
     view.click('새 분석 결과 적용'); view.render(); view.confirmation().onConfirm(); const applied = view.render();
     assert.match(applied, /value="검토할 새 단위"/); assert.match(applied, /type="date" required="" value=""/);
     assert.match(applied, /계속 보관할 업무 설명/); assert.doesNotMatch(applied, /value="기존에 검토한 단위"/);
+  } finally { globalThis.fetch = originalFetch; }
+});
+
+test('analysis cancellation preserves input, rejects double clicks and ignores an old response during retry', async () => {
+  const originalFetch = globalThis.fetch;
+  const calls: { finish: (response: Response) => void; signal?: AbortSignal | null }[] = [];
+  globalThis.fetch = async (_url, init) => new Promise<Response>(finish => { calls.push({ finish, signal: init?.signal }); });
+  try {
+    const view = host(async () => true); view.render(); view.change('description', '보존할 업무 설명'); view.render();
+    view.click('AI로 업무 초안 만들기'); view.click('AI로 업무 초안 만들기');
+    assert.equal(calls.length, 1);
+    assert.match(view.render(), /최대 약 3분/);
+    view.cancelAnalysis(); assert.equal(calls[0].signal?.aborted, true);
+    assert.match(view.render(), /보존할 업무 설명/);
+    view.click('AI로 업무 초안 만들기'); view.render();
+    assert.equal(calls.length, 2);
+    const result = (title: string) => Response.json({ preview: { units: [{ title, description: '업무 범위', tasks: [{ title: '수행 과제', description: '수행 내용' }] }] } });
+    calls[0].finish(result('취소한 이전 결과')); await tick();
+    let html = view.render(); assert.match(html, /업무 분석 중/); assert.doesNotMatch(html, /취소한 이전 결과/);
+    calls[1].finish(result('현재 요청 결과')); await tick();
+    html = view.render(); assert.match(html, /현재 요청 결과/); assert.match(html, /보존할 업무 설명/); assert.doesNotMatch(html, /취소한 이전 결과/);
   } finally { globalThis.fetch = originalFetch; }
 });

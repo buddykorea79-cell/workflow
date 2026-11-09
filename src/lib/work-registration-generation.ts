@@ -10,6 +10,8 @@ import { dataDirectory, readState } from './store';
 import { extractDocument, type ExtractedDocument } from './document-extraction';
 import { generateStructuredJson, type BizRouterOptions } from './bizrouter';
 import { assertUserRateLimit, createRateLimiter } from './rate-limit';
+import { AI_GENERATION_TIMEOUT_MS } from './ai-generation-policy';
+import { aiAbortError, createAiDeadline, withAiSignal } from './ai-generation-operation';
 import type { Attachment, WorkspaceData } from './types';
 
 export const WORK_REGISTRATION_BODY_LIMIT = 350_000;
@@ -77,16 +79,6 @@ async function readDraftBytes(file: Attachment): Promise<Buffer> {
   if ((await stat(filename)).size > ATTACHMENT_SIZE_LIMIT) throw new DomainError(413, 'FILE_TOO_LARGE', '문서는 10MB 이하만 읽을 수 있습니다.');
   return readFile(filename);
 }
-function abortError() { return new DomainError(504, 'AI_TIMEOUT', '업무 분석 시간이 초과되었거나 요청이 취소되었습니다. 입력 내용은 유지됩니다.'); }
-function boundedOperation<T>(operation: Promise<T>, signal: AbortSignal): Promise<T> {
-  return new Promise((resolve, reject) => {
-    const abort = () => reject(abortError());
-    signal.addEventListener('abort', abort, { once: true });
-    if (signal.aborted) abort();
-    operation.then(resolve, reject).finally(() => signal.removeEventListener('abort', abort));
-  });
-}
-
 export interface WorkRegistrationDependencies {
   readState: () => Promise<WorkspaceData>;
   readBytes: (file: Attachment) => Promise<Buffer>;
@@ -99,38 +91,43 @@ export interface WorkRegistrationDependencies {
 
 /** No workspace writes. In-flight exclusion lasts until an unabortable parser actually settles. */
 export function createWorkRegistrationProcessor(overrides: Partial<WorkRegistrationDependencies> = {}) {
-  const deps: WorkRegistrationDependencies = { readState, readBytes: readDraftBytes, extract: extractDocument, generate: generateWorkRegistrationPreview, checkRate: createRateLimiter(), checkSharedRate: assertUserRateLimit, timeoutMs: 60_000, ...overrides };
+  const deps: WorkRegistrationDependencies = { readState, readBytes: readDraftBytes, extract: extractDocument, generate: generateWorkRegistrationPreview, checkRate: createRateLimiter(), checkSharedRate: assertUserRateLimit, timeoutMs: AI_GENERATION_TIMEOUT_MS, ...overrides };
   const active = new Set<string>();
   return async (userId: string, value: unknown, requestSignal?: AbortSignal): Promise<WorkRegistrationResult> => {
-    const input = parseWorkRegistrationRequest(value);
-    const ids = input.action === 'extract' ? [input.attachmentId] : input.documents.map(item => item.attachmentId);
-    const files = authorizeWorkRegistration(await deps.readState(), userId, ids);
-    if (requestSignal?.aborted) throw abortError();
-    if (active.has(userId)) throw new DomainError(429, 'AI_ALREADY_RUNNING', '진행 중인 문서 분석이 끝난 뒤 다시 요청해 주세요.');
-    deps.checkRate(`${userId}:${input.action}`, input.action === 'extract' ? 20 : 5);
-    if (input.action === 'generate') deps.checkSharedRate(userId);
-    active.add(userId);
-    const signal = AbortSignal.any([AbortSignal.timeout(deps.timeoutMs), ...(requestSignal ? [requestSignal] : [])]);
-    const operation = (async (): Promise<WorkRegistrationResult> => {
-      try {
-        let result: WorkRegistrationResult;
-        if (input.action === 'extract') {
-          const file = files[0]; const bytes = await deps.readBytes(file);
-          if (signal.aborted) throw abortError();
-          if (bytes.length !== file.size || createHash('sha256').update(bytes).digest('hex') !== file.sha256) throw new DomainError(409, 'ATTACHMENT_CHANGED', '첨부파일 크기나 내용이 변경되었습니다. 파일을 다시 등록해 주세요.');
-          const document = await deps.extract(bytes, file.name);
-          result = { document: { ...document, attachmentId: file.id, name: file.name } };
-        } else {
-          result = await deps.generate({ description: input.description, documents: input.documents.map((document, index) => ({ name: files[index].name, text: document.text })) }, { signal });
-        }
-        if (signal.aborted) throw abortError();
-        // Permissions and file ownership can change while extraction/model calls run.
-        const latest = authorizeWorkRegistration(await deps.readState(), userId, ids);
-        if (latest.some((file, index) => fileFingerprint(file) !== fileFingerprint(files[index]))) throw new DomainError(409, 'ATTACHMENT_CHANGED', '분석 중 첨부파일 정보가 변경되었습니다. 파일을 다시 선택해 주세요.');
-        return result;
-      } finally { active.delete(userId); }
-    })();
-    return boundedOperation(operation, signal);
+    const deadline = createAiDeadline(requestSignal, deps.timeoutMs);
+    const { signal } = deadline;
+    try {
+      const input = parseWorkRegistrationRequest(value);
+      const ids = input.action === 'extract' ? [input.attachmentId] : input.documents.map(item => item.attachmentId);
+      const files = authorizeWorkRegistration(await withAiSignal(() => deps.readState(), signal), userId, ids);
+      if (signal.aborted) throw aiAbortError(signal);
+      if (active.has(userId)) throw new DomainError(429, 'AI_ALREADY_RUNNING', '진행 중인 문서 분석이 끝난 뒤 다시 요청해 주세요.');
+      deps.checkRate(`${userId}:${input.action}`, input.action === 'extract' ? 20 : 5);
+      if (input.action === 'generate') deps.checkSharedRate(userId);
+      active.add(userId);
+      const operation = (async (): Promise<WorkRegistrationResult> => {
+        try {
+          let result: WorkRegistrationResult;
+          if (input.action === 'extract') {
+            const file = files[0]; const bytes = await deps.readBytes(file);
+            if (signal.aborted) throw aiAbortError(signal);
+            if (bytes.length !== file.size || createHash('sha256').update(bytes).digest('hex') !== file.sha256) throw new DomainError(409, 'ATTACHMENT_CHANGED', '첨부파일 크기나 내용이 변경되었습니다. 파일을 다시 등록해 주세요.');
+            const document = await deps.extract(bytes, file.name);
+            result = { document: { ...document, attachmentId: file.id, name: file.name } };
+          } else {
+            result = await deps.generate({ description: input.description, documents: input.documents.map((document, index) => ({ name: files[index].name, text: document.text })) }, { signal });
+          }
+          if (signal.aborted) throw aiAbortError(signal);
+          // Permissions and file ownership can change while extraction/model calls run.
+          const latest = authorizeWorkRegistration(await deps.readState(), userId, ids);
+          if (latest.some((file, index) => fileFingerprint(file) !== fileFingerprint(files[index]))) throw new DomainError(409, 'ATTACHMENT_CHANGED', '분석 중 첨부파일 정보가 변경되었습니다. 파일을 다시 선택해 주세요.');
+          if (signal.aborted) throw aiAbortError(signal);
+          return result;
+        } finally { active.delete(userId); }
+      })();
+      void operation.catch(() => {});
+      return await withAiSignal(() => operation, signal);
+    } finally { deadline.dispose(); }
   };
 }
 

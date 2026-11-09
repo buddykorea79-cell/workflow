@@ -11,6 +11,8 @@ import { AI_REFERENCE_LIMIT, AI_REFERENCE_TEXT_LIMIT, procedureOverviewFingerpri
 import { useUnsavedChanges } from './unsaved-changes';
 import { Button, Modal } from './ui';
 import { sameDraft } from '@/lib/pending-draft';
+import { aiRequestError } from '@/lib/ai-request-lifecycle';
+import { AiRequestStatus, useAiRequest } from './ai-request-status';
 import '@xyflow/react/dist/style.css';
 import './procedure-builder.css';
 
@@ -152,11 +154,13 @@ export function ProcedureBuilder({ taskId, overview, overviewAttachments, workfl
   const overviewFingerprint = procedureOverviewFingerprint({ ...overview, reviewRequired });
   const sourceFingerprint = JSON.stringify([overviewFingerprint, referencesFingerprint, selectedOverviewIds, readAttachments, hasSupport, reviewRequired]);
   const latestFingerprint = useRef(sourceFingerprint); latestFingerprint.current = sourceFingerprint;
-  const controller = useRef<AbortController | null>(null);
+  const aiRequest = useAiRequest();
+  const latestScope = useRef({ taskId, disabled }); latestScope.current = { taskId, disabled };
+  const applyInFlight = useRef(false);
   const selectedLength = overview.title.length + overview.description.length + overview.completionCriteria.length + selectedReferences.reduce((sum, reference) => sum + reference.content.length, 0);
   const hasSourceContent = Boolean(overview.description.trim() || overview.completionCriteria.trim() || selectedOverviewIds.length || selectedReferences.length);
   useEffect(() => { setReviewed(false); setGeneratedBy(''); }, [sourceFingerprint]);
-  useEffect(() => () => controller.current?.abort(), []);
+  useEffect(() => { aiRequest.cancel(); setBusy(false); }, [taskId, disabled]);
   useEffect(() => {
     if (!focusSelected || !selectedEditor.current) return;
     selectedEditor.current.focus({ preventScroll: true });
@@ -185,45 +189,50 @@ export function ProcedureBuilder({ taskId, overview, overviewAttachments, workfl
     setDraft({ ...draft, steps: result.workflow }); setReviewed(false); setDiagramChanged(true); setRedrawKey(value => value + 1); setError('');
   }
   async function importPdf(file: File) {
-    if (executing) return;
+    if (executing || applyInFlight.current) return;
     const submitted = latestDraft.current;
     if (file.size > PROCEDURE_PDF_LIMIT) { setError('문서는 10MB 이하로 선택해 주세요.'); return; }
+    const request = aiRequest.start(); if (!request) return;
     setBusy(true); setError(''); setFileNotice('');
     try {
       const form = new FormData(); form.append('taskId', taskId); form.append('file', file);
-      const response = await fetch('/api/procedure-extract', { method: 'POST', body: form });
+      const response = await fetch('/api/procedure-extract', { method: 'POST', body: form, signal: request.signal });
       const result = await response.json() as { error?: string; pages?: ProcedurePage[]; text?: string; pageCount?: number; warnings?: string[] };
+      if (!aiRequest.accepts(request) || latestScope.current.taskId !== taskId || latestScope.current.disabled) return;
       if (!response.ok) throw new Error(result.error || '문서 본문을 읽지 못했습니다.');
       if (!sameDraft(latestDraft.current, submitted)) { setFileNotice('문서를 읽는 동안 수정한 자료와 초안을 유지했습니다. 추출 결과로 덮어쓰지 않았습니다.'); return; }
       setText(result.text || ''); setPages(result.pages); if (!title.trim()) setTitle(file.name.replace(/\.[^.]+$/, ''));
       setDraft(null); setReviewed(false); setFileNotice(`${file.name} · ${result.pageCount ? `${result.pageCount}쪽·섹션 · ` : ''}본문 추출 완료${result.warnings?.length ? ` · ${result.warnings.join(' ')}` : ''}`);
-    } catch (cause) { setError(cause instanceof Error ? cause.message : '본문을 추출하지 못했습니다.'); }
-    finally { setBusy(false); }
+    } catch (cause) { if (aiRequest.owns(request)) setError(aiRequestError(request, cause, '본문을 추출하지 못했습니다. 입력은 유지됩니다.')); }
+    finally { if (aiRequest.finish(request)) setBusy(false); }
   }
   function generate() {
-    if (executing) return;
+    if (executing || aiRequest.isRunning() || applyInFlight.current) return;
     setError('');
     try { const next = generateProcedureDraft({ title, text, type, url, pages }, prefix(), { hasSupport, reviewRequired }); setDraft(next); setSelectedId(next.steps[0]?.id || ''); setReviewed(false); setDiagramChanged(false); setRedrawKey(value => value + 1); setGeneratedBy('규칙 기반 초안'); }
     catch (cause) { setError(cause instanceof Error ? cause.message : '초안을 만들지 못했습니다.'); }
   }
   async function generateAi() {
-    if (executing) return;
+    if (executing || applyInFlight.current) return;
     const submitted = latestDraft.current;
+    const requestController = aiRequest.start(); if (!requestController) return;
     setBusy(true); setError(''); setReviewed(false); setGeneratedBy('');
-    const fingerprint = sourceFingerprint; const requestController = new AbortController(); controller.current = requestController;
+    const fingerprint = sourceFingerprint;
     try {
       const response = await fetch('/api/procedure-generate', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ taskId, overviewFingerprint, overviewAttachmentIds: selectedOverviewIds, referenceIds: selectedReferences.map(reference => reference.id), referencesFingerprint, readAttachments }), signal: requestController.signal });
       const result = await response.json() as { error?: string; draft?: ProcedureDraft; model?: string };
+      if (!aiRequest.accepts(requestController) || latestScope.current.taskId !== taskId || latestScope.current.disabled) return;
       if (!response.ok || !result.draft) throw new Error(result.error || 'AI 절차를 생성하지 못했습니다.');
       if (latestFingerprint.current !== fingerprint || !sameDraft(latestDraft.current, submitted)) throw new Error('분석 중 업무 개요·붙임 파일 또는 관련 근거가 변경되었습니다. 저장한 뒤 다시 분석해 주세요.');
       const next = { ...result.draft, steps: result.draft.steps.map(step => ({ ...step, role: step.role === 'support' && !hasSupport ? 'primary' as const : step.role })) };
       setDraft(next); setSelectedId(next.steps[0]?.id || ''); setDiagramChanged(false); setRedrawKey(value => value + 1); setGeneratedBy(`BizRouter AI · ${result.model || '분석 완료'}`);
-    } catch (cause) { if (!requestController.signal.aborted) setError(cause instanceof Error ? cause.message : 'AI 분석을 완료하지 못했습니다.'); }
-    finally { if (controller.current === requestController) { if (!requestController.signal.aborted) setBusy(false); controller.current = null; } }
+    } catch (cause) { if (aiRequest.owns(requestController)) setError(aiRequestError(requestController, cause, 'AI 분석을 완료하지 못했습니다. 입력과 기존 초안은 유지됩니다.')); }
+    finally { if (aiRequest.finish(requestController)) setBusy(false); }
   }
   async function apply() {
-    if (!draft || executing || !reviewed) return;
-    const submitted = latestDraft.current; const isCurrent = () => sameDraft(latestDraft.current, submitted);
+    if (!draft || executing || aiRequest.isRunning() || applyInFlight.current || !reviewed) return;
+    applyInFlight.current = true;
+    const submitted = latestDraft.current; const isCurrent = () => latestScope.current.taskId === taskId && !latestScope.current.disabled && sameDraft(latestDraft.current, submitted);
     setApplying(true); setError(''); setApplyNotice('');
     try {
       if (errors.length) throw new Error(errors.join(' '));
@@ -233,7 +242,7 @@ export function ProcedureBuilder({ taskId, overview, overviewAttachments, workfl
       if (isCurrent()) { setDraft(null); setReviewed(false); setGeneratedBy(''); setDiagramChanged(false); onClose?.(); }
       else { setReviewed(false); setApplyNotice('요청한 절차는 저장했습니다. 저장 중 추가로 수정한 초안은 유지했으니 다시 검토하고 적용해 주세요.'); }
     } catch (cause) { setError(cause instanceof Error ? cause.message : '절차를 적용하지 못했습니다.'); }
-    finally { setApplying(false); }
+    finally { applyInFlight.current = false; setApplying(false); }
   }
   return <section className="procedure-builder" aria-label="업무 개요와 붙임 파일로 AI 절차·절차도 만들기">
     <header className="procedure-builder-heading"><div><p>업무 개요와 붙임 파일에서 시작하는 절차</p><h3>업무를 분석하고, 근거로 보완하세요.</h3></div>{onClose && <button className="procedure-close" type="button" aria-label="절차 초안 닫기" onClick={onClose}><X size={18}/></button>}</header>
@@ -251,7 +260,7 @@ export function ProcedureBuilder({ taskId, overview, overviewAttachments, workfl
       <label className="procedure-file-analysis"><input type="checkbox" checked={readAttachments} disabled={locked} onChange={event => { setReadAttachments(event.target.checked); setDraft(null); }}/><span>관련 근거의 첨부파일도 Kordoc으로 읽기</span></label>
       <button type="button" className="btn btn-secondary" disabled={executing} onClick={() => { setOverviewAttachmentIds([]); setReadAttachments(false); setReferenceIds(ids => ids.filter(id => references.some(reference => reference.id === id && reference.content.trim()))); setDraft(null); setError(''); }}>모든 파일 제외 · 저장한 텍스트만 분석</button>
       <p className="procedure-ai-disclosure">저장된 업무 개요, 선택한 파일의 본문과 관련 근거를 BizRouter로 전송합니다. 파일 원본과 원문 주소는 전송하지 않습니다. 변경한 업무 개요와 붙임 파일·근거는 먼저 저장해 주세요.</p>
-      <div className="procedure-ai-action"><button className="btn btn-primary" type="button" disabled={executing || !hasSourceContent || selectedReferences.some(reference => !reference.content.trim() && !(readAttachments && reference.attachmentId)) || selectedLength > AI_REFERENCE_TEXT_LIMIT} onClick={() => void generateAi()}><Sparkles size={16}/>{busy ? 'AI가 업무 개요·파일을 분석하는 중…' : 'AI 업무 분석·절차 만들기'}</button><small>저장된 텍스트 {selectedLength.toLocaleString('ko-KR')}자 · 파일 {new Set([...selectedOverviewIds, ...(readAttachments ? selectedReferences.flatMap(reference => reference.attachmentId ? [reference.attachmentId] : []) : [])]).size}개 선택 · 파일 추출 후 합계 최대 60,000자</small>{busy && <button type="button" className="btn btn-secondary" onClick={() => { controller.current?.abort(); setBusy(false); setError('AI 분석을 취소했습니다. 선택한 자료는 유지됩니다.'); }}>분석 취소</button>}</div>
+      <div className="procedure-ai-action"><button className="btn btn-primary" type="button" disabled={executing || !hasSourceContent || selectedReferences.some(reference => !reference.content.trim() && !(readAttachments && reference.attachmentId)) || selectedLength > AI_REFERENCE_TEXT_LIMIT} onClick={() => void generateAi()}><Sparkles size={16}/>{busy ? 'AI가 업무 개요·파일을 분석하는 중…' : 'AI 업무 분석·절차 만들기'}</button><small>저장된 텍스트 {selectedLength.toLocaleString('ko-KR')}자 · 파일 {new Set([...selectedOverviewIds, ...(readAttachments ? selectedReferences.flatMap(reference => reference.attachmentId ? [reference.attachmentId] : []) : [])]).size}개 선택 · 파일 추출 후 합계 최대 60,000자</small></div>
       {selectedLength > AI_REFERENCE_TEXT_LIMIT && <p className="procedure-error" role="alert">업무 설명과 선택한 근거의 본문 합계를 6만 자 이하로 맞춰 주세요.</p>}
     </div> : <>
     <p className="procedure-builder-intro">문서 파일 또는 붙여 넣은 본문에서 수행 행동을 찾습니다. 목차·배점·지표 설명은 절차에서 제외합니다. 외부 AI 전송 없이 규칙 기반 초안을 작성합니다.</p>
@@ -261,6 +270,7 @@ export function ProcedureBuilder({ taskId, overview, overviewAttachments, workfl
     <label className="procedure-text"><span>자료 본문</span><textarea rows={7} value={text} maxLength={PROCEDURE_TEXT_LIMIT} disabled={locked} onChange={event => { setText(event.target.value); setPages(undefined); setDraft(null); setFileNotice('본문을 직접 수정했습니다. 근거 위치는 문단 기준으로 다시 표시됩니다.'); }} placeholder={'1. 담당자는 요구자료를 작성한다.\n2. 부서장은 자료를 검토한다.\n3. 담당자는 결과를 제출한다.'}/><small>스캔 PDF의 OCR은 지원하지 않습니다. 원문 본문을 붙여 넣거나 추출한 내용을 보완하세요.</small></label>
     <button className="btn btn-primary procedure-generate" type="button" disabled={executing || !title.trim() || !text.trim()} onClick={generate}><GitBranch size={16}/>규칙 기반 절차 초안 만들기<ArrowRight size={15}/></button>
     </>}
+    <AiRequestStatus startedAt={aiRequest.startedAt} onCancel={() => { if (aiRequest.cancel()) { setBusy(false); setError('분석을 취소했습니다. 선택한 자료와 기존 초안은 유지됩니다. 다시 시도할 때 이전 요청이 처리 중이면 잠시 기다려 주세요.'); } }}/>
     {error && !draft && <p className="procedure-error" role="alert">{error}</p>}
     {generatedBy && <p className="procedure-generated-by" role="status"><Check size={15}/>{generatedBy} · {draft?.analysis ? '업무 요약·절차도 생성 완료' : '절차도 생성 완료'}</p>}
     {draft?.analysis && <section className="procedure-analysis" aria-label="업무 개요·파일·관련 근거 AI 검토 요약">
