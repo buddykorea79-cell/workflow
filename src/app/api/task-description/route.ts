@@ -13,6 +13,7 @@ import { extractDocument } from '@/lib/document-extraction';
 import { generateAiTaskDescription } from '@/lib/bizrouter';
 import { assertUserRateLimit } from '@/lib/rate-limit';
 import { aiAbortError, createAiDeadline, withAiSignal } from '@/lib/ai-generation-operation';
+import { resolveAiModel } from '@/lib/ai-model-settings';
 
 export const runtime = 'nodejs';
 // AI_GENERATION_ROUTE_MAX_DURATION_SECONDS; Next.js requires a static literal.
@@ -61,10 +62,10 @@ export async function POST(request: NextRequest) {
           if (signal.aborted) throw aiAbortError(signal);
           return { attachmentId: attachment.id, name: attachment.name, ...document };
         }
-        const documents = await transaction(state => input.documents.map(document => ({ ...document, name: descriptionAttachment(state, userId, document.attachmentId).name })));
+        const source = await transaction(state => ({ model: resolveAiModel(state), documents: input.documents.map(document => ({ ...document, name: descriptionAttachment(state, userId, document.attachmentId).name })) }));
         if (signal.aborted) throw aiAbortError(signal);
         assertUserRateLimit(userId);
-        const result = await generateAiTaskDescription({ title: input.title, description: input.description, documents }, { signal });
+        const result = await generateAiTaskDescription({ title: input.title, description: input.description, documents: source.documents }, { signal, model: source.model });
         if (signal.aborted) throw aiAbortError(signal);
         return result;
       } finally { requests.delete(userId); }

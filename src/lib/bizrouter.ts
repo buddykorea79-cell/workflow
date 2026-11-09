@@ -5,11 +5,9 @@ import { procedureErrors, type ProcedureDraft, type ProcedureGenerationOptions }
 import { AI_DESCRIPTION_DOCUMENT_LIMIT, AI_PROCEDURE_SOURCE_LIMIT, AI_REFERENCE_LIMIT, AI_REFERENCE_TEXT_LIMIT } from './procedure-ai-input';
 import type { TaskReference, WorkflowStep } from './types';
 import { aiAbortError, createAiDeadline, withAiSignal } from './ai-generation-operation';
+import { assertBizRouterModel, fetchBizRouterModels } from './bizrouter-models';
 
 const origin = 'https://api.bizrouter.ai/v1';
-// The catalog includes metadata for every model (and can be several MB).
-// Its transport budget must not be confused with generated procedure output.
-const catalogResponseLimit = 8 * 1024 * 1024;
 const completionResponseLimit = 1024 * 1024;
 const evidenceSchema = z.object({ referenceId: z.string().min(1).max(200), locator: z.string().trim().min(1).max(200), quote: z.string().trim().min(1).max(1200) }).strict();
 const stepSchema = z.object({ id: z.string().regex(/^[a-zA-Z0-9_-]{1,80}$/), title: z.string().trim().min(1).max(150), role: z.enum(['primary', 'support', 'reviewer']), description: z.string().min(1).max(2500), output: z.string().max(1000), required: z.boolean(), dependsOn: z.array(z.string().max(80)).max(30), checklist: z.array(z.string().trim().min(1).max(300)).max(12), evidence: evidenceSchema }).strict();
@@ -34,7 +32,7 @@ export function parseAiDescription(value: unknown, documents: DescriptionDocumen
 
 export async function generateAiTaskDescription(input: { title: string; description: string; documents: DescriptionDocument[] }, options: BizRouterOptions = {}): Promise<{ draft: DescriptionDraft; model: string }> {
   const apiKey = options.apiKey ?? process.env.BIZROUTER_API_KEY; const model = options.model ?? process.env.BIZROUTER_MODEL;
-  if (!apiKey?.trim() || !model?.trim()) throw new DomainError(503, 'AI_NOT_CONFIGURED', '서버의 BIZROUTER_API_KEY와 BIZROUTER_MODEL을 설정해 주세요.');
+  if (!apiKey?.trim() || !model?.trim()) throw new DomainError(503, 'AI_NOT_CONFIGURED', '서버의 BIZROUTER_API_KEY와 관리자 화면의 AI 모델을 설정해 주세요.');
   if (!input.documents.length || input.documents.length > 10 || input.documents.some(document => !document.text.trim()) || new Set(input.documents.map(document => document.attachmentId)).size !== input.documents.length) throw new DomainError(422, 'AI_DOCUMENT_REQUIRED', '본문이 있는 문서를 1~10개 선택해 주세요.');
   if (input.documents.reduce((sum, document) => sum + document.text.length, 0) > 60_000) throw new DomainError(422, 'AI_DOCUMENT_TOO_LONG', '분석 본문은 합계 6만 자까지 지원합니다. 미리보기에서 필요한 부분만 남겨 주세요.');
   const deadline = createAiDeadline(options.signal, options.timeoutMs);
@@ -43,10 +41,7 @@ export async function generateAiTaskDescription(input: { title: string; descript
   const headers = { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json' };
   try {
     signal.throwIfAborted();
-    const catalogResponse = await fetcher(`${origin}/models`, { headers, signal, cache: 'no-store', redirect: 'error' });
-    if (!catalogResponse.ok) throw upstreamError(catalogResponse.status);
-    const catalog = z.object({ models: z.array(z.object({ id: z.string(), response_format_modes: z.array(z.string()).optional() })) }).safeParse(await readJson(catalogResponse, 'catalog', signal));
-    if (!catalog.success || !catalog.data.models.some(item => item.id === model && item.response_format_modes?.includes('json_schema'))) throw new DomainError(503, 'AI_MODEL_UNAVAILABLE', 'BIZROUTER_MODEL의 모델 접근 권한과 JSON 구조화 응답 지원을 확인해 주세요.');
+    assertBizRouterModel(await fetchBizRouterModels({ apiKey, fetcher, signal }), model);
     const schema = descriptionSchema.extend({ sources: z.array(descriptionSchema.shape.sources.element.extend({ attachmentId: z.enum(input.documents.map(document => document.attachmentId)) })).length(input.documents.length) });
     for (let attempt = 0; ; attempt++) {
       try {
@@ -56,7 +51,7 @@ export async function generateAiTaskDescription(input: { title: string; descript
           { role: 'user', content: JSON.stringify(input) }, ...(attempt ? [{ role: 'user', content: '이전 결과의 검증에 실패했습니다. 모든 attachmentId를 정확히 한 번씩 포함하고 각 문서의 실제 원문 인용과 간결한 설명 전체를 다시 작성하세요.' }] : []),
         ] }) });
         if (!response.ok) throw upstreamError(response.status);
-        const envelope = z.object({ model: z.string().optional(), choices: z.array(z.object({ finish_reason: z.string(), message: z.object({ content: z.string().nullable() }) })).min(1) }).safeParse(await readJson(response, 'completion', signal));
+        const envelope = z.object({ model: z.string().optional(), choices: z.array(z.object({ finish_reason: z.string(), message: z.object({ content: z.string().nullable() }) })).min(1) }).safeParse(await readJson(response, signal));
         if (!envelope.success || envelope.data.choices[0].finish_reason !== 'stop' || !envelope.data.choices[0].message.content) throw new DomainError(502, 'AI_INCOMPLETE_RESPONSE', 'AI 응답이 완료되지 않았습니다. 다시 분석해 주세요.');
         let value: unknown; try { value = JSON.parse(envelope.data.choices[0].message.content); } catch { throw new DomainError(502, 'AI_INVALID_STRUCTURE', 'AI 응답 형식을 확인하지 못했습니다.'); }
         return { draft: parseAiDescription(value, input.documents), model: envelope.data.model || model };
@@ -134,8 +129,7 @@ export function parseAiProcedure(value: unknown, references: TaskReference[], id
   return { steps, evidence, references: [], analysis: { summary: raw.summary, sources }, warnings: ['AI가 업무 개요와 업무 첨부파일을 우선 분석하고 관련 근거를 참고한 초안입니다. 요약과 원문 인용, 담당 역할, 선행 관계와 완료 조건을 검토해 주세요.', ...(normalizedReview ? ['이 업무의 검토 설정에 따라 원문으로 확인된 검토 단계를 필수로 표시했습니다.'] : []), ...raw.warnings] };
 }
 
-async function readJson(response: Response, kind: 'catalog' | 'completion', signal: AbortSignal): Promise<unknown> {
-  const limit = kind === 'catalog' ? catalogResponseLimit : completionResponseLimit;
+async function readJson(response: Response, signal: AbortSignal): Promise<unknown> {
   const reader = response.body?.getReader();
   if (!reader) throw new DomainError(502, 'AI_EMPTY_RESPONSE', 'BizRouter 응답을 읽지 못했습니다.');
   const decoder = new TextDecoder(); let text = ''; let size = 0;
@@ -146,11 +140,9 @@ async function readJson(response: Response, kind: 'catalog' | 'completion', sign
     while (true) {
       const chunk = await withAiSignal(() => reader.read(), signal); if (chunk.done) break;
       size += chunk.value.byteLength;
-      if (size > limit) {
+      if (size > completionResponseLimit) {
         cancel();
-        throw kind === 'catalog'
-          ? new DomainError(502, 'AI_CATALOG_TOO_LARGE', 'BizRouter 모델 목록이 처리 한도를 초과했습니다. 서비스 연동 설정을 확인해 주세요. 등록한 근거의 크기와는 관계가 없습니다.')
-          : new DomainError(502, 'AI_RESPONSE_TOO_LARGE', 'AI가 분석 결과를 지나치게 길게 반환했습니다. 다시 분석해 주세요. 등록한 근거는 유지됩니다.');
+        throw new DomainError(502, 'AI_RESPONSE_TOO_LARGE', 'AI가 분석 결과를 지나치게 길게 반환했습니다. 다시 분석해 주세요. 등록한 근거는 유지됩니다.');
       }
       text += decoder.decode(chunk.value, { stream: true });
     }
@@ -176,14 +168,11 @@ export async function generateStructuredJson<T>(input: { name: string; schema: z
   const headers = { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json' };
   try {
     signal.throwIfAborted();
-    const catalogResponse = await fetcher(`${origin}/models`, { headers, signal, cache: 'no-store', redirect: 'error' });
-    if (!catalogResponse.ok) throw upstreamError(catalogResponse.status);
-    const catalog = z.object({ models: z.array(z.object({ id: z.string(), response_format_modes: z.array(z.string()).optional() })) }).safeParse(await readJson(catalogResponse, 'catalog', signal));
-    if (!catalog.success || !catalog.data.models.some(item => item.id === model && item.response_format_modes?.includes('json_schema'))) throw new DomainError(503, 'AI_MODEL_UNAVAILABLE', '설정한 BizRouter 모델의 접근 권한과 구조화 응답 지원을 확인해 주세요.');
+    assertBizRouterModel(await fetchBizRouterModels({ apiKey, fetcher, signal }), model);
     signal.throwIfAborted();
     const response = await fetcher(`${origin}/chat/completions`, { method: 'POST', headers, signal, cache: 'no-store', redirect: 'error', body: JSON.stringify({ model, stream: false, max_tokens: 12_000, response_format: { type: 'json_schema', json_schema: { name: input.name, strict: true, schema: z.toJSONSchema(input.schema, { target: 'draft-7' }) } }, messages: [{ role: 'system', content: input.system }, { role: 'user', content: JSON.stringify(input.data) }] }) });
     if (!response.ok) throw upstreamError(response.status);
-    const envelope = z.object({ model: z.string().optional(), choices: z.array(z.object({ finish_reason: z.string(), message: z.object({ content: z.string().nullable() }) })).min(1) }).safeParse(await readJson(response, 'completion', signal));
+    const envelope = z.object({ model: z.string().optional(), choices: z.array(z.object({ finish_reason: z.string(), message: z.object({ content: z.string().nullable() }) })).min(1) }).safeParse(await readJson(response, signal));
     signal.throwIfAborted();
     if (!envelope.success || envelope.data.choices[0].finish_reason !== 'stop' || !envelope.data.choices[0].message.content) throw new DomainError(502, 'AI_INCOMPLETE_RESPONSE', 'AI가 업무 초안을 완성하지 못했습니다. 입력 내용은 유지됩니다. 다시 분석해 주세요.');
     let value: unknown;
@@ -200,7 +189,7 @@ export async function generateStructuredJson<T>(input: { name: string; schema: z
 export async function generateAiProcedure(input: ProcedureAiInput, options: BizRouterOptions = {}): Promise<{ draft: ProcedureDraft; model: string }> {
   const apiKey = options.apiKey ?? process.env.BIZROUTER_API_KEY;
   const model = options.model ?? process.env.BIZROUTER_MODEL;
-  if (!apiKey?.trim() || !model?.trim()) throw new DomainError(503, 'AI_NOT_CONFIGURED', 'BizRouter API 키와 분석 모델을 설정해 주세요. 서버의 BIZROUTER_API_KEY, BIZROUTER_MODEL 설정이 필요합니다.');
+  if (!apiKey?.trim() || !model?.trim()) throw new DomainError(503, 'AI_NOT_CONFIGURED', '서버의 BIZROUTER_API_KEY와 관리자 화면의 AI 모델을 설정해 주세요.');
   const sources = procedureAiSources(input);
   const deadline = createAiDeadline(options.signal, options.timeoutMs);
   const { signal } = deadline;
@@ -209,10 +198,7 @@ export async function generateAiProcedure(input: ProcedureAiInput, options: BizR
   const headers = { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json' };
   try {
     signal.throwIfAborted();
-    const catalogResponse = await fetcher(`${origin}/models`, { headers, signal, cache: 'no-store', redirect: 'error' });
-    if (!catalogResponse.ok) throw upstreamError(catalogResponse.status);
-    const catalog = z.object({ models: z.array(z.object({ id: z.string(), response_format_modes: z.array(z.string()).optional() })) }).safeParse(await readJson(catalogResponse, 'catalog', signal));
-    if (!catalog.success || !catalog.data.models.some(item => item.id === model && item.response_format_modes?.includes('json_schema'))) throw new DomainError(503, 'AI_MODEL_UNAVAILABLE', '설정한 BizRouter 모델이 허용 목록에 없거나 구조화 응답을 지원하지 않습니다. BIZROUTER_MODEL 설정을 확인해 주세요.');
+    assertBizRouterModel(await fetchBizRouterModels({ apiKey, fetcher, signal }), model);
     const referenceId = z.enum(sources.map(source => source.id));
     const requestSchema = resultSchema.extend({
       sourceSummaries: z.array(sourceSummarySchema.extend({ referenceId })).length(sources.length),
@@ -234,7 +220,7 @@ export async function generateAiProcedure(input: ProcedureAiInput, options: BizR
           ] }),
         });
         if (!response.ok) throw upstreamError(response.status);
-        const envelope = z.object({ model: z.string().optional(), choices: z.array(z.object({ finish_reason: z.string(), message: z.object({ content: z.string().nullable() }) })).min(1) }).safeParse(await readJson(response, 'completion', signal));
+        const envelope = z.object({ model: z.string().optional(), choices: z.array(z.object({ finish_reason: z.string(), message: z.object({ content: z.string().nullable() }) })).min(1) }).safeParse(await readJson(response, signal));
         if (!envelope.success || envelope.data.choices[0].finish_reason !== 'stop' || !envelope.data.choices[0].message.content) throw new DomainError(502, 'AI_INCOMPLETE_RESPONSE', 'AI가 분석 결과를 완성하기 전에 응답이 끝났습니다. 다시 분석해 주세요. 등록한 근거는 유지됩니다.');
         let content: unknown;
         try { content = JSON.parse(envelope.data.choices[0].message.content); } catch { throw new DomainError(502, 'AI_INVALID_JSON', 'AI가 올바른 절차 JSON을 반환하지 않았습니다. 다시 분석해 주세요.'); }

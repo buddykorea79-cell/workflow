@@ -9,6 +9,7 @@ import { generateAiProcedure, procedureAbortError, withProcedureSignal } from '@
 import { assertUserRateLimit } from '@/lib/rate-limit';
 import { AI_REFERENCE_LIMIT, procedureOverviewFingerprint, procedureReferenceFingerprint } from '@/lib/procedure-ai-input';
 import { createAiDeadline } from '@/lib/ai-generation-operation';
+import { resolveAiModel } from '@/lib/ai-model-settings';
 
 export const runtime = 'nodejs';
 // AI_GENERATION_ROUTE_MAX_DURATION_SECONDS; Next.js requires a static literal.
@@ -71,7 +72,7 @@ export async function POST(request: NextRequest) {
         if (!file) throw new DomainError(409, 'AI_ATTACHMENT_MISSING', '이 업무의 첨부파일 연결을 확인해 주세요.');
         return [file];
       });
-      return structuredClone({ hasSupport: task.supportIds.length > 0 || !!task.cooperationDepartmentIds?.length, reviewRequired: !!task.commonId || task.reviewRequired !== false, title: task.title, description: task.description, completionCriteria: task.completionCriteria, overviewAttachments, references: saved, attachments, requiredStepTitles: state.commonTasks.find(common => common.id === task.commonId)?.requiredSteps });
+      return structuredClone({ model: resolveAiModel(state), hasSupport: task.supportIds.length > 0 || !!task.cooperationDepartmentIds?.length, reviewRequired: !!task.commonId || task.reviewRequired !== false, title: task.title, description: task.description, completionCriteria: task.completionCriteria, overviewAttachments, references: saved, attachments, requiredStepTitles: state.commonTasks.find(common => common.id === task.commonId)?.requiredSteps });
     }), signal);
     if (activeRequests.has(userId)) throw new DomainError(429, 'AI_ALREADY_RUNNING', '진행 중인 AI 분석이 끝난 뒤 다시 요청해 주세요.');
     assertUserRateLimit(userId);
@@ -85,7 +86,7 @@ export async function POST(request: NextRequest) {
         const overview = await readProcedureOverviewDocuments(source.overviewAttachments, undefined, documentsOptions);
         const prepared = input.readAttachments ? await readProcedureDocuments(source.references, source.attachments, undefined, { ...documentsOptions, primaryDocuments: overview.documents }) : { references: source.references, warnings: [] };
         if (signal.aborted) throw procedureAbortError(signal);
-        const result = await generateAiProcedure({ hasSupport: source.hasSupport, reviewRequired: source.reviewRequired, title: source.title, description: source.description, completionCriteria: source.completionCriteria, documents: overview.documents, references: prepared.references, requiredStepTitles: source.requiredStepTitles }, { signal });
+        const result = await generateAiProcedure({ hasSupport: source.hasSupport, reviewRequired: source.reviewRequired, title: source.title, description: source.description, completionCriteria: source.completionCriteria, documents: overview.documents, references: prepared.references, requiredStepTitles: source.requiredStepTitles }, { signal, model: source.model });
         if (signal.aborted) throw procedureAbortError(signal);
         result.draft.warnings.push(...overview.warnings, ...prepared.warnings);
         return result;

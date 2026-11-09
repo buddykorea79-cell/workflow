@@ -4,6 +4,8 @@ import { assertSameOrigin } from '@/lib/auth';
 import { apiError, json } from '@/lib/api';
 import { DomainError } from '@/lib/domain';
 import { requireIntegrationAdmin } from '@/lib/admin-integrations-auth';
+import { readState } from '@/lib/store';
+import { resolveAiModel } from '@/lib/ai-model-settings';
 import { cleanupStorageProbe, completeStorageProbe, integrationStatus, prepareStorageProbe, testAiConnection, testDatabaseConnection, testStorageConnection, verifyDiagnosticManifest } from '@/lib/admin-integrations';
 
 export const runtime = 'nodejs';
@@ -14,14 +16,14 @@ async function boundedBody(request: NextRequest) {
   const reader = request.body?.getReader(); if (!reader) throw new DomainError(422, 'INVALID_INPUT', '시험 항목을 선택해 주세요.'); let size = 0; let text = ''; const decoder = new TextDecoder();
   try { while (true) { const chunk = await reader.read(); if (chunk.done) break; size += chunk.value.length; if (size > 7000) { await reader.cancel(); throw new DomainError(413, 'REQUEST_TOO_LARGE', '시험 요청이 너무 큽니다.'); } text += decoder.decode(chunk.value, { stream: true }); } try { return JSON.parse(text + decoder.decode()); } catch { throw new DomainError(422, 'INVALID_INPUT', '시험 요청 형식을 확인해 주세요.'); } } finally { reader.releaseLock(); }
 }
-export async function GET(request: NextRequest) { try { await requireIntegrationAdmin(request); return json(integrationStatus()); } catch (error) { return apiError(error); } }
+export async function GET(request: NextRequest) { try { await requireIntegrationAdmin(request); return json(integrationStatus(process.env, resolveAiModel(await readState()))); } catch (error) { return apiError(error); } }
 export async function POST(request: NextRequest) {
   let key: string | undefined;
   try {
     assertSameOrigin(request); const userId = await requireIntegrationAdmin(request); const parsed = bodySchema.safeParse(await boundedBody(request));
     if (!parsed.success) throw new DomainError(422, 'INVALID_INPUT', '시험 항목과 요청을 확인해 주세요.'); const input = parsed.data;
     if (requests.has(userId)) throw new DomainError(429, 'DIAGNOSTIC_RUNNING', '진행 중인 연결 시험이 끝난 뒤 다시 실행해 주세요.'); requests.add(userId); key = userId;
-    if (input.action === 'ai') return json(await testAiConnection({ signal: request.signal }));
+    if (input.action === 'ai') return json(await testAiConnection({ signal: request.signal, model: resolveAiModel(await readState()) }));
     if (input.action === 'database') return json(await testDatabaseConnection());
     if (input.action === 'storage') return json(await testStorageConnection());
     if (input.action === 'storage.prepare') return json(await prepareStorageProbe(userId, input.file));

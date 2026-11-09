@@ -7,6 +7,7 @@ import { dataDirectory } from './store';
 import { resolveAttachmentStoreMode, resolveStoreMode } from './store-mode';
 import { createNeonDownloadUrl, createNeonUploadUrl, deleteNeonFile, getNeonStorageConfig, readNeonFile, uploadNeonFile } from './attachment-storage';
 import type { DiagnosticCheck, DiagnosticResult, IntegrationService, IntegrationStatus, IntegrationVariable, PreparedStorageProbe } from './admin-integration-types';
+import { assertBizRouterModel, fetchBizRouterModels } from './bizrouter-models';
 
 type Environment = Record<string, string | undefined>;
 const aiOrigin = 'https://api.bizrouter.ai/v1';
@@ -16,13 +17,13 @@ const manifestSchema = fileInput.extend({ id: z.uuid(), userId: z.string().min(1
 export type DiagnosticFileManifest = z.infer<typeof manifestSchema>;
 
 function variables(env: Environment, definitions: [string, boolean, string][]): IntegrationVariable[] { return definitions.map(([name, required, purpose]) => ({ name, required, purpose, configured: !!env[name]?.trim() })); }
-export function integrationStatus(env: Environment = process.env): IntegrationStatus {
+export function integrationStatus(env: Environment = process.env, selectedModel = env.BIZROUTER_MODEL): IntegrationStatus {
   const databaseMode = resolveStoreMode(env);
   const storageMode = resolveAttachmentStoreMode(env);
-  const ai = variables(env, [['BIZROUTER_API_KEY', true, 'AI API 인증'], ['BIZROUTER_MODEL', true, '분석 모델 ID']]);
+  const ai = variables(env, [['BIZROUTER_API_KEY', true, 'AI API 인증'], ['BIZROUTER_MODEL', !selectedModel?.trim(), '관리자 선택이 없을 때 사용할 기본 모델']]);
   const database = variables(env, [['IEUM_STORE', false, 'local: 로컬 강제 · neon: DB 필수 · 미설정: 자동 선택'], ['DATABASE_URL', true, 'Neon PostgreSQL 연결 문자열'], ['IEUM_WORKSPACE_ID', false, '기본값 development']]);
   const storage = variables(env, [['IEUM_STORAGE_PROVIDER', true, 'Neon 사용 시 neon'], ['AWS_ENDPOINT_URL_S3', true, 'Neon Storage endpoint'], ['AWS_REGION', true, '저장소 리전'], ['AWS_ACCESS_KEY_ID', true, '저장소 접근 키'], ['AWS_SECRET_ACCESS_KEY', true, '저장소 비밀 키'], ['IEUM_STORAGE_BUCKET', false, '기본값 ieum-attachments'], ['IEUM_SESSION_SECRET', true, '서명된 업로드 확인용 · 32자 이상']]);
-  return { checkedAt: new Date().toISOString(), ai: { configured: ai.every(item => item.configured), variables: ai }, database: { configured: databaseMode === 'neon', mode: databaseMode, variables: database }, storage: { configured: storageMode === 'neon' && storage.filter(item => item.required).every(item => item.configured) && (env.IEUM_SESSION_SECRET?.trim().length || 0) >= 32, mode: storageMode, variables: storage } };
+  return { checkedAt: new Date().toISOString(), ai: { configured: !!env.BIZROUTER_API_KEY?.trim() && !!selectedModel?.trim(), variables: ai }, database: { configured: databaseMode === 'neon', mode: databaseMode, variables: database }, storage: { configured: storageMode === 'neon' && storage.filter(item => item.required).every(item => item.configured) && (env.IEUM_SESSION_SECRET?.trim().length || 0) >= 32, mode: storageMode, variables: storage } };
 }
 function finish(service: IntegrationService, started: number, checks: DiagnosticCheck[], message: string): DiagnosticResult { return { service, ok: checks.length > 0 && checks.every(check => check.ok), checkedAt: new Date().toISOString(), durationMs: Date.now() - started, checks, message }; }
 function aiFailure(status: number): never {
@@ -34,19 +35,18 @@ async function boundedJson(response: Response, limit: number) {
   const reader = response.body?.getReader(); if (!reader) throw new Error('EMPTY_RESPONSE'); let size = 0; let text = ''; const decoder = new TextDecoder();
   try { while (true) { const chunk = await reader.read(); if (chunk.done) break; size += chunk.value.byteLength; if (size > limit) { await reader.cancel(); throw new Error('RESPONSE_LIMIT'); } text += decoder.decode(chunk.value, { stream: true }); } return JSON.parse(text + decoder.decode()); } finally { reader.releaseLock(); }
 }
-export async function testAiConnection(options: { env?: Environment; fetcher?: typeof fetch; signal?: AbortSignal } = {}): Promise<DiagnosticResult> {
+export async function testAiConnection(options: { env?: Environment; model?: string; fetcher?: typeof fetch; signal?: AbortSignal } = {}): Promise<DiagnosticResult> {
   const started = Date.now(); const checks: DiagnosticCheck[] = []; const env = options.env ?? process.env; const fetcher = options.fetcher ?? fetch;
-  let stage = '서버 환경변수'; const signal = options.signal ? AbortSignal.any([options.signal, AbortSignal.timeout(55_000)]) : AbortSignal.timeout(55_000);
+  const model = options.model ?? env.BIZROUTER_MODEL;
+  let stage = 'AI 연결 설정'; const signal = options.signal ? AbortSignal.any([options.signal, AbortSignal.timeout(55_000)]) : AbortSignal.timeout(55_000);
   try {
-    if (!env.BIZROUTER_API_KEY?.trim() || !env.BIZROUTER_MODEL?.trim()) throw new DomainError(503, 'AI_NOT_CONFIGURED', 'BIZROUTER_API_KEY와 BIZROUTER_MODEL을 서버에 설정해 주세요.');
+    if (!env.BIZROUTER_API_KEY?.trim() || !model?.trim()) throw new DomainError(503, 'AI_NOT_CONFIGURED', '서버에 BIZROUTER_API_KEY를 설정하고 관리자 화면에서 AI 모델을 선택해 주세요.');
     checks.push({ label: stage, ok: true }); stage = '인증·모델 접근';
     const headers = { Authorization: `Bearer ${env.BIZROUTER_API_KEY}`, 'Content-Type': 'application/json' };
-    const catalogResponse = await fetcher(`${aiOrigin}/models`, { headers, signal, redirect: 'error', cache: 'no-store' }); if (!catalogResponse.ok) aiFailure(catalogResponse.status);
-    const catalog = z.object({ models: z.array(z.object({ id: z.string(), response_format_modes: z.array(z.string()).optional() })) }).safeParse(await boundedJson(catalogResponse, 8 * 1024 * 1024));
-    if (!catalog.success || !catalog.data.models.some(model => model.id === env.BIZROUTER_MODEL && model.response_format_modes?.includes('json_schema'))) throw new DomainError(503, 'AI_MODEL_UNAVAILABLE', '설정한 모델이 허용 목록에 없거나 JSON 구조화 응답을 지원하지 않습니다.');
-    checks.push({ label: stage, ok: true }); stage = '실제 AI 응답';
+    assertBizRouterModel(await fetchBizRouterModels({ apiKey: env.BIZROUTER_API_KEY, fetcher, signal }), model);
+    checks.push({ label: stage, ok: true, detail: `시험 모델: ${model}` }); stage = '실제 AI 응답';
     const schema = { type: 'object', properties: { connected: { type: 'boolean', const: true }, message: { type: 'string', const: '온이음 연결 확인' } }, required: ['connected', 'message'], additionalProperties: false };
-    const response = await fetcher(`${aiOrigin}/chat/completions`, { method: 'POST', headers, signal, redirect: 'error', cache: 'no-store', body: JSON.stringify({ model: env.BIZROUTER_MODEL, stream: false, max_tokens: 512, response_format: { type: 'json_schema', json_schema: { name: 'connection_test', strict: true, schema } }, messages: [{ role: 'system', content: '연결 시험입니다. connected는 true, message는 온이음 연결 확인인 JSON만 반환하세요.' }, { role: 'user', content: '연결을 확인해 주세요.' }] }) });
+    const response = await fetcher(`${aiOrigin}/chat/completions`, { method: 'POST', headers, signal, redirect: 'error', cache: 'no-store', body: JSON.stringify({ model, stream: false, max_tokens: 512, response_format: { type: 'json_schema', json_schema: { name: 'connection_test', strict: true, schema } }, messages: [{ role: 'system', content: '연결 시험입니다. connected는 true, message는 온이음 연결 확인인 JSON만 반환하세요.' }, { role: 'user', content: '연결을 확인해 주세요.' }] }) });
     if (!response.ok) aiFailure(response.status);
     const envelope = z.object({ choices: z.array(z.object({ finish_reason: z.string(), message: z.object({ content: z.string() }) })).min(1) }).safeParse(await boundedJson(response, 64 * 1024));
     if (!envelope.success || envelope.data.choices[0].finish_reason !== 'stop') throw new DomainError(502, 'AI_TEST_INCOMPLETE', 'AI 시험 응답이 완료되지 않았습니다. 모델 설정을 확인하거나 다시 시험해 주세요.');

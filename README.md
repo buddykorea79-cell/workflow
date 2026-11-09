@@ -189,7 +189,7 @@ AI 업무등록(단위·세부업무 생성), 업무 설명 초안, 절차 생�
 
 **관련 근거**에서는 법령·지침·국정과제·지시사항과 생산 문서를 관리합니다. HWP·HWPX·PDF·DOCX·XLSX·XLS·PPTX는 Kordoc으로, TXT·CSV는 텍스트로 읽으며 파일과 추출 본문을 확인합니다. 파일만 보관할 수도 있지만 AI 분석에는 읽을 수 있는 본문이 필요합니다. 스캔 문서 자동 OCR과 법령 최신성 확인은 제공하지 않습니다.
 
-BizRouter 연결에는 서버의 `BIZROUTER_API_KEY`와 `BIZROUTER_MODEL` 설정이 필요합니다. `GET /v1/models`에서 `json_schema`를 지원하는 허용 모델 ID를 선택하세요. API 키는 클라이언트로 전달하지 않습니다. AI 분석을 실행할 때 업무 개요·개요 첨부파일에서 읽은 본문·선택한 관련 근거 본문을 BizRouter로 전송합니다. 개요 파일은 최대 10개, 관련 근거는 최대 20개, 전체 본문은 합계 60,000자이며 오류 안내가 적용됩니다. [BizRouter 모델 목록](https://bizrouter.ai/docs/models), [구조화 응답](https://bizrouter.ai/docs/chat-completions).
+BizRouter 연결에는 서버의 `BIZROUTER_API_KEY`와 사용할 모델이 필요합니다. 모델은 **관리자 → 연결·테스트**에서 저장한 워크스페이스 모델을 우선하고, 저장값이 없으면 `BIZROUTER_MODEL`을 사용합니다. `GET /v1/models`에서 `json_schema`를 지원하는 허용 모델만 선택할 수 있으며, 관리자 모델 변경은 재배포 없이 다음 AI 요청부터 적용됩니다. 환경변수의 키·기본 모델을 변경하면 재배포가 필요합니다. `npm run bizrouter:check`는 관리자 저장값을 읽지 않는 가상 자료 검사로 환경변수 모델을 시험합니다. API 키는 클라이언트로 전달하지 않습니다. AI 분석을 실행할 때 업무 개요·개요 첨부파일에서 읽은 본문·선택한 관련 근거 본문을 BizRouter로 전송합니다. 개요 파일은 최대 10개, 관련 근거는 최대 20개, 전체 본문은 합계 60,000자이며 오류 안내가 적용됩니다. [관리자 모델 설정](docs/ADMIN-INTEGRATIONS.md), [BizRouter 모델 목록](https://bizrouter.ai/docs/models), [구조화 응답](https://bizrouter.ai/docs/chat-completions).
 
 흐름도의 역할 레인과 근거 표시는 [korea100 데이터 계약](https://github.com/hosungseo/korea100/blob/main/docs/data-contract.md)을 참고했습니다. 생성된 그림은 검토할 업무 절차 초안이며 실제 수행 완료 상태와 구분합니다.
 

@@ -12,6 +12,7 @@ import { generateStructuredJson, type BizRouterOptions } from './bizrouter';
 import { assertUserRateLimit, createRateLimiter } from './rate-limit';
 import { AI_GENERATION_TIMEOUT_MS } from './ai-generation-policy';
 import { aiAbortError, createAiDeadline, withAiSignal } from './ai-generation-operation';
+import { resolveAiModel } from './ai-model-settings';
 import type { Attachment, WorkspaceData } from './types';
 
 export const WORK_REGISTRATION_BODY_LIMIT = 350_000;
@@ -99,7 +100,9 @@ export function createWorkRegistrationProcessor(overrides: Partial<WorkRegistrat
     try {
       const input = parseWorkRegistrationRequest(value);
       const ids = input.action === 'extract' ? [input.attachmentId] : input.documents.map(item => item.attachmentId);
-      const files = authorizeWorkRegistration(await withAiSignal(() => deps.readState(), signal), userId, ids);
+      const state = await withAiSignal(() => deps.readState(), signal);
+      const files = authorizeWorkRegistration(state, userId, ids);
+      const model = resolveAiModel(state);
       if (signal.aborted) throw aiAbortError(signal);
       if (active.has(userId)) throw new DomainError(429, 'AI_ALREADY_RUNNING', '진행 중인 문서 분석이 끝난 뒤 다시 요청해 주세요.');
       deps.checkRate(`${userId}:${input.action}`, input.action === 'extract' ? 20 : 5);
@@ -115,7 +118,7 @@ export function createWorkRegistrationProcessor(overrides: Partial<WorkRegistrat
             const document = await deps.extract(bytes, file.name);
             result = { document: { ...document, attachmentId: file.id, name: file.name } };
           } else {
-            result = await deps.generate({ description: input.description, documents: input.documents.map((document, index) => ({ name: files[index].name, text: document.text })) }, { signal });
+            result = await deps.generate({ description: input.description, documents: input.documents.map((document, index) => ({ name: files[index].name, text: document.text })) }, { signal, model });
           }
           if (signal.aborted) throw aiAbortError(signal);
           // Permissions and file ownership can change while extraction/model calls run.
