@@ -1,0 +1,13 @@
+.od-procedure-view{display:flex;flex-direction:column;gap:20px;min-width:0}
+.od-procedure-context p{margin:0 0 6px;color:var(--muted,#52637a);font-size:13px;overflow-wrap:anywhere}
+.od-procedure-context h3{margin:0 0 10px;font-size:20px;line-height:1.5;overflow-wrap:anywhere}
+.od-procedure-context>span{display:block;font-size:13px;line-height:1.7;color:var(--muted,#52637a)}
+.od-procedure-participants{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:16px;margin:0;padding:16px 0;border-top:1px solid var(--line,#dce4ee);border-bottom:1px solid var(--line,#dce4ee)}
+.od-procedure-participants dt{margin-bottom:6px;font-size:12px;color:var(--muted,#52637a)}
+.od-procedure-participants dd{margin:0;font-size:14px;font-weight:600;line-height:1.6;overflow-wrap:anywhere}
+.od-procedure-loading,.od-procedure-error{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:12px;min-height:200px;text-align:center;font-size:14px;line-height:1.7}
+.od-procedure-loading{color:var(--muted,#52637a)}.od-procedure-loading p,.od-procedure-error p{margin:0}
+.od-procedure-error{color:#b42318}.od-procedure-view .procedure-flow-section{margin:0}
+@media(min-width:761px){.od-procedure-modal{width:min(1200px,calc(100vw - 48px))}}
+@media(max-width:760px){.od-procedure-view .procedure-flow{height:320px;min-height:320px}}
+@media(max-width:640px){.od-procedure-participants{grid-template-columns:1fr;gap:12px}.od-procedure-participants>div{display:grid;grid-template-columns:78px 1fr;gap:8px}.od-procedure-participants dt{margin:0;line-height:1.8}.od-procedure-context h3{font-size:18px}}
