@@ -82,13 +82,15 @@ test('expanded flow uses the shared modal and only jumps after explicit selectio
   globalThis.requestAnimationFrame = callback => { frames.push(callback); return frames.length; }; globalThis.cancelAnimationFrame = () => undefined;
   try {
     const workflow = defaultWorkflow();
-    const view = host(() => flowUi.ProcedureFlow({ workflow, compact: true, onSelect: id => selected.push(id) }));
+    const context = { departmentName: '기획 부서', unitTitle: '자료 관리', taskTitle: '제출 자료 점검' };
+    const view = host(() => flowUi.ProcedureFlow({ workflow, context, compact: true, onSelect: id => selected.push(id) }));
     view.render(); view.commit(); view.button(' 크게 보기').onClick(); view.render(); view.commit();
     assert.equal(portalTarget, body);
     assert.equal(view.all(props => Array.isArray(props.nodes)).length, 1, 'compact canvas stays mounted behind the native scrolling diagram');
     let modal = view.one((_props, type) => type === ui.Modal);
-    assert.equal(modal.title, '업무 절차도 크게 보기'); assert.match(modal.description, /연결된 선행 절차/);
-    assert.match(modal.description, /스크롤/);
+    assert.equal(modal.title, '업무 절차도');
+    assert.equal(modal.description, '부서명: 기획 부서 · 단위업무: 자료 관리 · 개인업무: 제출 자료 점검');
+    assert.equal(all(modal.children, props => ['procedure-flow-legend', 'procedure-flow-help', 'procedure-accessible-list'].includes(props.className)).length, 0, 'the enlarged body contains the diagram without extra explanations or lists');
     view.one(props => Array.isArray(props.workflow)).onSelect(workflow[2].id); view.render();
     assert.deepEqual(selected, [], 'inspecting an enlarged node does not yet move the underlying editor');
     modal = view.one((_props, type) => type === ui.Modal); modal.onClose(); view.render(); view.commit();
@@ -112,7 +114,7 @@ test('scroll-only flow shows the full workflow without a canvas or a second enla
   assert.equal(view.all(props => props['aria-haspopup'] === 'dialog').length, 0);
   const diagram = view.one(props => Array.isArray(props.workflow));
   assert.equal(diagram.workflow, workflow); assert.equal(diagram.onSelect, undefined);
-  assert.equal(view.all(props => props.className === 'procedure-accessible-list').length, 1);
+  assert.equal(view.all(props => ['procedure-flow-legend', 'procedure-flow-help', 'procedure-accessible-list'].includes(props.className)).length, 0);
 });
 
 test('each canvas refits after an actual resize while preserving the viewport across ordinary rerenders', () => {

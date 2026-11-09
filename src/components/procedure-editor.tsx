@@ -4,6 +4,7 @@ import { useEffect, useId, useRef, useState } from 'react';
 import { ArrowDown, ArrowUp, Plus, Save, Trash2 } from 'lucide-react';
 import type { WorkflowStep, Workspace } from '@/lib/types';
 import type { ProcedureParticipants } from '@/lib/procedure-participants';
+import { taskProcedureContext, type ProcedureContext } from '@/lib/procedure-context';
 import { canMoveProcedureStep, canRemoveProcedureStep, canSetProcedureDependency, procedureOrderStart } from '@/lib/procedure-order';
 import { Button, Badge, Field, type CommandFn } from './ui';
 import { createLazyScreen } from './lazy-screen';
@@ -23,6 +24,7 @@ interface Props {
   workflow: WorkflowStep[];
   originalWorkflow: WorkflowStep[];
   participants: ProcedureParticipants;
+  context?: ProcedureContext;
   hasSupport?: boolean;
   hasReviewer?: boolean;
   reviewRequired?: boolean;
@@ -41,7 +43,7 @@ interface Props {
   onAdd: () => string | undefined;
 }
 
-export function ProcedureEditor({ workspace, taskId, command, onWorkspace, onBusyChange, workflow, originalWorkflow, participants, hasSupport = false, hasReviewer = true, reviewRequired = true, onStartEditing, onOpenOrganization, requiredStepTitles = [], editable, busy, hasChanges = false, diagramChanged, redrawKey, onApply, onChange, onRemove, onMove, onAdd }: Props) {
+export function ProcedureEditor({ workspace, taskId, command, onWorkspace, onBusyChange, workflow, originalWorkflow, participants, context, hasSupport = false, hasReviewer = true, reviewRequired = true, onStartEditing, onOpenOrganization, requiredStepTitles = [], editable, busy, hasChanges = false, diagramChanged, redrawKey, onApply, onChange, onRemove, onMove, onAdd }: Props) {
   const [selectedId, setSelectedId] = useState('');
   const [focusStep, setFocusStep] = useState('');
   const warningId = useId();
@@ -65,8 +67,10 @@ export function ProcedureEditor({ workspace, taskId, command, onWorkspace, onBus
     select.scrollIntoView({ behavior: 'smooth', block: 'center' });
   };
   const firstMovable = procedureOrderStart(workflow);
+  const task = workspace.tasks.find(item => item.id === taskId);
+  const flowContext = context ?? (task ? taskProcedureContext(workspace, task) : undefined);
   return <section className="pe-editor" aria-label="현재 적용된 업무 절차">
-    {workflow.length > 0 && <section className="pe-diagram" aria-label="전체 업무 절차도"><ProcedureFlow workflow={workflow} participants={participants} selectedId={selectedId} onSelect={selectStep} redrawKey={redrawKey} compact/><p className="pe-diagram-status">{diagramChanged ? '수정 중인 절차도 · 저장·반영하면 적용됩니다.' : '저장된 절차도'}<span>절차를 선택하면 아래 내용으로 이동합니다.</span></p></section>}
+    {workflow.length > 0 && <section className="pe-diagram" aria-label="전체 업무 절차도"><ProcedureFlow workflow={workflow} participants={participants} context={flowContext} selectedId={selectedId} onSelect={selectStep} redrawKey={redrawKey} compact/><p className="pe-diagram-status">{diagramChanged ? '수정 중인 절차도 · 저장·반영하면 적용됩니다.' : '저장된 절차도'}<span>절차를 선택하면 아래 내용으로 이동합니다.</span></p></section>}
     <div className="pw-section-intro"><div><h3>업무 절차 <span>{workflow.length}개</span></h3><p>{editable ? '위·아래 버튼은 표시 순서를 바꿉니다. 실제 수행 순서는 각 절차의 선행 절차로 정하세요.' : '절차별 담당자, 수행 방법과 참고 파일을 확인하세요.'}</p></div>{editable && <Button variant="secondary" disabled={workflow.length >= 50} onClick={add}><Plus size={15}/>수기로 절차 추가</Button>}</div>
     {editable && <div className="pe-apply-bar"><p>누가 · 무엇을 · 어떻게<br/><span>{hasChanges ? '수정한 내용과 순서를 저장하면 절차도에도 함께 반영됩니다.' : '저장된 절차입니다. 내용을 수정하면 저장할 수 있습니다.'}</span></p><Button variant="accent" disabled={busy || !workflow.length || !hasChanges} onClick={() => void onApply()}><Save size={16}/>{busy ? '저장 중…' : '수정사항 저장·절차도 반영'}</Button></div>}
     {editable && firstMovable > 0 && <p className="pe-locked-order">완료된 절차까지의 순서는 유지됩니다. 이후 절차를 추가하거나 이동할 수 있습니다.</p>}

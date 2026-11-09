@@ -1,12 +1,4 @@
-.od-procedure-view{display:flex;flex-direction:column;gap:14px;min-width:0;min-height:0;flex:1}
-.od-procedure-context{flex-shrink:0;padding:0 2px}
-.od-procedure-context p{margin:0 0 5px;color:#365477;font-size:14px;font-weight:600;overflow-wrap:anywhere}
-.od-procedure-context>span{display:block;font-size:13px;line-height:1.6;color:var(--muted,#52637a)}
-.od-procedure-loading,.od-procedure-error{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:12px;min-height:200px;flex:1;text-align:center;font-size:14px;line-height:1.7}
+.od-procedure-view{display:flex;flex-direction:column;min-width:0;min-height:0;flex:1}
+.od-procedure-loading,.od-procedure-error{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:12px;min-height:0;flex:1;text-align:center;font-size:14px;line-height:1.7}
 .od-procedure-loading{color:var(--muted,#52637a)}.od-procedure-loading p,.od-procedure-error p{margin:0}
-.od-procedure-error{color:#b42318}.od-procedure-view .procedure-flow-section{margin:0;flex:1;min-height:320px}
-.modal.od-procedure-modal{width:1280px;height:calc(100dvh - 48px);max-height:calc(100dvh - 48px)}
-.od-procedure-modal>.modal-heading{padding:22px 24px 18px}.od-procedure-modal>.modal-heading p{margin-top:5px;font-size:16px;color:#365477}
-.od-procedure-modal>.modal-content{display:flex;flex-direction:column;flex:1;min-height:0;overflow:auto;padding:16px 20px}
-.od-procedure-modal>.modal-content>.od-procedure-actions{flex-shrink:0;margin-top:14px}
-@media(max-width:760px){.modal.od-procedure-modal{height:calc(100dvh - 28px);max-height:calc(100dvh - 28px)}.od-procedure-modal>.modal-heading{padding:18px 18px 13px}.od-procedure-modal>.modal-heading h2{font-size:18px}.od-procedure-modal>.modal-heading p{font-size:14px}.od-procedure-modal>.modal-content{padding:10px}.od-procedure-context p{font-size:13px}.od-procedure-context>span{font-size:12px}.od-procedure-view{gap:10px}.od-procedure-modal>.modal-content>.od-procedure-actions{margin-top:10px}}
+.od-procedure-error{color:#b42318}

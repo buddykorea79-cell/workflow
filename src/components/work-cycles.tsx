@@ -12,6 +12,7 @@ import { ArrowRight, CalendarDays, Check, CheckCircle2, ChevronDown, FileText, H
 import type { Run, RunProcedureHistory, Task, WorkflowStep, Workspace } from '@/lib/types';
 import { nextCycleWorkflow, runWorkflow, taskCycleState } from '@/lib/work-cycles';
 import { taskProcedureParticipants } from '@/lib/procedure-participants';
+import { taskProcedureContext, type ProcedureContext } from '@/lib/procedure-context';
 import { procedureScheduleConflicts } from '@/lib/procedure-schedule';
 import { savedCommandTarget } from '@/lib/pending-draft';
 import { useRevisionCommand } from './command-revision';
@@ -29,6 +30,15 @@ const roleNames: Record<WorkflowStep['role'], string> = { primary: '담당자 �
 const dayValue = (value: string) => Date.parse(`${value}T00:00:00Z`);
 const validDate = (value: string) => /^\d{4}-\d{2}-\d{2}$/.test(value) && Number.isFinite(dayValue(value)) && new Date(dayValue(value)).toISOString().slice(0, 10) === value;
 const nameOf = (w: Workspace, id?: string) => w.users.find(user => user.id === id)?.name || w.identities?.find(user => user.id === id)?.name || '담당자 기록 없음';
+
+function cycleProcedureContext(workspace: Workspace, task: Task, definitionVersion?: number): ProcedureContext {
+  const definition = definitionVersion === undefined ? undefined : task.versions.find(version => version.version === definitionVersion);
+  return taskProcedureContext(workspace, {
+    departmentId: definition?.departmentId ?? task.departmentId,
+    unitId: definition?.unitId ?? task.unitId,
+    title: definition?.title ?? task.title,
+  });
+}
 
 type Props = { workspace: Workspace; task: Task; command: CommandFn; dirty: boolean; unavailable?: boolean; children?: ReactNode; onHistoryChange?: (value: boolean) => void };
 
@@ -88,7 +98,7 @@ export function WorkCycles({ workspace: w, task, command, dirty, unavailable = f
     <div className="wc-view-controls"><Tabs tabs={tabs} label="업무 회차" className="tabs"/>{past.length > 0 && <label className="wc-history-select"><span>지난 회차 선택</span><select aria-label="지난 업무 회차" value={isHistory ? selected.id : ''} onChange={event => event.target.value && changeSelection(event.target.value)}><option value="">회차를 선택하세요</option>{past.map(run => <option key={run.id} value={run.id}>{numberFor(run)}회차 · {run.period} · {executionLabel(run.status)}</option>)}</select><ChevronDown size={14} /></label>}</div>
     <div {...tabs.panelAttrs(view)} className="wc-tab-panel">
     {formMode && !isHistory && <CycleScheduleForm key={`${task.id}-${formMode}`} workspace={w} task={task} latest={latest} cycleNumber={formMode === 'next' ? state.nextCycleNumber : count} mode={formMode} command={command} disabled={dirty || unavailable} onSavedRunId={setDisplayedRunId} onClose={() => setFormMode(null)} />}
-    {hasNewDefinition && !isHistory && <><p className="wc-readonly"><FileText size={15} />변경된 업무 절차는 다음 회차를 시작할 때 적용됩니다. 완료한 회차의 원래 절차는 지난 회차에서 확인하세요.</p>{!formMode && <ProcedureFlow workflow={nextCycleWorkflow(task)} participants={taskProcedureParticipants(w, task)} />}</>}
+    {hasNewDefinition && !isHistory && <><p className="wc-readonly"><FileText size={15} />변경된 업무 절차는 다음 회차를 시작할 때 적용됩니다. 완료한 회차의 원래 절차는 지난 회차에서 확인하세요.</p>{!formMode && <ProcedureFlow workflow={nextCycleWorkflow(task)} participants={taskProcedureParticipants(w, task)} context={taskProcedureContext(w, task)} />}</>}
     {isHistory ? <CycleHistory workspace={w} task={task} run={selected} number={numberFor(selected)} /> : <>{!past.length && <p className="wc-history-empty"><History size={14} />새 일정을 등록하면 완료한 절차·일정·결과를 지난 회차에서 확인할 수 있습니다.</p>}{!formMode && <CurrentCycleSteps key={latest?.id || task.id} workspace={w} task={task} run={latest} command={command} disabled={dirty || !activeTask} hideCompletedVersion={hasNewDefinition} />}{!formMode && latest && <CurrentCycleNotes key={latest.id} workspace={w} task={task} run={latest} command={command} disabled={dirty || !activeTask}/>}{children}</>}
     </div>
     <div {...tabs.panelAttrs(isHistory ? 'current' : 'history')}/>
@@ -221,7 +231,7 @@ function CurrentCycleSteps({ workspace: w, task, run, command, disabled, hideCom
     <div className="wc-current-heading"><div><h3>일정에 따라 한 단계씩</h3><p>수행 내용을 확인하고 체크리스트와 결과를 기록하세요.</p></div><Badge tone="outline">{workflow.filter(step => done(step.id)).length} / {workflow.length} 완료</Badge></div>
     {!run && <p className="wc-note">일정을 등록하면 이번 회차의 체크리스트와 수행 결과를 함께 기록할 수 있습니다.</p>}
     {run?.status === 'paused' && <p className="wc-warning">일시 중지된 회차입니다. 현재 수행 상태를 변경할 수 없습니다.</p>}
-    <CollapsedProcedureFlow workflow={workflow} participants={participants}/>
+    <CollapsedProcedureFlow workflow={workflow} participants={participants} context={cycleProcedureContext(w, task, run?.definitionVersion)}/>
     <div className="wc-history-steps wc-execution-steps">{workflow.map((step, index) => {
       const execution = run?.steps.find(item => item.stepId === step.id);
       const completed = done(step.id);
@@ -311,7 +321,7 @@ function CycleHistory({ workspace: w, task, run, number }: { workspace: Workspac
     <p className="wc-readonly"><LockKeyhole size={15} />지난 회차의 절차·일정·수행 결과입니다. 현재 회차를 수정해도 이 기록은 바뀌지 않습니다.</p>
     {run.scheduleDetails && <div className="wc-schedule-details"><strong>회차 세부 내용</strong><p>{run.scheduleDetails}</p></div>}
     {!run.workflowSnapshot && <p className="wc-note">이전 버전의 회차는 연결된 업무 기준과 남아 있는 수행 기록으로 표시합니다. 기록되지 않은 날짜·완료자는 미지정으로 표시합니다.</p>}
-    <CollapsedProcedureFlow workflow={workflow} participants={participants}/>
+    <CollapsedProcedureFlow workflow={workflow} participants={participants} context={cycleProcedureContext(w, task, run.definitionVersion)}/>
     <div className="wc-history-steps">{workflow.map((step, index) => {
       const execution = run.steps.find(item => item.stepId === step.id);
       const done = execution?.status === 'completed';
@@ -353,7 +363,7 @@ function ProcedureRevisionEntry({ workspace: w, task, run, entry }: { workspace:
       <div className="wc-procedure-reason"><strong>교체 사유</strong><p>{entry.reason || '사유 기록 없음'}</p></div>
       <div className="wc-history-meta"><div><span>당시 회차 상태</span><strong>{executionLabel(entry.status)}</strong></div><div><span>당시 회차 일정</span><strong>{entry.startDate ? `${displayDate(entry.startDate)} — ` : ''}{displayDate(entry.dueDate)}</strong></div><div><span>당시 업무 담당자</span><strong>{participants.primary}</strong></div><div><span>당시 지원 담당자</span><strong>{participants.support}</strong></div><div><span>당시 검토자</span><strong>{participants.reviewer}</strong></div>{entry.completedAt && <div><span>완료 시각</span><strong>{displayTime(entry.completedAt)}</strong></div>}</div>
       {entry.scheduleDetails && <div className="wc-schedule-details"><strong>당시 회차 세부 내용</strong><p>{entry.scheduleDetails}</p></div>}
-      <CollapsedProcedureFlow workflow={workflow} participants={participants}/>
+      <CollapsedProcedureFlow workflow={workflow} participants={participants} context={cycleProcedureContext(w, task, entry.definitionVersion)}/>
       <div className="wc-history-steps">{workflow.map((step, index) => {
         const execution = entry.steps.find(item => item.stepId === step.id);
         const done = execution?.status === 'completed';
@@ -372,7 +382,7 @@ function ProcedureRevisionEntry({ workspace: w, task, run, entry }: { workspace:
   </details>;
 }
 
-function CollapsedProcedureFlow({ workflow, participants }: { workflow: WorkflowStep[]; participants: ReturnType<typeof taskProcedureParticipants> }) {
+function CollapsedProcedureFlow({ workflow, participants, context }: { workflow: WorkflowStep[]; participants: ReturnType<typeof taskProcedureParticipants>; context: ProcedureContext }) {
   const [open, setOpen] = useState(false);
-  return <details className="wc-flow-disclosure" onToggle={event => setOpen(event.currentTarget.open)}><summary onPointerEnter={() => void preloadProcedureFlow()} onFocus={() => void preloadProcedureFlow()}><span>전체 절차 흐름 보기</span><ChevronDown size={15}/></summary>{open && <ProcedureFlow workflow={workflow} participants={participants}/>}</details>;
+  return <details className="wc-flow-disclosure" onToggle={event => setOpen(event.currentTarget.open)}><summary onPointerEnter={() => void preloadProcedureFlow()} onFocus={() => void preloadProcedureFlow()}><span>전체 절차 흐름 보기</span><ChevronDown size={15}/></summary>{open && <ProcedureFlow workflow={workflow} participants={participants} context={context}/>}</details>;
 }

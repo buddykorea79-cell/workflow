@@ -14,8 +14,10 @@ import { sameDraft } from '@/lib/pending-draft';
 import { aiRequestError } from '@/lib/ai-request-lifecycle';
 import { AiRequestStatus, useAiRequest } from './ai-request-status';
 import { ProcedureFlowDocument } from './procedure-flow-document';
+import { procedureContextText, type ProcedureContext } from '@/lib/procedure-context';
 import '@xyflow/react/dist/style.css';
 import './procedure-builder.css';
+import './procedure-flow-dialog.css';
 
 const roles: WorkflowStep['role'][] = ['primary', 'support', 'reviewer'];
 const roleLabels = { primary: '담당자', support: '협업·지원', reviewer: '검토자' };
@@ -53,7 +55,7 @@ export function ProcedureFlowCanvas({ nodes, edges, redrawKey, onSelect }: { nod
   </div>;
 }
 
-export function ProcedureFlow({ workflow, participants, selectedId, onSelect, redrawKey = 0, compact = false, scrollOnly = false }: { workflow: WorkflowStep[]; participants?: ProcedureParticipants; selectedId?: string; onSelect?: (id: string) => void; redrawKey?: number; compact?: boolean; scrollOnly?: boolean }) {
+export function ProcedureFlow({ workflow, participants, context, selectedId, onSelect, redrawKey = 0, compact = false, scrollOnly = false }: { workflow: WorkflowStep[]; participants?: ProcedureParticipants; context?: ProcedureContext; selectedId?: string; onSelect?: (id: string) => void; redrawKey?: number; compact?: boolean; scrollOnly?: boolean }) {
   const [expanded, setExpanded] = useState(false);
   const [expandedSelection, setExpandedSelection] = useState('');
   const destination = useRef<string | null>(null);
@@ -99,18 +101,18 @@ export function ProcedureFlow({ workflow, participants, selectedId, onSelect, re
     return { nodes, edges };
   }, [workflow, selectedId, participants, scrollOnly]);
   if (!workflow.length) return <div className="procedure-flow-empty">절차를 등록하면 담당 역할별 흐름도가 표시됩니다.</div>;
+  if (scrollOnly) return <ProcedureFlowDocument workflow={workflow} participants={participants} selectedId={selectedId} onSelect={onSelect}/>;
   const select = (id: string, enlarged: boolean) => { if (workflow.some(step => step.id === id)) { if (enlarged) setExpandedSelection(id); else onSelect?.(id); } };
   const list = (enlarged: boolean) => <details className="procedure-accessible-list"><summary>절차 목록으로 보기</summary><ol>{workflow.map(step => <li key={step.id}>{onSelect ? <button type="button" aria-pressed={(enlarged ? expandedSelection : selectedId) === step.id} onClick={() => select(step.id, enlarged)}>{step.title || '새 절차'}</button> : <b>{step.title}</b>}<span>{roleLabels[step.role]} · {participants?.[step.role]?.trim() || participantFallbacks[step.role]} · {step.dependsOn.length ? `선행: ${step.dependsOn.map(id => workflow.find(item => item.id === id)?.title || id).join(', ')}` : '시작 절차'}</span></li>)}</ol></details>;
   return <>
-    <div className={`procedure-flow-section${compact ? ' is-compact' : ''}${scrollOnly ? ' is-scroll-view' : ''}`}>
-      <div className="procedure-flow-legend"><span><GitBranch size={17}/>{compact ? '업무 절차도' : '역할별 업무 흐름'}</span>{!scrollOnly && <button type="button" aria-haspopup="dialog" onClick={() => { setExpandedSelection(selectedId || workflow[0].id); setExpanded(true); }}><Maximize2 size={15}/> 크게 보기</button>}</div>
-      {!compact && <p className="procedure-flow-help">{scrollOnly ? '위에서 아래로 읽고, 화면 밖의 절차는 스크롤해서 확인하세요.' : '크게 보기에서 단계별 내용을 읽기 좋은 크기로 확인하세요.'} 연결된 선행 절차는 모두 완료해야 합니다.</p>}
-      {scrollOnly ? <ProcedureFlowDocument workflow={workflow} participants={participants} selectedId={selectedId} onSelect={onSelect}/> : <ProcedureFlowCanvas key={workflow.map(step => step.id + step.dependsOn.join(',')).join('|')} redrawKey={redrawKey} nodes={nodes} edges={edges} onSelect={onSelect ? id => select(id, false) : undefined}/>}
+    <div className={`procedure-flow-section${compact ? ' is-compact' : ''}`}>
+      <div className="procedure-flow-legend"><span><GitBranch size={17}/>{compact ? '업무 절차도' : '역할별 업무 흐름'}</span><button type="button" aria-haspopup="dialog" onClick={() => { setExpandedSelection(selectedId || workflow[0].id); setExpanded(true); }}><Maximize2 size={15}/> 크게 보기</button></div>
+      {!compact && <p className="procedure-flow-help">크게 보기에서 단계별 내용을 읽기 좋은 크기로 확인하세요. 연결된 선행 절차는 모두 완료해야 합니다.</p>}
+      <ProcedureFlowCanvas key={workflow.map(step => step.id + step.dependsOn.join(',')).join('|')} redrawKey={redrawKey} nodes={nodes} edges={edges} onSelect={onSelect ? id => select(id, false) : undefined}/>
       {compact && onSelect ? <nav className="procedure-flow-shortcuts" aria-label="절차 편집 위치 선택">{workflow.map((step, index) => <button type="button" key={step.id} aria-pressed={selectedId === step.id} onClick={() => select(step.id, false)}><span>{index + 1}</span>{step.title || '새 절차'}</button>)}</nav> : list(false)}
     </div>
-    {expanded && typeof document !== 'undefined' && createPortal(<Modal title="업무 절차도 크게 보기" description="위에서 아래로 읽고, 화면 밖의 절차는 스크롤해서 확인하세요. 연결된 선행 절차는 모두 완료해야 합니다." wide className="procedure-flow-modal" onClose={() => setExpanded(false)}>
+    {expanded && typeof document !== 'undefined' && createPortal(<Modal title="업무 절차도" description={procedureContextText(context)} wide className="procedure-flow-modal" onClose={() => setExpanded(false)}>
       <ProcedureFlowDocument workflow={workflow} participants={participants} selectedId={expandedSelection} onSelect={onSelect ? id => select(id, true) : undefined}/>
-      {list(true)}
       <div className="procedure-flow-modal-actions"><Button variant="secondary" onClick={() => setExpanded(false)}>닫기</Button>{onSelect && <Button disabled={!workflow.some(step => step.id === expandedSelection)} onClick={() => { destination.current = expandedSelection; setExpanded(false); }}>선택한 절차로 이동 <ArrowRight size={15}/></Button>}</div>
     </Modal>, document.body)}
   </>;
@@ -123,6 +125,7 @@ export interface ProcedureBuilderProps {
   workflow: WorkflowStep[];
   references?: TaskReference[];
   participants?: ProcedureParticipants;
+  context?: ProcedureContext;
   hasSupport?: boolean;
   reviewRequired?: boolean;
   requiredStepTitles?: string[];
@@ -131,7 +134,7 @@ export interface ProcedureBuilderProps {
   onClose?: () => void;
 }
 
-export function ProcedureBuilder({ taskId, overview, overviewAttachments, workflow, references = [], participants, hasSupport = false, reviewRequired = overview.reviewRequired !== false, requiredStepTitles = [], disabled = false, onApply, onClose }: ProcedureBuilderProps) {
+export function ProcedureBuilder({ taskId, overview, overviewAttachments, workflow, references = [], participants, context, hasSupport = false, reviewRequired = overview.reviewRequired !== false, requiredStepTitles = [], disabled = false, onApply, onClose }: ProcedureBuilderProps) {
   const [title, setTitle] = useState(''); const [url, setUrl] = useState('');
   const [type, setType] = useState<TaskReference['type']>('guideline'); const [text, setText] = useState('');
   const [pages, setPages] = useState<ProcedurePage[] | undefined>(); const [draft, setDraft] = useState<ProcedureDraft | null>(null);
@@ -285,7 +288,7 @@ export function ProcedureBuilder({ taskId, overview, overviewAttachments, workfl
     {draft && <div className="procedure-draft"><div className="procedure-draft-heading"><div><h4>검토할 절차 초안 <span>{draft.steps.length}개</span></h4><p>누가, 무엇을, 어떻게 할지 수정하세요. 표시 순서와 선행 관계를 따로 정할 수 있습니다.</p></div><button type="button" className="btn btn-secondary" disabled={locked || draft.steps.length >= 50} onClick={() => { const id = `${prefix()}-manual`; setDraft(current => current ? { ...current, steps: appendProcedureStep(current.steps, { id, title: '', role: 'primary', description: '', output: '', required: true, dependsOn: [], checklist: [], done: false }).workflow, evidence: { ...current.evidence, [id]: { sourceTitle: title, locator: '직접 작성한 절차', excerpt: '' } } } : current); setSelectedId(id); setReviewed(false); setDiagramChanged(true); }}><Plus size={15}/>수기로 절차 추가</button></div>
       <ul className="procedure-warnings">{draft.warnings.map(warning => <li key={warning}>{warning}</li>)}</ul>
       <p className="procedure-draft-status" role="status">{diagramChanged ? '수정한 내용과 순서를 미리 보고 있습니다. 아래 주황색 버튼으로 저장하고 반영하세요.' : '절차를 선택해 내용을 수정할 수 있습니다.'}</p>
-      <ProcedureFlow workflow={draft.steps} participants={participants} selectedId={selectedId} onSelect={id => { setSelectedId(id); setFocusSelected(true); }} redrawKey={redrawKey}/>
+      <ProcedureFlow workflow={draft.steps} participants={participants} context={context} selectedId={selectedId} onSelect={id => { setSelectedId(id); setFocusSelected(true); }} redrawKey={redrawKey}/>
       <div className="procedure-edit-layout"><nav className="procedure-step-list" aria-label="초안 단계 선택">{draft.steps.map((step, index) => <button type="button" key={step.id} className={step.id === selectedId ? 'selected' : ''} disabled={locked} onClick={() => setSelectedId(step.id)}><span>{String(index + 1).padStart(2, '0')}</span><div><b>{step.title || '새 절차'}</b><small>{roleLabels[step.role]}<br/>{participants?.[step.role]?.trim() || participantFallbacks[step.role]}</small></div></button>)}</nav>
       {selected && <div className="procedure-step-editor" ref={selectedEditor} tabIndex={-1} aria-label={`${selected.title || '새 절차'} 초안 편집`}>
         <div className="procedure-editor-title"><h4>{draft.steps.findIndex(step => step.id === selected.id) + 1}번 절차 수정</h4><div className="procedure-draft-order"><button type="button" className="btn btn-secondary" disabled={locked || !canMoveProcedureStep(draft.steps, selected.id, 'up')} aria-label={`${selected.title || '새 절차'} 위로 이동`} onClick={() => moveSelected('up')}><ArrowUp size={14}/>위로</button><button type="button" className="btn btn-secondary" disabled={locked || !canMoveProcedureStep(draft.steps, selected.id, 'down')} aria-label={`${selected.title || '새 절차'} 아래로 이동`} onClick={() => moveSelected('down')}><ArrowDown size={14}/>아래로</button>{!selectedRequired && !selectedLastReviewer && canRemoveProcedureStep(draft.steps, selected.id) && <button type="button" className="procedure-remove" disabled={locked} onClick={() => { const remaining = removeProcedureStep(draft.steps, selected.id).workflow; setDraft({ ...draft, steps: remaining }); setSelectedId(remaining[0]?.id || ''); setReviewed(false); setDiagramChanged(true); }}><Trash2 size={14}/>삭제</button>}</div></div>

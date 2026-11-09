@@ -64,7 +64,7 @@ test('assignment table keeps four columns and opens a foreign task flow without 
   try {
     view.render(); view.one(props => props['aria-label'] === '전체 업무분장표 부서').onChange({ target: { value: foreign.departmentId } }); view.render();
     view.one(props => props['aria-label'] === `${foreign.task} 절차도 보기`).onClick(); view.render();
-    assert.equal(view.one(props => props.title === '업무 절차도').description, foreign.task);
+    assert.equal(view.one(props => props.title === '업무 절차도').description, `부서명: ${foreign.department} · 단위업무: ${foreign.unit} · 개인업무: ${foreign.task}`);
     assert.equal(view.one(props => props.taskId === foreign.taskId).taskId, foreign.taskId);
     assert.equal(view.one(props => props['aria-label'] === '전체 업무분장표 부서').value, foreign.departmentId);
     view.one(props => props.title === '업무 절차도').onClose(); view.render();
@@ -79,8 +79,7 @@ test('viewer maps only current step structure into a read-only flow and keeps se
   const view = host(() => viewer.OrganizationDivisionProcedure({ taskId: 'foreign' }));
   try {
     assert.match(view.render(), /불러오고 있습니다/); await tick(); const rendered = view.render();
-    assert.equal(seen?.cache, 'no-store'); assert.match(rendered, /현재 저장된 업무 기준/);
-    assert.match(rendered, /다른 부서/);
+    assert.equal(seen?.cache, 'no-store'); assert.equal(rendered, '', 'the loaded body adds no explanation or repeated context beyond the chart');
     const flow = view.one(props => Array.isArray(props.workflow));
     assert.equal(flow.onSelect, undefined); assert.equal(flow.scrollOnly, true, 'read-only viewer uses the native scrolling diagram without another zoom dialog'); assert.deepEqual(flow.participants, payload.participants);
     assert.ok(flow.workflow.every((step: Props) => step.done === false && step.description === '' && step.output === '' && step.attachmentIds === undefined));

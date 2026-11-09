@@ -36,18 +36,22 @@ function renderHost(render: () => ReactNode) {
   try { const tree = render(); return { tree, effects }; } finally { Object.assign(react, saved); }
 }
 
-test('read-only document preserves full titles, participants, dependency numbers and has no card tab stops', () => {
+test('read-only horizontal document preserves full titles and accessible relationships without duplicate card text or card tab stops', () => {
   const html = renderToStaticMarkup(createElement(ui.ProcedureFlowDocument, { workflow, participants, className: 'test-height' }));
-  assert.match(html, /class="procedure-flow-document test-height" role="region" aria-label="역할별 업무 절차도" tabindex="0"/);
+  assert.match(html, /class="procedure-flow-document test-height" data-direction="horizontal" role="region" aria-label="역할별 업무 절차도, 왼쪽에서 오른쪽으로 진행" tabindex="0"/);
   assert.equal((html.match(/<article /g) || []).length, 3);
   assert.equal((html.match(/<button/g) || []).length, 0);
   for (const step of workflow) assert.ok(html.includes(step.title));
   for (const name of Object.values(participants)) assert.equal(html.split(name).length - 1, 3, 'full participants appear in the header text/title and the complete card');
   assert.ok(html.includes('선행 절차 01, 02'));
-  assert.ok(html.includes('--pfd-min-width:976px'));
+  assert.ok(html.includes('--pfd-grid-columns:220px 220px 220px'));
   assert.doesNotMatch(html, /react-flow|transform:|viewBox=/);
   const { tree } = renderHost(() => ui.ProcedureFlowDocument({ workflow, participants }));
-  for (const card of all(tree, props => props.className === 'pfd-card-participant')) assert.equal(card.title, undefined, 'full card names do not rely on a hover tooltip');
+  const lanes = all(tree, props => props.className === 'pfd-row');
+  assert.deepEqual(lanes.map(lane => lane['data-role']), ['primary', 'support', 'reviewer']);
+  const cards = all(tree, props => !!props['data-step-id']);
+  assert.deepEqual(cards.map(card => card.style.gridColumn), [1, 2, 3]);
+  assert.equal(all(tree, props => props.className === 'pfd-card-participant' || props.className === 'pfd-card-dependencies').length, 0);
 });
 
 test('selectable cards use native buttons and emit only the selected id without mutating the workflow', () => {
@@ -62,14 +66,14 @@ test('selectable cards use native buttons and emit only the selected id without 
   assert.deepEqual(workflow, original);
 });
 
-test('connectors use row gaps and role gutters without crossing an intervening card', () => {
-  const source = { left: 24, right: 304, top: 24, bottom: 180, row: 0, rowTop: 24, rowBottom: 260 };
-  const target = { left: 672, right: 952, top: 620, bottom: 790, row: 2, rowTop: 620, rowBottom: 790 };
-  const path = ui.documentConnectorPath(source, target, false, 976);
+test('horizontal connectors use stage and lane gaps without crossing an intervening card', () => {
+  const source = { left: 24, right: 244, top: 24, bottom: 74, column: 0, laneTop: 6, laneBottom: 100 };
+  const target = { left: 576, right: 796, top: 224, bottom: 274, column: 2, laneTop: 200, laneBottom: 294 };
+  const path = ui.documentConnectorPath(source, target, false, 300);
   const points = [...path.matchAll(/[ML] ([\d.-]+) ([\d.-]+)/g)].map(match => ({ x: Number(match[1]), y: Number(match[2]) }));
-  const obstacle = { left: 348, right: 628, top: 332, bottom: 548 };
-  assert.deepEqual(points[0], { x: 164, y: 180 });
-  assert.deepEqual(points.at(-1), { x: 812, y: 618 });
+  const obstacle = { left: 300, right: 520, top: 124, bottom: 174 };
+  assert.deepEqual(points[0], { x: 244, y: 49 });
+  assert.deepEqual(points.at(-1), { x: 574, y: 249 });
   for (let index = 1; index < points.length; index++) {
     const a = points[index - 1], b = points[index];
     const intersects = a.x === b.x
@@ -77,14 +81,14 @@ test('connectors use row gaps and role gutters without crossing an intervening c
       : a.y > obstacle.top && a.y < obstacle.bottom && Math.max(a.x, b.x) > obstacle.left && Math.min(a.x, b.x) < obstacle.right;
     assert.equal(intersects, false, 'an edge must stay in whitespace around intermediate cards');
   }
-  const nextRow = { ...target, top: 332, row: 1, rowTop: 332 };
-  assert.ok(ui.documentConnectorPath(source, nextRow, false, 976).includes('164 296'), 'departure clears the tallest card in the source row');
-  const selfLoop = ui.documentConnectorPath(source, source, true, 976);
-  assert.match(selfLoop, /L 967 282 L 967 2/);
-  assert.ok(selfLoop.endsWith('L 164 22'));
+  const nextColumn = { ...target, left: 300, right: 520, column: 1 };
+  assert.ok(ui.documentConnectorPath(source, nextColumn, false, 300).includes('272 49 L 272 249'), 'role changes use the gap between adjacent stages');
+  const selfLoop = ui.documentConnectorPath(source, source, true, 300);
+  assert.match(selfLoop, /L 262 297 L 6 297/);
+  assert.ok(selfLoop.endsWith('L 22 49'));
 });
 
-test('selection scrolls only its own viewport and keeps the card below the sticky role header', () => {
+test('selection scrolls horizontally past the sticky role label without moving the vertical viewport', () => {
   const raf = globalThis.requestAnimationFrame, cancel = globalThis.cancelAnimationFrame;
   const frames: FrameRequestCallback[] = [];
   globalThis.requestAnimationFrame = callback => { frames.push(callback); return frames.length; };
@@ -97,13 +101,21 @@ test('selection scrolls only its own viewport and keeps the card below the stick
       getBoundingClientRect: () => ({ top: 100, left: 100 }),
       scrollTo: (options: ScrollToOptions) => calls.push(options),
     };
-    all(tree, props => props.className === 'pfd-role-header')[0].ref.current = { getBoundingClientRect: () => ({ height: 70 }) };
-    all(tree, props => props['data-step-id'] === 'review')[0].ref({ getBoundingClientRect: () => ({ top: 700, bottom: 880, left: 600, right: 880, height: 180 }) });
+    all(tree, props => props.className === 'pfd-role-header')[0].ref.current = { getBoundingClientRect: () => ({ width: 124 }) };
+    all(tree, props => props['data-step-id'] === 'review')[0].ref({ getBoundingClientRect: () => ({ top: 700, bottom: 880, left: 600, right: 880, width: 280, height: 180 }) });
     const cleanups = effects.map(effect => effect());
     frames.forEach(callback => callback(0));
-    assert.deepEqual(calls, [{ top: 394, left: 444, behavior: 'auto' }]);
+    assert.deepEqual(calls, [{ left: 364, behavior: 'auto' }]);
     cleanups.forEach(cleanup => cleanup?.());
   } finally { globalThis.requestAnimationFrame = raf; globalThis.cancelAnimationFrame = cancel; }
+});
+
+test('shorter viewports expand text width without shrinking its type or an already sufficient card', () => {
+  assert.equal(ui.expandedDocumentCardWidth(220, 156, 44, 50), 220);
+  const expanded = ui.expandedDocumentCardWidth(220, 156, 112, 23);
+  assert.ok(expanded >= 840);
+  assert.equal(expanded % 16, 0);
+  assert.equal(ui.expandedDocumentCardWidth(expanded, expanded - 64, 22.4, 23), expanded);
 });
 
 test('a returning connection remains visible and explained, while empty workflows have a clear state', () => {
