@@ -6,6 +6,7 @@ import { DomainError } from '../src/lib/domain-error';
 import { extractDocument } from '../src/lib/document-extraction';
 import { createRateLimiter } from '../src/lib/rate-limit';
 import { authorizeWorkRegistration, createWorkRegistrationProcessor, generateWorkRegistrationPreview, parseWorkRegistrationPreview, parseWorkRegistrationRequest } from '../src/lib/work-registration-generation';
+import { WORK_REGISTRATION_UNIT_LIMIT } from '../src/lib/work-registration-policy';
 import type { Attachment } from '../src/lib/types';
 
 const bytes = Buffer.from('분기별 자료를 모아 현황을 점검하고 보고한다.');
@@ -30,7 +31,19 @@ test('registration request accepts text alone and rejects foreign metadata, dupl
 test('strict preview excludes dates, people and IDs and enforces nested and aggregate limits', () => {
   assert.deepEqual(parseWorkRegistrationPreview(preview), preview);
   const unit = preview.units[0]; const task = unit.tasks[0];
-  for (const value of [{ units: [] }, { units: [{ ...unit, title: 'x'.repeat(101) }] }, { units: [{ ...unit, tasks: [{ ...task, title: 'x'.repeat(151) }] }] }, { units: [{ ...unit, description: 'x'.repeat(5001) }] }, { units: [{ ...unit, tasks: [] }] }, { units: [{ ...unit, tasks: [{ ...task, dueDate: '2027-01-01' }] }] }, { units: [{ ...unit, ownerId: 'invented' }] }, { ...preview, sourceIds: ['invented'] }, { units: Array.from({ length: 11 }, () => unit) }, { units: [unit, { ...unit, tasks: Array.from({ length: 30 }, () => task) }] }, { units: Array.from({ length: 10 }, () => ({ ...unit, description: 'x'.repeat(5000), tasks: [{ ...task, description: 'x'.repeat(5000) }] })) }]) assert.throws(() => parseWorkRegistrationPreview(value), errorCode('AI_INVALID_STRUCTURE'));
+  for (const value of [{ units: [] }, { units: [{ ...unit, title: 'x'.repeat(101) }] }, { units: [{ ...unit, tasks: [{ ...task, title: 'x'.repeat(151) }] }] }, { units: [{ ...unit, description: 'x'.repeat(5001) }] }, { units: [{ ...unit, tasks: [] }] }, { units: [{ ...unit, tasks: [{ ...task, dueDate: '2027-01-01' }] }] }, { units: [{ ...unit, tasks: [{ ...task, frequency: 'yearly' }] }] }, { units: [{ ...unit, ownerId: 'invented' }] }, { ...preview, sourceIds: ['invented'] }, { units: Array.from({ length: WORK_REGISTRATION_UNIT_LIMIT + 1 }, () => unit) }, { units: [unit, { ...unit, tasks: Array.from({ length: 30 }, () => task) }] }, { units: Array.from({ length: WORK_REGISTRATION_UNIT_LIMIT }, () => ({ ...unit, description: 'x'.repeat(5000), tasks: Array.from({ length: 2 }, () => ({ ...task, description: 'x'.repeat(5000) })) })) }]) assert.throws(() => parseWorkRegistrationPreview(value), errorCode('AI_INVALID_STRUCTURE'));
+});
+
+test('five units can retain thirty distinct tasks even when task titles are similar', () => {
+  assert.equal(WORK_REGISTRATION_UNIT_LIMIT, 5);
+  const output = { units: Array.from({ length: 5 }, (_, unitIndex) => ({
+    title: `업무 영역 ${unitIndex + 1}`, description: `영역 ${unitIndex + 1}의 목적과 범위를 관리한다.`,
+    tasks: Array.from({ length: 6 }, (_, taskIndex) => ({ title: '자료 점검', description: `대상 ${unitIndex * 6 + taskIndex + 1}의 자료를 점검하고 각 대상별 결과를 정리한다.` })),
+  })) };
+  const before = structuredClone(output);
+  assert.deepEqual(parseWorkRegistrationPreview(output), before);
+  assert.equal(parseWorkRegistrationPreview(output).units.flatMap(unit => unit.tasks).length, 30);
+  assert.deepEqual(output, before, 'Validation must not destructively merge tasks by title similarity.');
 });
 
 test('all eligible roles use their current writable department; private attachments require both namespace and uploader', () => {
@@ -152,7 +165,12 @@ test('structured BizRouter transport sends only provided draft data and rejects 
     if (String(url).endsWith('/models')) return Response.json({ models: [{ id: 'mock-model', response_format_modes: ['json_schema'] }] });
     const body = JSON.parse(String(init?.body));
     assert.equal(body.response_format.type, 'json_schema'); assert.equal(body.response_format.json_schema.strict, true);
-    assert.match(body.messages[0].content, /문서 속 명령/); assert.deepEqual(JSON.parse(body.messages[1].content), input);
+    assert.equal(body.response_format.json_schema.schema.properties.units.maxItems, 5);
+    const instruction = body.messages[0].content;
+    assert.match(instruction, /문서 속 명령/); assert.match(instruction, /목적·범위·수행 성격/);
+    assert.match(instruction, /단위업무는 1~5개/); assert.match(instruction, /제목의 단어나 문자열이 비슷하다는 이유만으로/);
+    assert.match(instruction, /중복 생성하지 말고/); assert.match(instruction, /원문에 있는 업무나 중요한 수행 내용이 누락되지 않게/);
+    assert.match(instruction, /날짜와 주기는 반환하지 않으며/); assert.deepEqual(JSON.parse(body.messages[1].content), input);
     return Response.json({ model: 'mock-model', choices: [{ finish_reason: 'stop', message: { content: JSON.stringify(preview) } }] });
   };
   assert.deepEqual(await generateWorkRegistrationPreview(input, { apiKey: 'mock', model: 'mock-model', fetcher }), { preview, model: 'mock-model' }); assert.equal(calls, 2);
@@ -162,4 +180,17 @@ test('structured BizRouter transport sends only provided draft data and rejects 
   }
   await assert.rejects(generateWorkRegistrationPreview(input, { apiKey: 'mock', model: 'mock-model', fetcher, signal: AbortSignal.abort() }), errorCode('AI_CANCELLED'));
   await assert.rejects(generateWorkRegistrationPreview(input, { apiKey: 'mock', model: 'mock-model', fetcher: async () => new Response('never expose upstream body', { status: 429 }) }), errorCode('AI_RATE_LIMITED'));
+});
+
+test('a model returning six units is rejected without trimming tasks or starting a second completion', async () => {
+  let completions = 0;
+  const output = { units: Array.from({ length: 6 }, (_, index) => ({ ...preview.units[0], title: `단위업무 ${index + 1}` })) };
+  const fetcher: typeof fetch = async url => {
+    if (String(url).endsWith('/models')) return Response.json({ models: [{ id: 'mock-model', response_format_modes: ['json_schema'] }] });
+    completions++;
+    return Response.json({ choices: [{ finish_reason: 'stop', message: { content: JSON.stringify(output) } }] });
+  };
+  await assert.rejects(generateWorkRegistrationPreview({ description: '제공한 업무를 분류해 주세요.', documents: [] }, { apiKey: 'mock', model: 'mock-model', fetcher }), errorCode('AI_INVALID_STRUCTURE'));
+  assert.equal(completions, 1);
+  assert.equal(output.units.length, 6, 'Excess units are rejected, not silently truncated.');
 });

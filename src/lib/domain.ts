@@ -25,7 +25,7 @@ import { organizationDivisionForUser } from './organization-division';
 import { withReplacedRunProcedure } from './procedure-replacement';
 import { organizationIdentityIssue, organizationUserChangeIssue } from './organization-management';
 import { canCreateCommon, canReviewCommon, commonApprovalSnapshot, commonOriginDepartment, commonPublished } from './common-approval';
-import { canonicalWorkImport, validateWorkImport, workImportNeutralCard, type WorkImportInput } from './work-import';
+import { canonicalWorkImport, validateCompletedWorkImportReplay, validateWorkImport, workImportNeutralCard, type WorkImportInput } from './work-import';
 import type { Attachment, AuditEvent, Command, CommandTargetKind, CommonApprovalRequest, CommonTask, CommonDistribution, DepartmentDivisionReadModel, Handover, Performance, PerformanceSubmissionStatus, Run, Source, TargetRevisionChange, Task, Unit, User, WorkflowStep, Workspace, WorkspaceData } from './types';
 
 export { DomainError } from './domain-error';
@@ -481,6 +481,17 @@ export function executeCommand(state: WorkspaceData, userId: string, raw: unknow
   const required = (payload: Record<string, unknown>, key: string): string => parseInput(text, payload[key], { path: key, labels: commandValidationLabels(command.type) });
   let importInput: WorkImportInput | undefined;
   if (command.type === 'work.import') {
+    // Older successful batches allowed ten units. Only an existing actor-scoped
+    // receipt may use that legacy bound, and this branch can never create work.
+    const claimedId = typeof command.payload.importId === 'string' ? command.payload.importId.trim().toLowerCase() : '';
+    const completed = state.processedRequests.find(request => request.id === `work.import:${claimedId}` && request.actorId === user.id);
+    if (completed) {
+      const replay = validateCompletedWorkImportReplay(command.payload);
+      if (!replay.success) throw new DomainError(422, 'VALIDATION_ERROR', replay.issues[0]?.message ?? '등록할 업무 내용을 확인해 주세요.', replay.issues);
+      const replayFingerprint = createHash('sha256').update(`work.import\n${canonicalWorkImport(replay.data)}`).digest('hex');
+      if (completed.fingerprint !== replayFingerprint) fail(409, 'IDEMPOTENCY_CONFLICT', '동일한 요청 ID에 다른 내용이 전달되었습니다.');
+      return [];
+    }
     const validated = validateWorkImport(command.payload);
     if (!validated.success) throw new DomainError(422, 'VALIDATION_ERROR', validated.issues[0]?.message ?? '등록할 업무 내용을 확인해 주세요.', validated.issues);
     importInput = validated.data;

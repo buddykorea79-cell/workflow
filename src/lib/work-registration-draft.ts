@@ -1,5 +1,7 @@
 import type { CommandFailure } from './command-response';
 import type { WorkImportInput, WorkImportTask, WorkImportUnit } from './work-import';
+import { currentPeriod, dueDateForPeriod } from './schedule';
+import { WORK_REGISTRATION_UNIT_LIMIT } from './work-registration-policy';
 
 export type RegistrationTask = WorkImportTask & { key: string };
 export type RegistrationUnit = Omit<WorkImportUnit, 'tasks'> & { key: string; tasks: RegistrationTask[] };
@@ -8,8 +10,16 @@ export type RegistrationSnapshot = { description: string; documents: Registratio
 export type RegistrationAttempt = { input: WorkImportInput; snapshot: string; everUnknown: boolean };
 export type AnalysisUnit = { title: string; description: string; tasks: { title: string; description: string }[] };
 
-export function registrationPreview(units: AnalysisUnit[], key = () => crypto.randomUUID()): RegistrationUnit[] {
-  return units.map(unit => ({ key: key(), title: unit.title, description: unit.description, tasks: unit.tasks.map(task => ({ key: key(), title: task.title, description: task.description, dueDate: '', frequency: 'once', priority: 'medium' })) }));
+export function registrationDefaults(serverTime: string | Date): Pick<WorkImportTask, 'dueDate' | 'frequency' | 'priority'> {
+  const period = currentPeriod('yearly', typeof serverTime === 'string' ? new Date(serverTime) : serverTime);
+  return { dueDate: dueDateForPeriod('yearly', period, '2000-12-31'), frequency: 'yearly', priority: 'medium' };
+}
+
+/** Apply registration defaults once; later reviewed dates and cycles belong to the user. */
+export function registrationPreview(units: AnalysisUnit[], serverTime: string | Date, key = () => crypto.randomUUID()): RegistrationUnit[] {
+  if (units.length > WORK_REGISTRATION_UNIT_LIMIT) throw new Error(`단위업무는 최대 ${WORK_REGISTRATION_UNIT_LIMIT}개까지 만들 수 있습니다. 업무 범위를 나누어 다시 분석해 주세요.`);
+  const defaults = registrationDefaults(serverTime);
+  return units.map(unit => ({ key: key(), title: unit.title, description: unit.description, tasks: unit.tasks.map(task => ({ key: key(), title: task.title, description: task.description, ...defaults })) }));
 }
 
 export function registrationPayload(units: readonly RegistrationUnit[]): WorkImportUnit[] {

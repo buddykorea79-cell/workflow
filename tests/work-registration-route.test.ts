@@ -44,21 +44,32 @@ test('work registration route enforces bounded JSON/auth/draft ownership and run
     assert.equal(extracted.status, 200); const extractedBody = await extracted.json();
     assert.equal(extractedBody.document.attachmentId, attachment.id); assert.match(extractedBody.document.text, /현황 자료/); assert.equal(extractedBody.document.format, 'hwpx');
     assert.equal(calls, 0); assert.match(extracted.headers.get('cache-control')!, /no-store/);
-    const output = { units: [{ title: '현황 관리', description: '현황을 관리합니다.', tasks: [{ title: '자료 점검', description: '자료를 점검합니다.' }] }] };
+    const output = { units: Array.from({ length: 5 }, (_, index) => ({ title: `현황 관리 ${index + 1}`, description: `대상 ${index + 1}의 현황을 관리합니다.`, tasks: [{ title: '자료 점검', description: `대상 ${index + 1}의 자료를 점검합니다.` }] })) };
+    let aiOutput: unknown = output;
     globalThis.fetch = async (url, init) => {
       calls++;
       if (String(url).endsWith('/models')) return Response.json({ models: [{ id: 'mock-model', response_format_modes: ['json_schema'] }] });
-      const input = JSON.parse(JSON.parse(String(init?.body)).messages[1].content);
+      const body = JSON.parse(String(init?.body));
+      assert.equal(body.response_format.json_schema.schema.properties.units.maxItems, 5);
+      const input = JSON.parse(body.messages[1].content);
       assert.deepEqual(input.documents, [{ name: attachment.name, text: '수정한 점검 본문' }]);
       assert.equal(input.description, generate.description);
-      return Response.json({ model: 'mock-model', choices: [{ finish_reason: 'stop', message: { content: JSON.stringify(output) } }] });
+      return Response.json({ model: 'mock-model', choices: [{ finish_reason: 'stop', message: { content: JSON.stringify(aiOutput) } }] });
     };
     const before = await readFile(file, 'utf8');
     const response = await POST(request({ ...generate, documents: [{ attachmentId: attachment.id, text: '수정한 점검 본문' }] }));
     assert.equal(response.status, 200); assert.deepEqual(await response.json(), { preview: output, model: 'mock-model' }); assert.equal(calls, 2);
     assert.equal(await readFile(file, 'utf8'), before, 'analysis must not create tasks, connect files or revise the workspace');
+    aiOutput = { units: [...output.units, { ...output.units[0], title: '초과 단위업무' }] };
+    const tooMany = await POST(request({ ...generate, documents: [{ attachmentId: attachment.id, text: '수정한 점검 본문' }] }));
+    assert.equal(tooMany.status, 502); assert.equal((await tooMany.json()).code, 'AI_INVALID_STRUCTURE'); assert.equal(calls, 4);
+    assert.equal(await readFile(file, 'utf8'), before, 'rejecting six generated units must not silently register a truncated preview');
+    aiOutput = { units: [{ ...output.units[0], tasks: [{ ...output.units[0].tasks[0], dueDate: '2026-12-31', frequency: 'yearly' }] }] };
+    const aiSchedule = await POST(request({ ...generate, documents: [{ attachmentId: attachment.id, text: '수정한 점검 본문' }] }));
+    assert.equal(aiSchedule.status, 502); assert.equal((await aiSchedule.json()).code, 'AI_INVALID_STRUCTURE'); assert.equal(calls, 6);
+    assert.equal(await readFile(file, 'utf8'), before, 'schedule defaults belong to the reviewed registration form, not guessed AI fields');
     state.departmentWorkPlans = [{ departmentId: 'dept-plan', status: 'confirmed', version: 1 }]; await save();
-    const locked = await POST(request()); assert.equal(locked.status, 409); assert.equal((await locked.json()).code, 'DEPARTMENT_CONFIRMED'); assert.equal(calls, 2);
+    const locked = await POST(request()); assert.equal(locked.status, 409); assert.equal((await locked.json()).code, 'DEPARTMENT_CONFIRMED'); assert.equal(calls, 6);
   } finally {
     globalThis.fetch = originalFetch;
     for (const key of environment) { if (previous[key] === undefined) delete process.env[key]; else process.env[key] = previous[key]; }

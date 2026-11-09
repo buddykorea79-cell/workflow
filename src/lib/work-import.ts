@@ -1,8 +1,9 @@
 import { withParticle, type FieldIssue } from './form-validation';
 import type { Card, Frequency } from './types';
+import { WORK_REGISTRATION_UNIT_LIMIT } from './work-registration-policy';
 
 /** Shared with the preview UI. Keep this module free of server and AI dependencies. */
-export const WORK_IMPORT_LIMITS = { maxUnits: 10, maxTasks: 30, unitTitle: 100, taskTitle: 150, description: 5000, totalText: 60_000, bodyBytes: 256_000 } as const;
+export const WORK_IMPORT_LIMITS = { maxUnits: WORK_REGISTRATION_UNIT_LIMIT, maxTasks: 30, unitTitle: 100, taskTitle: 150, description: 5000, totalText: 60_000, bodyBytes: 256_000 } as const;
 export const WORK_IMPORT_FREQUENCIES = ['once', 'monthly', 'quarterly', 'half_yearly', 'yearly'] as const;
 export const WORK_IMPORT_PRIORITIES = ['low', 'medium', 'high'] as const;
 export type WorkImportTask = { title: string; description: string; dueDate: string; frequency: Frequency; priority: 'low' | 'medium' | 'high' };
@@ -16,6 +17,15 @@ const validDate = (value: string) => /^\d{4}-\d{2}-\d{2}$/.test(value) && Number
 
 /** Normalize user-reviewed text and reject hidden assignment, attachment, or state fields. */
 export function validateWorkImport(value: unknown): WorkImportValidation {
+  return validateWorkImportWithUnitLimit(value, WORK_IMPORT_LIMITS.maxUnits);
+}
+
+/** Only verify a matching actor's already-completed receipt; never use this to create new work. */
+export function validateCompletedWorkImportReplay(value: unknown): WorkImportValidation {
+  return validateWorkImportWithUnitLimit(value, 10);
+}
+
+function validateWorkImportWithUnitLimit(value: unknown, maxUnits: number): WorkImportValidation {
   const issues: FieldIssue[] = [];
   const issue = (path: string, message: string) => { issues.push({ path, message }); };
   const strictObject = (input: unknown, keys: readonly string[], path: string): Record<string, unknown> => {
@@ -35,9 +45,9 @@ export function validateWorkImport(value: unknown): WorkImportValidation {
   const importId = typeof input.importId === 'string' ? input.importId.trim().toLowerCase() : '';
   if (!uuid.test(importId)) issue('importId', '등록 요청 정보를 다시 준비해 주세요.');
   const rawUnits = Array.isArray(input.units) ? input.units : [];
-  if (!rawUnits.length || rawUnits.length > WORK_IMPORT_LIMITS.maxUnits) issue('units', '단위업무는 1개 이상 10개 이하로 등록해 주세요.');
+  if (!rawUnits.length || rawUnits.length > maxUnits) issue('units', `단위업무는 1개 이상 ${maxUnits}개 이하로 등록해 주세요. 유사한 업무는 같은 단위업무로 묶어 주세요.`);
   let taskCount = 0;
-  const units = rawUnits.slice(0, WORK_IMPORT_LIMITS.maxUnits).map((rawUnit, unitIndex): WorkImportUnit => {
+  const units = rawUnits.slice(0, maxUnits).map((rawUnit, unitIndex): WorkImportUnit => {
     const path = `units.${unitIndex}`;
     const unit = strictObject(rawUnit, ['title', 'description', 'tasks'], path);
     const title = text(unit.title, `${path}.title`, '단위업무 이름', WORK_IMPORT_LIMITS.unitTitle);
@@ -51,7 +61,7 @@ export function validateWorkImport(value: unknown): WorkImportValidation {
       const taskTitle = text(task.title, `${taskPath}.title`, '세부업무 이름', WORK_IMPORT_LIMITS.taskTitle);
       const taskDescription = text(task.description, `${taskPath}.description`, '업무 설명', WORK_IMPORT_LIMITS.description);
       const dueDate = typeof task.dueDate === 'string' ? task.dueDate.trim() : '';
-      if (!dueDate) issue(`${taskPath}.dueDate`, '업무 마감일을 직접 지정해 주세요.');
+      if (!dueDate) issue(`${taskPath}.dueDate`, '업무 마감일을 입력해 주세요.');
       else if (!validDate(dueDate)) issue(`${taskPath}.dueDate`, '실제 존재하는 마감일을 연-월-일 형식으로 입력해 주세요.');
       const frequency = task.frequency === undefined ? 'once' : task.frequency;
       const priority = task.priority === undefined ? 'medium' : task.priority;

@@ -53,6 +53,7 @@ function host(command: CommandFn) {
     cancelAnalysis() { const status = find(tree, props => typeof props.startedAt === 'number' && typeof props.onCancel === 'function'); assert.ok(status); (status.onCancel as () => void)(); },
     confirmation() { const result = find(tree, props => props.title === '새 분석 결과로 바꿀까요?' && typeof props.onConfirm === 'function'); assert.ok(result); return result as NodeProps & { onConfirm: () => void; onCancel: () => void }; },
     change(name: string, value: string) { const field = find(tree, props => props.name === name); assert.ok(field, name); const control = find(field.children, props => !!props.onChange); assert.ok(control, name); control.onChange?.({ target: { value } }); },
+    value(name: string) { const field = find(tree, props => props.name === name); assert.ok(field, name); const control = find(field.children, props => !!props.onChange); assert.ok(control, name); return control.value; },
   };
 }
 const tick = () => new Promise<void>(resolve => setImmediate(resolve));
@@ -69,12 +70,61 @@ test('personal entry is orange, precedes the two add actions and respects the di
   }
 });
 
-test('manual preview requires explicit dates and analysis disclosure remains visible', () => {
-  const view = host(async () => { throw new Error('Blank dates must not be submitted'); });
+test('manual preview defaults to the registration year end and yearly recurrence but still rejects a cleared date', () => {
+  const view = host(async () => { throw new Error('A cleared date must not be submitted'); });
   let html = view.render(); assert.match(html, /BizRouter로 보내 분석/); assert.match(html, /분석용으로 보관/);
   view.click('단위업무 직접 추가'); html = view.render();
-  assert.match(html, /type="date" required="" value=""/);
+  assert.equal(view.value('units.0.tasks.0.dueDate'), '2026-12-31');
+  assert.equal(view.value('units.0.tasks.0.frequency'), 'yearly');
+  for (const [name, value] of Object.entries({ 'units.0.title': '정기 보고', 'units.0.description': '정기 보고 운영', 'units.0.tasks.0.title': '보고서 작성', 'units.0.tasks.0.description': '자료를 취합해 작성', 'units.0.tasks.0.dueDate': '' })) { view.change(name, value); view.render(); }
   view.click('검토한 업무 등록'); assert.match(view.render(), /필수 항목과 마감일/);
+});
+
+test('new task defaults use the Seoul registration year and do not overwrite existing dates on refresh', () => {
+  const view = host(async () => true);
+  view.setWorkspace({ ...fixture(), serverTime: '2026-12-31T15:30:00Z' });
+  view.render(); view.click('단위업무 직접 추가'); view.render();
+  assert.equal(view.value('units.0.tasks.0.dueDate'), '2027-12-31');
+  assert.equal(view.value('units.0.tasks.0.frequency'), 'yearly');
+  view.change('units.0.tasks.0.dueDate', '2027-06-15'); view.render();
+  view.change('units.0.tasks.0.frequency', 'quarterly'); view.render();
+  view.setWorkspace({ ...fixture(), serverTime: '2028-01-01T00:30:00Z' }); view.render();
+  assert.equal(view.value('units.0.tasks.0.dueDate'), '2027-06-15');
+  assert.equal(view.value('units.0.tasks.0.frequency'), 'quarterly');
+  view.click('세부업무 추가'); view.render();
+  assert.equal(view.value('units.0.tasks.1.dueDate'), '2028-12-31');
+  assert.equal(view.value('units.0.tasks.1.frequency'), 'yearly');
+});
+
+test('five manually reviewed units remain intact and a sixth append is blocked', () => {
+  const view = host(async () => true); view.render();
+  for (let index = 0; index < 5; index++) {
+    assert.equal(view.button('단위업무 직접 추가').disabled, false);
+    view.click('단위업무 직접 추가'); view.render();
+    view.change(`units.${index}.title`, `검토한 단위 ${index + 1}`); view.render();
+  }
+  assert.equal(view.button('단위업무 직접 추가').disabled, true);
+  view.click('단위업무 직접 추가'); const html = view.render();
+  assert.doesNotMatch(html, /data-field-path="units\.5\.title"/);
+  for (let index = 0; index < 5; index++) {
+    assert.equal(view.value(`units.${index}.title`), `검토한 단위 ${index + 1}`);
+    assert.equal(view.value(`units.${index}.tasks.0.frequency`), 'yearly');
+  }
+});
+
+test('registration submits edited dates and recurrence while untouched tasks retain their yearly default', async () => {
+  const calls: WorkImportInput[] = [];
+  const view = host(async (_type, payload) => { calls.push(structuredClone(payload) as unknown as WorkImportInput); return true; });
+  fill(view); view.click('세부업무 추가'); view.render();
+  for (const [name, value] of Object.entries({ 'units.0.tasks.1.title': '분기별 자료 점검', 'units.0.tasks.1.description': '분기별 자료를 점검합니다.', 'units.0.tasks.1.dueDate': '2027-04-30', 'units.0.tasks.1.frequency': 'quarterly' })) { view.change(name, value); view.render(); }
+  view.click('검토한 업무 등록'); await tick(); view.render();
+  assert.equal(calls.length, 1);
+  assert.deepEqual(calls[0].units[0].tasks.map(({ dueDate, frequency }) => ({ dueDate, frequency })), [
+    { dueDate: '2026-12-20', frequency: 'yearly' },
+    { dueDate: '2027-04-30', frequency: 'quarterly' },
+  ]);
+  assert.equal(view.value('units.0.tasks.1.dueDate'), '2027-04-30');
+  assert.equal(view.value('units.0.tasks.1.frequency'), 'quarterly');
 });
 
 test('an uncertain write retries its original request after edits and a division lock, then keeps unsaved additions', async () => {
@@ -121,7 +171,9 @@ test('late analysis preserves changed input and provides inspectable results bef
     confirmation.onCancel(); const cancelled = view.render();
     assert.match(cancelled, /value="기존에 검토한 단위"/); assert.match(cancelled, /계속 보관할 업무 설명/); assert.match(cancelled, /새 분석 결과 먼저 확인/);
     view.click('새 분석 결과 적용'); view.render(); view.confirmation().onConfirm(); const applied = view.render();
-    assert.match(applied, /value="검토할 새 단위"/); assert.match(applied, /type="date" required="" value=""/);
+    assert.match(applied, /value="검토할 새 단위"/);
+    assert.equal(view.value('units.0.tasks.0.dueDate'), '2026-12-31');
+    assert.equal(view.value('units.0.tasks.0.frequency'), 'yearly');
     assert.match(applied, /계속 보관할 업무 설명/); assert.doesNotMatch(applied, /value="기존에 검토한 단위"/);
   } finally { globalThis.fetch = originalFetch; }
 });
@@ -144,5 +196,20 @@ test('analysis cancellation preserves input, rejects double clicks and ignores a
     let html = view.render(); assert.match(html, /업무 분석 중/); assert.doesNotMatch(html, /취소한 이전 결과/);
     calls[1].finish(result('현재 요청 결과')); await tick();
     html = view.render(); assert.match(html, /현재 요청 결과/); assert.match(html, /보존할 업무 설명/); assert.doesNotMatch(html, /취소한 이전 결과/);
+  } finally { globalThis.fetch = originalFetch; }
+});
+
+test('an oversized AI grouping is rejected without replacing or truncating the reviewed draft', async () => {
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async () => Response.json({ preview: { units: Array.from({ length: 6 }, (_, index) => ({ title: `초과 단위 ${index + 1}`, description: '초과 결과', tasks: [{ title: `초과 과제 ${index + 1}`, description: '초과 내용' }] })) } });
+  try {
+    const view = host(async () => { throw new Error('Analysis must not register work'); });
+    fill(view); view.change('description', '기존 업무를 유사한 범위로 묶습니다.'); view.render();
+    view.click('AI로 업무 초안 만들기'); await tick(); const html = view.render();
+    assert.match(html, /단위업무는 최대 5개/);
+    assert.equal(view.value('units.0.title'), '정기 보고');
+    assert.equal(view.value('units.0.tasks.0.dueDate'), '2026-12-20');
+    assert.equal(view.value('units.0.tasks.0.frequency'), 'yearly');
+    assert.doesNotMatch(html, /초과 단위|초과 과제|data-field-path="units\.1\.title"/);
   } finally { globalThis.fetch = originalFetch; }
 });

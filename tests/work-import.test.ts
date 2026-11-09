@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { randomUUID } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import { canonicalWorkImport, validateWorkImport, WORK_IMPORT_LIMITS, workImportNeutralCard, type WorkImportInput } from '../src/lib/work-import';
 import { commandTarget } from '../src/lib/command-targets';
 import { createSeed } from '../src/lib/seed';
@@ -15,6 +15,13 @@ function unchangedFailure(state: WorkspaceData, payload: unknown, code: string, 
   const before = structuredClone(state);
   assert.throws(() => execute(state, payload, actor), (error: unknown) => error instanceof DomainError && error.code === code);
   assert.deepEqual(state, before, 'failed direct domain call must not publish any partial state');
+}
+
+function completedLegacyImport(units = 10, actor = 'u-jiho') {
+  const state = createSeed(now); const input = draft(units, 3);
+  // Simulate the durable receipt written by the former 10-unit version.
+  state.processedRequests.push({ id: `work.import:${input.importId}`, actorId: actor, fingerprint: createHash('sha256').update(`work.import\n${canonicalWorkImport(input)}`).digest('hex') });
+  return { state, input };
 }
 
 test('work import normalizes text, UUID case, defaults and JSON property order for retry identity', () => {
@@ -43,8 +50,12 @@ test('work import strict DTO rejects hidden assignment, file, budget and workflo
 });
 
 test('work import enforces unit/task and total text limits without silently truncating', () => {
-  assert.equal(validateWorkImport(draft(10, 3)).success, true);
-  assert.equal(validateWorkImport(draft(11, 1)).success, false);
+  assert.equal(validateWorkImport(draft(5, 6)).success, true);
+  const overLimit = draft(6, 1);
+  const overLimitResult = validateWorkImport(overLimit);
+  assert.equal(overLimitResult.success, false);
+  if (!overLimitResult.success) assert.ok(overLimitResult.issues.some(issue => issue.path === 'units' && issue.message.includes('5개')));
+  unchangedFailure(createSeed(now), overLimit, 'VALIDATION_ERROR');
   assert.equal(validateWorkImport(draft(2, 16)).success, false);
   const empty = draft(1, 0); assert.equal(validateWorkImport(empty).success, false);
   const input = draft(3, 4); input.units.forEach(unit => unit.tasks.forEach(task => { task.description = '가'.repeat(WORK_IMPORT_LIMITS.description); }));
@@ -130,6 +141,55 @@ test('a response-loss retry with a different transport ID is a no-op even after 
   assert.ok(state.processedRequests.some(request => request.id === `work.import:${input.importId}` && request.actorId === 'u-jiho'));
 });
 
+test('completed legacy batches replay across the five-unit rollout with old normalization and no writes', () => {
+  for (const count of [6, 10]) {
+    const { state, input } = completedLegacyImport(count);
+    state.departmentWorkPlans = [{ departmentId: 'dept-plan', status: 'confirmed', version: 1 }];
+    const before = structuredClone(state);
+    const reordered = {
+      units: input.units.map(unit => ({ tasks: unit.tasks.map(task => ({ dueDate: ` ${task.dueDate} `, description: ` ${task.description}\n`, title: task.title })), description: unit.description, title: unit.title })),
+      importId: ` ${input.importId.toUpperCase()} `,
+    };
+    assert.deepEqual(execute(state, reordered, 'u-jiho', { requestId: 'after-deployment', expectedRevision: 0 }), []);
+    assert.deepEqual(state, before, 'An acknowledged old receipt must not create, remove or revise any work.');
+    assert.equal(validateWorkImport(input).success, false, 'New registrations still use the five-unit policy.');
+  }
+});
+
+test('legacy replay hashes every unit and rejects changed content rather than truncating to five', () => {
+  const { state, input } = completedLegacyImport();
+  input.units[9].tasks[2].description += ' 변경';
+  unchangedFailure(state, input, 'IDEMPOTENCY_CONFLICT');
+});
+
+test('legacy replay allowance requires the same actor and a completed import identity', () => {
+  const { state, input } = completedLegacyImport(6);
+  unchangedFailure(state, input, 'VALIDATION_ERROR', 'u-seoyeon');
+  unchangedFailure(state, { ...input, importId: randomUUID() }, 'VALIDATION_ERROR');
+  unchangedFailure(createSeed(now), input, 'VALIDATION_ERROR');
+});
+
+test('inactive accounts, including administrators, cannot replay a completed legacy import', () => {
+  for (const actor of ['u-jiho', 'u-admin']) {
+    const { state, input } = completedLegacyImport(6, actor);
+    state.users.find(user => user.id === actor)!.active = false;
+    unchangedFailure(state, input, 'ACCOUNT_INACTIVE', actor);
+  }
+});
+
+test('legacy receipt replay still strictly validates hidden fields, deadlines and the former bounds', () => {
+  for (const change of ['hidden', 'missing-date', 'invalid-date', 'units', 'tasks'] as const) {
+    const { state, input } = completedLegacyImport();
+    const task = input.units[9].tasks[2];
+    if (change === 'hidden') Object.assign(task, { primaryId: 'u-admin' });
+    if (change === 'missing-date') task.dueDate = '';
+    if (change === 'invalid-date') task.dueDate = '2026-02-30';
+    if (change === 'units') input.units.push(structuredClone(input.units[0]));
+    if (change === 'tasks') input.units[9].tasks.push(structuredClone(task));
+    unchangedFailure(state, input, 'VALIDATION_ERROR');
+  }
+});
+
 test('the same import identity cannot commit a changed payload, but identities are actor scoped', () => {
   const state = createSeed(now); const input = draft(1, 1); execute(state, input);
   const changed = structuredClone(input); changed.units[0].tasks[0].title += ' 수정';
@@ -147,11 +207,31 @@ test('a rejected first attempt can be corrected with the same import ID without 
   assert.deepEqual(state.processedRequests.slice(0, history.length), history); assert.equal(state.processedRequests.length, history.length + 1);
 });
 
-test('maximum reviewed batch succeeds despite a stale global revision and creates 40 revision receipts', () => {
-  const state = createSeed(now); const input = draft(10, 3);
+test('maximum reviewed batch retains all 30 tasks in five units despite a stale global revision', () => {
+  const state = createSeed(now); const before = structuredClone(state); const input = draft(5, 6);
   state.revision = 51;
   const receipts = execute(state, input, 'u-jiho', { expectedRevision: 1 });
-  assert.equal(receipts.length, 40); assert.equal(state.revision, 52);
+  assert.equal(receipts.length, 35); assert.equal(state.revision, 52);
+  assert.equal(state.units.length, before.units.length + 5);
+  assert.equal(state.tasks.length, before.tasks.length + 30);
+  for (const unitDraft of input.units) {
+    const unit = state.units.find(item => item.title === unitDraft.title)!;
+    assert.deepEqual(state.tasks.filter(task => task.unitId === unit.id).map(task => task.title).sort(), unitDraft.tasks.map(task => task.title).sort());
+  }
+});
+
+test('registration preserves annual defaults and each reviewed schedule including later owner edits', () => {
+  const state = createSeed(now); const input = draft(1, 2);
+  Object.assign(input.units[0].tasks[0], { dueDate: '2026-12-31', frequency: 'yearly' });
+  Object.assign(input.units[0].tasks[1], { dueDate: '2027-03-15', frequency: 'quarterly' });
+  execute(state, input);
+  for (const reviewed of input.units[0].tasks) {
+    const task = state.tasks.find(item => item.title === reviewed.title)!;
+    assert.equal(task.dueDate, reviewed.dueDate); assert.equal(task.frequency, reviewed.frequency);
+  }
+  const annual = state.tasks.find(item => item.title === input.units[0].tasks[0].title)!;
+  executeCommand(state, 'u-jiho', { type: 'task.configure', payload: { taskId: annual.id, dueDate: '2027-06-20', frequency: 'monthly' }, expectedRevision: state.revision, expected: { kind: 'task', id: annual.id, rev: annual.rev }, requestId: randomUUID() }, now);
+  assert.equal(annual.dueDate, '2027-06-20'); assert.equal(annual.frequency, 'monthly');
 });
 
 test('existing individual creation retains its default card, caller card, validation and idempotency behavior', () => {
