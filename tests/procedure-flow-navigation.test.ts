@@ -83,17 +83,18 @@ test('expanded flow uses the shared modal and only jumps after explicit selectio
   try {
     const workflow = defaultWorkflow();
     const view = host(() => flowUi.ProcedureFlow({ workflow, compact: true, onSelect: id => selected.push(id) }));
-    view.render(); view.commit(); view.button(' 확대 보기').onClick(); view.render(); view.commit();
+    view.render(); view.commit(); view.button(' 크게 보기').onClick(); view.render(); view.commit();
     assert.equal(portalTarget, body);
-    assert.equal(view.all(props => Array.isArray(props.nodes)).length, 2, 'compact canvas stays mounted behind the dialog');
+    assert.equal(view.all(props => Array.isArray(props.nodes)).length, 1, 'compact canvas stays mounted behind the native scrolling diagram');
     let modal = view.one((_props, type) => type === ui.Modal);
     assert.equal(modal.title, '업무 절차도 크게 보기'); assert.match(modal.description, /연결된 선행 절차/);
-    view.all(props => Array.isArray(props.nodes))[1].onSelect(workflow[2].id); view.render();
+    assert.match(modal.description, /스크롤/);
+    view.one(props => Array.isArray(props.workflow)).onSelect(workflow[2].id); view.render();
     assert.deepEqual(selected, [], 'inspecting an enlarged node does not yet move the underlying editor');
     modal = view.one((_props, type) => type === ui.Modal); modal.onClose(); view.render(); view.commit();
     assert.deepEqual(selected, []); assert.equal(view.all((_props, type) => type === ui.Modal).length, 0);
-    view.button(' 확대 보기').onClick(); view.render(); view.commit();
-    view.all(props => Array.isArray(props.nodes))[1].onSelect(workflow[1].id); view.render();
+    view.button(' 크게 보기').onClick(); view.render(); view.commit();
+    view.one(props => Array.isArray(props.workflow)).onSelect(workflow[1].id); view.render();
     view.button('선택한 절차로 이동 ').onClick(); view.render(); view.commit();
     assert.deepEqual(selected, []); frames.shift()!(0); assert.deepEqual(selected, []); frames.shift()!(0);
     assert.deepEqual(selected, [workflow[1].id]);
@@ -102,6 +103,16 @@ test('expanded flow uses the shared modal and only jumps after explicit selectio
     if (documentDescriptor) Object.defineProperty(globalThis, 'document', documentDescriptor); else Reflect.deleteProperty(globalThis, 'document');
     globalThis.requestAnimationFrame = raf; globalThis.cancelAnimationFrame = cancel;
   }
+});
+
+test('scroll-only flow shows the full workflow without a canvas or a second enlargement dialog', () => {
+  const workflow = defaultWorkflow(); const view = host(() => flowUi.ProcedureFlow({ workflow, scrollOnly: true }));
+  view.render(); view.commit();
+  assert.equal(view.all(props => Array.isArray(props.nodes)).length, 0);
+  assert.equal(view.all(props => props['aria-haspopup'] === 'dialog').length, 0);
+  const diagram = view.one(props => Array.isArray(props.workflow));
+  assert.equal(diagram.workflow, workflow); assert.equal(diagram.onSelect, undefined);
+  assert.equal(view.all(props => props.className === 'procedure-accessible-list').length, 1);
 });
 
 test('each canvas refits after an actual resize while preserving the viewport across ordinary rerenders', () => {

@@ -13,6 +13,7 @@ import { Button, Modal } from './ui';
 import { sameDraft } from '@/lib/pending-draft';
 import { aiRequestError } from '@/lib/ai-request-lifecycle';
 import { AiRequestStatus, useAiRequest } from './ai-request-status';
+import { ProcedureFlowDocument } from './procedure-flow-document';
 import '@xyflow/react/dist/style.css';
 import './procedure-builder.css';
 
@@ -52,7 +53,7 @@ export function ProcedureFlowCanvas({ nodes, edges, redrawKey, onSelect }: { nod
   </div>;
 }
 
-export function ProcedureFlow({ workflow, participants, selectedId, onSelect, redrawKey = 0, compact = false }: { workflow: WorkflowStep[]; participants?: ProcedureParticipants; selectedId?: string; onSelect?: (id: string) => void; redrawKey?: number; compact?: boolean }) {
+export function ProcedureFlow({ workflow, participants, selectedId, onSelect, redrawKey = 0, compact = false, scrollOnly = false }: { workflow: WorkflowStep[]; participants?: ProcedureParticipants; selectedId?: string; onSelect?: (id: string) => void; redrawKey?: number; compact?: boolean; scrollOnly?: boolean }) {
   const [expanded, setExpanded] = useState(false);
   const [expandedSelection, setExpandedSelection] = useState('');
   const destination = useRef<string | null>(null);
@@ -66,6 +67,7 @@ export function ProcedureFlow({ workflow, participants, selectedId, onSelect, re
     return () => { cancelAnimationFrame(frame); cancelAnimationFrame(nextFrame); };
   }, [expanded]);
   const { nodes, edges } = useMemo(() => {
+    if (scrollOnly) return { nodes: [] as Node[], edges: [] as Edge[] };
     const laneRoles = roles.filter(role => role !== 'support' || workflow.some(step => step.role === 'support'));
     const levels = new Map<string, number>();
     const depth = (id: string, trail = new Set<string>()): number => {
@@ -95,20 +97,19 @@ export function ProcedureFlow({ workflow, participants, selectedId, onSelect, re
     const ids = new Set(workflow.map(step => step.id));
     const edges: Edge[] = workflow.flatMap(step => step.dependsOn.filter(id => ids.has(id)).map(id => ({ id: `${id}-${step.id}`, source: id, target: step.id, type: 'smoothstep', markerEnd: { type: MarkerType.ArrowClosed, color: '#5483cc' }, style: { stroke: '#5483cc', strokeWidth: 1.6 } })));
     return { nodes, edges };
-  }, [workflow, selectedId, participants]);
+  }, [workflow, selectedId, participants, scrollOnly]);
   if (!workflow.length) return <div className="procedure-flow-empty">절차를 등록하면 담당 역할별 흐름도가 표시됩니다.</div>;
   const select = (id: string, enlarged: boolean) => { if (workflow.some(step => step.id === id)) { if (enlarged) setExpandedSelection(id); else onSelect?.(id); } };
-  const canvas = (enlarged: boolean) => <ProcedureFlowCanvas key={workflow.map(step => step.id + step.dependsOn.join(',')).join('|')} redrawKey={redrawKey} nodes={enlarged ? nodes.map(node => ({ ...node, selected: node.id === expandedSelection })) : nodes} edges={edges} onSelect={onSelect ? id => select(id, enlarged) : undefined}/>;
   const list = (enlarged: boolean) => <details className="procedure-accessible-list"><summary>절차 목록으로 보기</summary><ol>{workflow.map(step => <li key={step.id}>{onSelect ? <button type="button" aria-pressed={(enlarged ? expandedSelection : selectedId) === step.id} onClick={() => select(step.id, enlarged)}>{step.title || '새 절차'}</button> : <b>{step.title}</b>}<span>{roleLabels[step.role]} · {participants?.[step.role]?.trim() || participantFallbacks[step.role]} · {step.dependsOn.length ? `선행: ${step.dependsOn.map(id => workflow.find(item => item.id === id)?.title || id).join(', ')}` : '시작 절차'}</span></li>)}</ol></details>;
   return <>
-    <div className={`procedure-flow-section${compact ? ' is-compact' : ''}`}>
-      <div className="procedure-flow-legend"><span><GitBranch size={17}/>{compact ? '업무 절차도' : '역할별 업무 흐름'}</span><button type="button" aria-haspopup="dialog" onClick={() => { setExpandedSelection(selectedId || workflow[0].id); setExpanded(true); }}><Maximize2 size={15}/> 확대 보기</button></div>
-      {!compact && <p className="procedure-flow-help">화면을 끌어 이동하거나 +/−로 확대하세요. 연결된 선행 절차는 모두 완료해야 합니다.</p>}
-      {canvas(false)}
+    <div className={`procedure-flow-section${compact ? ' is-compact' : ''}${scrollOnly ? ' is-scroll-view' : ''}`}>
+      <div className="procedure-flow-legend"><span><GitBranch size={17}/>{compact ? '업무 절차도' : '역할별 업무 흐름'}</span>{!scrollOnly && <button type="button" aria-haspopup="dialog" onClick={() => { setExpandedSelection(selectedId || workflow[0].id); setExpanded(true); }}><Maximize2 size={15}/> 크게 보기</button>}</div>
+      {!compact && <p className="procedure-flow-help">{scrollOnly ? '위에서 아래로 읽고, 화면 밖의 절차는 스크롤해서 확인하세요.' : '크게 보기에서 단계별 내용을 읽기 좋은 크기로 확인하세요.'} 연결된 선행 절차는 모두 완료해야 합니다.</p>}
+      {scrollOnly ? <ProcedureFlowDocument workflow={workflow} participants={participants} selectedId={selectedId} onSelect={onSelect}/> : <ProcedureFlowCanvas key={workflow.map(step => step.id + step.dependsOn.join(',')).join('|')} redrawKey={redrawKey} nodes={nodes} edges={edges} onSelect={onSelect ? id => select(id, false) : undefined}/>}
       {compact && onSelect ? <nav className="procedure-flow-shortcuts" aria-label="절차 편집 위치 선택">{workflow.map((step, index) => <button type="button" key={step.id} aria-pressed={selectedId === step.id} onClick={() => select(step.id, false)}><span>{index + 1}</span>{step.title || '새 절차'}</button>)}</nav> : list(false)}
     </div>
-    {expanded && typeof document !== 'undefined' && createPortal(<Modal title="업무 절차도 크게 보기" description="화면을 끌거나 +/−로 확대할 수 있습니다. 연결된 선행 절차는 모두 완료해야 합니다." wide className="procedure-flow-modal" onClose={() => setExpanded(false)}>
-      {canvas(true)}
+    {expanded && typeof document !== 'undefined' && createPortal(<Modal title="업무 절차도 크게 보기" description="위에서 아래로 읽고, 화면 밖의 절차는 스크롤해서 확인하세요. 연결된 선행 절차는 모두 완료해야 합니다." wide className="procedure-flow-modal" onClose={() => setExpanded(false)}>
+      <ProcedureFlowDocument workflow={workflow} participants={participants} selectedId={expandedSelection} onSelect={onSelect ? id => select(id, true) : undefined}/>
       {list(true)}
       <div className="procedure-flow-modal-actions"><Button variant="secondary" onClick={() => setExpanded(false)}>닫기</Button>{onSelect && <Button disabled={!workflow.some(step => step.id === expandedSelection)} onClick={() => { destination.current = expandedSelection; setExpanded(false); }}>선택한 절차로 이동 <ArrowRight size={15}/></Button>}</div>
     </Modal>, document.body)}

@@ -26,3 +26,10 @@
 
 .procedure-draft-status{margin:16px 0 0;color:#6b788b;font-size:14px;line-height:1.8}.procedure-draft-order{display:flex;align-items:center;gap:7px;flex-wrap:wrap}.procedure-draft-order .btn{min-height:33px;padding:0 10px;font-size:13px}.procedure-essential-grid{grid-template-columns:minmax(0,1fr) minmax(0,1.5fr)}.procedure-evidence>summary{display:flex;align-items:center;gap:6px;font-size:14px;color:#53729b;cursor:pointer}.procedure-evidence[open]>span{margin-top:12px}.procedure-apply .procedure-apply-button{min-width:190px}@media(max-width:760px){.procedure-editor-title{align-items:flex-start;flex-direction:column}.procedure-draft-order{width:100%}.procedure-draft-order .procedure-remove{margin-left:auto}.procedure-essential-grid{grid-template-columns:1fr}}
 .procedure-dependencies{display:grid;gap:8px;margin-top:12px;border:1px solid var(--border,#dce2e8);border-radius:10px;padding:12px}.procedure-dependencies legend{font-weight:600}.procedure-dependencies p{margin:0;color:var(--muted,#64748b);font-size:13px}.procedure-dependencies label{display:flex;align-items:center;gap:8px;font-size:14px}.procedure-dependencies input[type=checkbox]{width:auto;flex:none}
+.procedure-flow-section.is-scroll-view{display:flex;flex-direction:column;min-height:0;background:#f7f9fd}
+.is-scroll-view>.procedure-flow-legend,.is-scroll-view>.procedure-flow-help{flex-shrink:0}
+.is-scroll-view>.procedure-flow-document,.procedure-flow-modal .procedure-flow-document{flex:1;min-height:180px;max-height:none}
+.is-scroll-view>.procedure-accessible-list{background:#fff;flex-shrink:0;max-height:22dvh;overflow:auto}
+.procedure-flow-modal>.modal-heading{padding:22px 24px 18px}.procedure-flow-modal>.modal-heading p{font-size:14px}
+.procedure-flow-modal .procedure-accessible-list{margin-top:8px}
+@media(max-width:760px){.procedure-flow-modal>.modal-heading{padding:18px 18px 13px}.is-scroll-view>.procedure-flow-help{font-size:13px;line-height:1.55}.is-scroll-view>.procedure-accessible-list{padding:10px 12px}}

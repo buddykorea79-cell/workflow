@@ -41,8 +41,7 @@ export function OrganizationDivisionProcedure({ taskId }: { taskId: string }) {
   const data = state.data;
   const workflow: WorkflowStep[] = data.workflow.map(step => ({ id: step.id, title: step.title, role: step.role, dependsOn: step.dependsOn, description: '', output: '', required: false, checklist: [], done: false }));
   return <section className="od-procedure-view" aria-label="업무분장표의 읽기 전용 절차도">
-    <header className="od-procedure-context"><p>{data.departmentName} · {data.unitTitle}</p><h3>{data.taskTitle}</h3><span>현재 저장된 업무 기준의 절차입니다. 수행 회차의 완료 여부나 진행 실적을 나타내지 않습니다.</span></header>
-    <dl className="od-procedure-participants"><div><dt>담당</dt><dd>{data.participants.primary || '담당자 미지정'}</dd></div><div><dt>협업·지원</dt><dd>{data.participants.support || '지원자 미지정'}</dd></div><div><dt>검토</dt><dd>{data.participants.reviewer || '검토자 미지정'}</dd></div></dl>
-    {workflow.length ? <ProcedureFlow workflow={workflow} participants={data.participants}/> : <EmptyState title="아직 등록된 절차가 없습니다." description="담당자가 업무 절차를 저장하면 이곳에서 확인할 수 있습니다."/>}
+    <header className="od-procedure-context"><p>{data.departmentName} · {data.unitTitle}</p><span>현재 저장된 업무 기준의 절차입니다. 수행 회차의 완료 여부나 진행 실적을 나타내지 않습니다.</span></header>
+    {workflow.length ? <ProcedureFlow workflow={workflow} participants={data.participants} scrollOnly/> : <EmptyState title="아직 등록된 절차가 없습니다." description="담당자가 업무 절차를 저장하면 이곳에서 확인할 수 있습니다."/>}
   </section>;
 }

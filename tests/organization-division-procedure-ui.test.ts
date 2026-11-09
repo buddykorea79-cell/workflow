@@ -80,9 +80,9 @@ test('viewer maps only current step structure into a read-only flow and keeps se
   try {
     assert.match(view.render(), /불러오고 있습니다/); await tick(); const rendered = view.render();
     assert.equal(seen?.cache, 'no-store'); assert.match(rendered, /현재 저장된 업무 기준/);
-    assert.match(rendered, /다른 부서/); assert.match(rendered, /담당 이름/);
+    assert.match(rendered, /다른 부서/);
     const flow = view.one(props => Array.isArray(props.workflow));
-    assert.equal(flow.onSelect, undefined); assert.equal(flow.compact, undefined, 'read-only viewer uses the full-size chart and pan/zoom help'); assert.deepEqual(flow.participants, payload.participants);
+    assert.equal(flow.onSelect, undefined); assert.equal(flow.scrollOnly, true, 'read-only viewer uses the native scrolling diagram without another zoom dialog'); assert.deepEqual(flow.participants, payload.participants);
     assert.ok(flow.workflow.every((step: Props) => step.done === false && step.description === '' && step.output === '' && step.attachmentIds === undefined));
     assert.doesNotMatch(JSON.stringify(flow.workflow), /PRIVATE/);
     assert.equal(view.matches(props => typeof props.onApply === 'function' || typeof props.onSave === 'function').length, 0);
