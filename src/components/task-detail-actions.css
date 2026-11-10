@@ -50,48 +50,7 @@
   cursor: not-allowed;
 }
 
-/* Keep the existing shapes and typeface for navigation and role selection. */
-body .role-picker .role-option[data-scenario-role=true],
-body .sidebar .nav-item[data-scenario-nav=true],
-body .accessible-tabs button[data-accent=true],
-body .session-button {
-  background: var(--action-orange-soft);
-  border: 1px solid var(--action-orange-line);
+/* Role switching keeps its original layout; only its label is accented. */
+.session-button > span {
   color: var(--action-orange-ink);
-  font-weight: 700;
-}
-body .role-picker .role-option[data-scenario-role=true]:hover:not(.selected),
-body .sidebar .nav-item[data-scenario-nav=true]:hover:not(.active),
-body .accessible-tabs button[data-accent=true]:hover:not(:disabled),
-body .session-button:hover {
-  background: #ffead9;
-  border-color: var(--action-orange);
-  color: var(--action-orange-ink);
-}
-body .role-picker .role-option[data-scenario-role=true].selected,
-body .sidebar .nav-item[data-scenario-nav=true].active,
-body .accessible-tabs button[data-accent=true][aria-selected=true] {
-  background: var(--action-orange);
-  border-color: var(--action-orange);
-  color: #fff;
-  box-shadow: 0 2px 5px #9d3e1114;
-}
-body .sidebar .nav-item[data-scenario-nav=true].active .nav-count {
-  background: #fff;
-  color: var(--action-orange-ink);
-}
-body .role-picker .role-option[data-scenario-role=true]:focus-visible,
-body .sidebar .nav-item[data-scenario-nav=true]:focus-visible,
-body .accessible-tabs button[data-accent=true]:focus-visible,
-body .session-button:focus-visible {
-  outline: 3px solid var(--action-orange-focus);
-  outline-offset: 2px;
-}
-body .session-button {
-  min-height: 38px;
-  padding: 8px 12px;
-  border-radius: 10px;
-}
-body .handover-form input[type=checkbox] {
-  accent-color: var(--action-orange);
 }

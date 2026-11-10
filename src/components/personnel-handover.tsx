@@ -56,7 +56,7 @@ export function PersonnelHandover({ workspace, command, busy = false, onOpenTask
   const history = transfers.filter(item => item.status !== 'pending');
   const custody = transfers.filter(item => item.departmentId === departmentId && item.kind === 'emergency' && item.status === 'completed').map(transfer => ({ transfer, ...custodyItems(workspace, transfer) })).filter(item => item.unitIds.length || item.taskIds.length || item.runIds.length);
   const tabs = useTabs<Tab>({ value: tab, onChange: setTab, items: [
-    { value: 'pending', label: <>승인 대기 <span>{pending.length}</span></>, accent: true },
+    { value: 'pending', label: <>승인 대기 <span>{pending.length}</span></> },
     ...(canViewDepartment ? [{ value: 'custody' as const, label: <>부서 보관 업무 <span>{custody.length}</span></> }] : []),
     { value: 'history', label: '인수인계 이력' },
   ] });

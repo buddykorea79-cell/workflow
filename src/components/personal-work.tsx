@@ -443,10 +443,10 @@ function TaskEditor({ task, workspace: w, command: executeCommand, onClose, onWo
   });
   const changeTab = (next: typeof tab) => { if (next !== tab) requestNavigation(() => { setTab(next); setHistoryViewing(false); setMessage(''); }, undefined, [taskDraftId]); };
   const detailTabs = useTabs<TaskTab>({ value: tab, onChange: changeTab, items: [
-    { value: 'overview', label: <><FileText size={16} />업무 개요</>, accent: true },
+    { value: 'overview', label: <><FileText size={16} />업무 개요</> },
     { value: 'references', label: <><Landmark size={16} />관련 근거</> },
-    { value: 'workflow', label: <><ListChecks size={16} />절차</>, accent: true },
-    { value: 'schedule', label: <><CalendarDays size={16} />일정·수행</>, accent: true },
+    { value: 'workflow', label: <><ListChecks size={16} />절차</> },
+    { value: 'schedule', label: <><CalendarDays size={16} />일정·수행</> },
     { value: 'performance', label: <><Trophy size={16} />성과</> },
     { value: 'budget', label: <><Wallet size={16} />예산·집행</> },
     ...(directiveDistribution ? [{ value: 'monthly' as const, label: <><CalendarDays size={16} />월별 실적</> }] : []),

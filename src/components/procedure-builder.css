@@ -26,10 +26,5 @@
 .procedure-draft-status{margin:16px 0 0;color:#6b788b;font-size:14px;line-height:1.8}.procedure-draft-order{display:flex;align-items:center;gap:7px;flex-wrap:wrap}.procedure-draft-order .btn{min-height:33px;padding:0 10px;font-size:13px}.procedure-essential-grid{grid-template-columns:minmax(0,1fr) minmax(0,1.5fr)}.procedure-evidence>summary{display:flex;align-items:center;gap:6px;font-size:14px;color:#53729b;cursor:pointer}.procedure-evidence[open]>span{margin-top:12px}.procedure-apply .procedure-apply-button{min-width:190px}@media(max-width:760px){.procedure-editor-title{align-items:flex-start;flex-direction:column}.procedure-draft-order{width:100%}.procedure-draft-order .procedure-remove{margin-left:auto}.procedure-essential-grid{grid-template-columns:1fr}}
 .procedure-dependencies{display:grid;gap:8px;margin-top:12px;border:1px solid var(--border,#dce2e8);border-radius:10px;padding:12px}.procedure-dependencies legend{font-weight:600}.procedure-dependencies p{margin:0;color:var(--muted,#64748b);font-size:13px}.procedure-dependencies label{display:flex;align-items:center;gap:8px;font-size:14px}.procedure-dependencies input[type=checkbox]{width:auto;flex:none}
 
-/* Keep the demonstration file choices visible within the existing blue workspace. */
+/* Preserve a visible selected state for the in-content analysis action. */
 .procedure-source-modes .btn-accent-outline[aria-pressed=true]{box-shadow:inset 0 0 0 1px currentColor;font-weight:700}
-.procedure-primary-sources .procedure-reference-option{border:1px solid #d3a080;border-radius:9px;background:#fffaf5;padding:10px 12px;cursor:pointer}
-.procedure-primary-sources .procedure-reference-option:has(input:checked){border-color:#c65516;background:#fff1e7;box-shadow:inset 3px 0 0 #c65516}
-.procedure-primary-sources .procedure-reference-option:has(input:focus-visible){outline:3px solid #f6b58d;outline-offset:3px}
-.procedure-primary-sources .procedure-reference-option>span{color:#934013;font-weight:650}
-body .procedure-primary-sources input[type=checkbox],body .procedure-apply .procedure-check input[type=checkbox]{accent-color:#c65516}
