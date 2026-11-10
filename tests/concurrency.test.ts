@@ -17,13 +17,15 @@ function send(state: WorkspaceData, actor: string, type: string, payload: Record
 }
 const rejects = (code: string, fn: () => unknown) => assert.throws(fn, error => error instanceof DomainError && error.code === code);
 
-test('concurrency: all 83 server commands are explicitly classified, including logical and no-target commands', () => {
+test('concurrency: all 84 server commands are explicitly classified, including logical and no-target commands', () => {
   const cases = [...readFileSync('src/lib/domain.ts', 'utf8').matchAll(/case '([^']+)':/g)].map(match => match[1]);
-  assert.equal(cases.length, 83); assert.deepEqual(Object.keys(COMMAND_TARGET_RULES).sort(), cases.sort());
+  assert.equal(cases.length, 84); assert.deepEqual(Object.keys(COMMAND_TARGET_RULES).sort(), cases.sort());
   assert.equal(COMMAND_TARGET_RULES['run.correctOutput'], 'run');
   assert.equal(COMMAND_TARGET_RULES['work.import'], null);
+  assert.equal(COMMAND_TARGET_RULES['organization.setDefaultDeputy'], 'user');
   const context = { actorId: 'person', departmentId: 'department', delegations: [{ id: 'delegate', batchId: 'batch' }] };
   assert.deepEqual(commandTarget('department.confirm', {}, context), { kind: 'departmentPlan', id: 'department' });
+  assert.deepEqual(commandTarget('organization.setDefaultDeputy', { userId: 'owner', deputyId: 'deputy', reason: '기본 대행자 지정' }, context), { kind: 'user', id: 'owner' });
   assert.deepEqual(commandTarget('performance.setWeights', { period: '2026-H2', personId: 'forged' }, context), { kind: 'plan', id: planTargetId('person', '2026-H2') });
   assert.deepEqual(commandTarget('performance.evaluatePerson', { period: '2026-H2', personId: 'reviewed' }, context), { kind: 'plan', id: planTargetId('reviewed', '2026-H2') });
   assert.deepEqual(commandTarget('performance.saveHalf', { period: '2026-H2', taskId: 'task' }, context), { kind: 'halfPerformance', id: halfPerformanceTargetId('person', 'task', '2026-H2') });

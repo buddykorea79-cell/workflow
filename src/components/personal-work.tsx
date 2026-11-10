@@ -25,6 +25,7 @@ import { deadlineState } from '@/lib/task-deadline';
 import { definitionState, executionStatus } from '@/lib/status-labels';
 import { formatDate, formatDateFull as formatDeadline, formatDateTimeFull, isPastDate } from '@/lib/date-format';
 import { activeTaskDelegations, canActAsDeputy } from '@/lib/delegations';
+import { getDefaultDeputy } from '@/lib/default-deputy';
 import { DeputyRequestFields, TaskDelegationSection } from './delegation-fields';
 import { deputyPayload, initialDeputyDraft, validDeputyDraft } from '@/lib/delegation-draft';
 import { DateInput } from './date-input';
@@ -404,6 +405,8 @@ function TaskEditor({ task, workspace: w, command: executeCommand, onClose, onWo
   const editable = mayEdit && mode === 'edit' && !historyViewing;
   const isDeputy = canActAsDeputy(w, w.currentUser, task, undefined, new Date(w.serverTime));
   const deputies = activeTaskDelegations(w, task, undefined, new Date(w.serverTime));
+  const taskOwner = w.users.find(user => user.id === task.primaryId);
+  const defaultDeputy = taskOwner && getDefaultDeputy(w, taskOwner, new Date(w.serverTime));
   const canRecord = task.primaryId === w.currentUser.id || task.supportIds.includes(w.currentUser.id) || canActAsDeputy(w, w.currentUser, task, 'task.record', new Date(w.serverTime));
   const mayRecord = !unavailable && w.currentUser.role !== 'head' && (canRecord || w.currentUser.role === 'admin') && task.status !== 'archived' && !task.deletedAt && isRegistered(task, w);
   const recordsEditable = mayRecord && mode === 'records' && !historyViewing;
@@ -641,7 +644,8 @@ function TaskEditor({ task, workspace: w, command: executeCommand, onClose, onWo
             <ReadField label="반복 주기" value={frequencyNames[frequency]} />
           </>}
         </div>
-        <div className="pw-facts"><div><span>담당자</span><strong>{w.users.find(user => user.id === task.primaryId)?.name || '배정 대기'}</strong></div><div><span>소속 부서</span><strong>{w.departments.find(dept => dept.id === task.departmentId)?.name || '부서'}</strong></div><div><span>업무대행</span><strong>{deputies.length ? deputies.map(item => w.users.find(user => user.id === item.toId)?.name || '대행자').join(', ') : '현재 대행자 없음'}</strong></div></div>
+        <div className="pw-facts"><div><span>담당자</span><strong>{w.users.find(user => user.id === task.primaryId)?.name || '배정 대기'}</strong></div><div><span>소속 부서</span><strong>{w.departments.find(dept => dept.id === task.departmentId)?.name || '부서'}</strong></div><div><span>{deputies.length ? '현재 업무대행' : '기본 대행자'}</span><strong>{deputies.length ? deputies.map(item => w.users.find(user => user.id === item.toId)?.name || '대행자').join(', ') : defaultDeputy?.name || '미지정'}</strong></div></div>
+        {!deputies.length && defaultDeputy && <p className="pw-form-note">기본 대행자 지정 정보입니다. 실제 업무대행은 기간을 정하고 부서장 승인을 받은 뒤 시작합니다.</p>}
         {editable ? <Field name="description" label="업무 설명"><textarea rows={7} maxLength={20000} value={description} onChange={e => { setDescription(e.target.value); setSaved(false); }} /></Field> : <ReadField label="업무 설명" value={description} />}
         <TaskDescriptionFiles workspace={w} taskId={task.id} title={title} description={description} attachmentIds={descriptionAttachmentIds} onAttachmentsChange={ids => { if (unavailableRef.current) return; setDescriptionAttachmentIds(ids); setSaved(false); }} onDescriptionChange={value => { if (unavailableRef.current) return; setDescription(value); setSaved(false); }} onWorkspace={next => { if (!unavailableRef.current) onWorkspace?.(next); }} onBusyChange={setUploadBusy} disabled={!editable}/>
         {editable ? <TaskAssignmentFields workspace={w} primaryId={task.primaryId} departmentId={task.departmentId} supportIds={supportIds} cooperationDepartmentIds={cooperationDepartmentIds} onSupportChange={ids => { setSupportIds(ids); setSaved(false); }} onDepartmentsChange={ids => { setCooperationDepartmentIds(ids); setSaved(false); }}/> : <ReadField label="협업·지원" value={participants.support}/>}

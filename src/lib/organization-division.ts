@@ -1,6 +1,7 @@
 import type { User, WorkspaceData } from './types';
 import { activeTaskDelegations } from './delegations';
 import { commonPublished } from './common-approval';
+import { getDefaultDeputy } from './default-deputy';
 
 /** Organization-wide assignment titles only. Never include task bodies or file metadata. */
 export interface OrganizationDivisionReadModel {
@@ -13,6 +14,7 @@ export interface OrganizationDivisionDepartment {
 }
 export interface OrganizationDivisionPerson {
   id: string; name: string; team: string;
+  defaultDeputy?: { id: string; name: string; team: string };
   units: { id: string; title: string; tasks: { id: string; title: string; delegates: { id: string; name: string; team: string; startsAt: string; endsAt: string }[] }[] }[];
 }
 export interface OrganizationDivisionFilters { departmentId?: string; team?: string; name?: string }
@@ -36,10 +38,12 @@ export function buildOrganizationDivision(state: WorkspaceData, now = new Date()
       const personIds = [...new Set([...departmentUnits.map(unit => unit.ownerId), ...departmentTasks.map(task => task.primaryId)])];
       const people = personIds.map(personId => {
         const source = state.users.find(user => user.id === personId);
+        const defaultDeputy = source && getDefaultDeputy(state, source, now);
         const ownTasks = departmentTasks.filter(task => task.primaryId === personId);
         const ownUnitIds = [...new Set([...departmentUnits.filter(unit => unit.ownerId === personId).map(unit => unit.id), ...ownTasks.map(task => task.unitId)])];
         return {
           id: personId, name: source?.name || '이전 담당자', team: source?.departmentId === department.id ? source.team : '소속 확인 필요',
+          ...(defaultDeputy ? { defaultDeputy: { id: defaultDeputy.id, name: defaultDeputy.name, team: defaultDeputy.team } } : {}),
           units: ownUnitIds.map(unitId => {
             const unit = departmentUnits.find(item => item.id === unitId)!;
             return {
@@ -80,6 +84,6 @@ export function filterOrganizationDivision(model: OrganizationDivisionReadModel,
 export function organizationDivisionRows(model: OrganizationDivisionReadModel): OrganizationDivisionRow[] {
   return model.departments.flatMap(department => department.people.flatMap(person => person.units.flatMap(unit => (unit.tasks.length ? unit.tasks : [null]).map(task => ({
     departmentId: department.id, department: department.name, personId: person.id, person: person.name, team: person.team,
-    unitId: unit.id, unit: unit.title, taskId: task?.id || '', task: task?.title || '등록된 세부업무 없음', delegate: task?.delegates.map(delegate => delegate.name).join(', ') || '—',
+    unitId: unit.id, unit: unit.title, taskId: task?.id || '', task: task?.title || '등록된 세부업무 없음', delegate: task?.delegates.map(delegate => delegate.name).join(', ') || (person.defaultDeputy ? `${person.defaultDeputy.name} (기본)` : '—'),
   })))));
 }

@@ -52,8 +52,16 @@ test('basic personal detail is immediately rendered without loading inactive tab
   const html = renderToStaticMarkup(createElement(personal.TaskPanel, { workspace, taskId: task.id, command, onClose() {}, routedTab: 'overview' }));
   assert.match(html, /data-field-label="업무 설명"/);
   assert.match(html, /업무대행 지정/);
-  assert.match(html, /현재 대행자 없음|현재 이 업무를 대행/);
+  assert.match(html, /<span>기본 대행자<\/span><strong>미지정<\/strong>/);
   assert.doesNotMatch(html, /lazy-screen|화면을 불러오고 있습니다/);
+  const owner = workspace.users.find(person => person.id === task.primaryId)!;
+  const deputy = workspace.users.find(person => person.id === 'u-budget-member')!;
+  owner.defaultDeputyId = deputy.id;
+  const assigned = renderToStaticMarkup(createElement(personal.TaskPanel, { workspace, taskId: task.id, command, onClose() {}, routedTab: 'overview' }));
+  assert.ok(assigned.includes(`<span>기본 대행자</span><strong>${deputy.name}</strong>`));
+  assert.match(assigned, /실제 업무대행은 기간을 정하고 부서장 승인을 받은 뒤 시작합니다/);
+  assert.doesNotMatch(assigned, /<span>현재 업무대행<\/span>|class="delegation-current"|lazy-screen|화면을 불러오고 있습니다/);
+  assert.equal(componentRequire.cache[modulePath('delegation-work')], undefined);
 });
 
 test('opening the performance route loads actual performance content without replacing the detail tabs', async () => {

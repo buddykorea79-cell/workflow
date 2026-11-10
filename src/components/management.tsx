@@ -6,9 +6,10 @@ import { createLazyScreen } from './lazy-screen';
 import { useState } from 'react';
 import { ArrowRight, ArrowUpRight, Building2, CalendarDays, Check, CheckCircle2, ChevronDown, ChevronRight, ClipboardCheck, FileText, GitBranch, Layers3, ListChecks, Plus, Search, Send, ShieldCheck, Users } from 'lucide-react';
 import type { CommonTask, CommonDistribution, Performance, User, Workspace } from '@/lib/types';
-import { Badge, Button, EmptyState, Field, Modal, Progress, Tabs, useTabs } from './ui';
+import { Badge, Button, EmptyState, Field, Modal, Progress, Tabs, useTabs, type CommandFn } from './ui';
 import './management.css';
 import { OrganizationEditor } from './organization-editor';
+import { DefaultDeputyEditor, defaultDeputyLabel, defaultDeputyNotice } from './default-deputy-editor';
 import { useNotificationFocus } from './notification-focus';
 import { useUnsavedNavigation } from './unsaved-changes';
 import { isOrganizationUserActive } from '@/lib/organization-management';
@@ -21,7 +22,6 @@ const AdminBudgetCatalog = budgetScreen.Component;
 AdminIntegrations.displayName = 'AdminIntegrations';
 AdminBudgetCatalog.displayName = 'AdminBudgetCatalog';
 
-type CommandFn = (type: string, payload: Record<string, unknown>) => Promise<boolean>;
 type Props = { workspace: Workspace; command: CommandFn };
 type TaskProps = Props & { onOpenTask: (id: string) => void };
 
@@ -40,13 +40,14 @@ export function OrganizationView({ workspace: w, command, focusId, focusToken }:
   const [query, setQuery] = useState('');
   const [profile, setProfile] = useState<User | null>(null);
   const [editor, setEditor] = useState<'department' | 'user' | User | null>(null);
+  const [deputyEditor, setDeputyEditor] = useState<User | null>(null);
   const departments = w.departments.filter(department => isAdmin || department.id === w.currentUser.departmentId);
   const scopedUsers = w.users.filter(user => isAdmin || user.departmentId === w.currentUser.departmentId);
   const focusProps = useNotificationFocus(focusId, focusToken, id => {
     const user = scopedUsers.find(item => item.id === id);
     if (!user) return;
     setDepartmentId(user.departmentId); setRole('all'); setQuery('');
-    setProfile(null); setEditor(null);
+    setProfile(null); setEditor(null); setDeputyEditor(null);
     return `person:${user.id}`;
   });
   const selectedDepartment = isAdmin ? departmentId : w.currentUser.departmentId;
@@ -72,12 +73,13 @@ export function OrganizationView({ workspace: w, command, focusId, focusToken }:
         <header><div><Building2 size={18} /><h2>{department.name}</h2></div><span>{members.length}명 표시</span></header>
         {groups.map(group => <section className="management-team-group" key={group.key} aria-label={`${department.name} ${group.title}`}>
           <header><h3>{group.title}</h3><span>{group.members.length}명</span></header>
-          <div className="table-wrap"><table className="data-table"><thead><tr><th>구성원 / ID</th><th>팀 / 직위</th><th>권한</th><th>이메일 / 전화번호</th><th>상태</th></tr></thead><tbody>{[...group.members].sort((a, b) => memberOrder[a.role] - memberOrder[b.role] || a.name.localeCompare(b.name, 'ko')).map(user => <tr key={user.id} {...focusProps(`person:${user.id}`)}><td><button className="management-user-link" onClick={() => setProfile(user)}><span className="management-person-avatar">{user.name.slice(0, 1)}</span><span><strong>{user.name}</strong><small>{user.id}</small></span></button></td><td>{user.team}<small>{user.title}</small></td><td><span>{roleNames[user.role]}</span></td><td><span>{user.email || '미등록'}</span><small>{user.phone || '미등록'}</small></td><td><Badge tone={isOrganizationUserActive(user, new Date(w.serverTime)) ? 'success' : 'outline'}>{isOrganizationUserActive(user, new Date(w.serverTime)) ? '활성' : '비활성'}</Badge></td></tr>)}</tbody></table></div>
+          <div className="table-wrap"><table className="data-table"><thead><tr><th>구성원 / ID</th><th>팀 / 직위</th><th>권한</th><th>이메일 / 전화번호</th><th>기본 대행자</th><th>상태</th></tr></thead><tbody>{[...group.members].sort((a, b) => memberOrder[a.role] - memberOrder[b.role] || a.name.localeCompare(b.name, 'ko')).map(user => <tr key={user.id} {...focusProps(`person:${user.id}`)}><td><button className="management-user-link" onClick={() => setProfile(user)}><span className="management-person-avatar">{user.name.slice(0, 1)}</span><span><strong>{user.name}</strong><small>{user.id}</small></span></button></td><td>{user.team}<small>{user.title}</small></td><td><span>{roleNames[user.role]}</span></td><td><span>{user.email || '미등록'}</span><small>{user.phone || '미등록'}</small></td><td>{defaultDeputyLabel(w, user)}</td><td><Badge tone={isOrganizationUserActive(user, new Date(w.serverTime)) ? 'success' : 'outline'}>{isOrganizationUserActive(user, new Date(w.serverTime)) ? '활성' : '비활성'}</Badge></td></tr>)}</tbody></table></div>
         </section>)}
       </section>;
     })}</div>
     {!users.length && <EmptyState title="검색 결과가 없습니다." description="이름이나 필터를 바꿔 다시 찾아보세요." />}<p className="management-caption"><ShieldCheck size={15} />이름, 연락처, 부서와 권한은 시연을 위한 가상 데이터입니다.</p>
-    {visibleProfile && <Modal title="구성원 정보" onClose={() => setProfile(null)}><div className="management-profile"><div className="management-profile-identity"><span className="management-person-avatar">{visibleProfile.name.slice(0, 1)}</span><div><h2>{visibleProfile.name}</h2><p>{visibleProfile.title}</p></div><Badge>{roleNames[visibleProfile.role]}</Badge></div><dl><div><dt>ID</dt><dd>{visibleProfile.id}</dd></div><div><dt>부서</dt><dd>{deptName(w, visibleProfile.departmentId)}</dd></div><div><dt>팀</dt><dd>{visibleProfile.team}</dd></div><div><dt>이메일</dt><dd>{visibleProfile.email || '미등록'}</dd></div><div><dt>전화번호</dt><dd>{visibleProfile.phone || '미등록'}</dd></div></dl></div><div className="form-actions">{isAdmin && <Button onClick={() => { setEditor(visibleProfile); setProfile(null); }}>인사정보 변경</Button>}<Button variant="secondary" onClick={() => setProfile(null)}>닫기</Button></div></Modal>}
+    {visibleProfile && <Modal title="구성원 정보" onClose={() => setProfile(null)}><div className="management-profile"><div className="management-profile-identity"><span className="management-person-avatar">{visibleProfile.name.slice(0, 1)}</span><div><h2>{visibleProfile.name}</h2><p>{visibleProfile.title}</p></div><Badge>{roleNames[visibleProfile.role]}</Badge></div><dl><div><dt>ID</dt><dd>{visibleProfile.id}</dd></div><div><dt>부서</dt><dd>{deptName(w, visibleProfile.departmentId)}</dd></div><div><dt>팀</dt><dd>{visibleProfile.team}</dd></div><div><dt>이메일</dt><dd>{visibleProfile.email || '미등록'}</dd></div><div><dt>전화번호</dt><dd>{visibleProfile.phone || '미등록'}</dd></div><div><dt>기본 대행자</dt><dd>{defaultDeputyLabel(w, visibleProfile)}</dd></div></dl><p className="muted">{defaultDeputyNotice}</p></div><div className="form-actions">{isAdmin && <><Button variant="secondary" disabled={!isOrganizationUserActive(visibleProfile, new Date(w.serverTime))} title="활성 구성원의 기본 대행자를 변경합니다." onClick={() => { setDeputyEditor(visibleProfile); setProfile(null); }}>기본 대행자 변경</Button><Button onClick={() => { setEditor(visibleProfile); setProfile(null); }}>인사정보 변경</Button></>}<Button variant="secondary" onClick={() => setProfile(null)}>닫기</Button></div></Modal>}
+    {deputyEditor && <DefaultDeputyEditor key={deputyEditor.id} workspace={w} command={command} person={deputyEditor} onClose={() => { setProfile(deputyEditor); setDeputyEditor(null); }} />}
     {editor && <OrganizationEditor key={typeof editor === 'object' ? editor.id : editor} workspace={w} command={command} mode={editor} onClose={() => setEditor(null)} />}
   </div>;
 }

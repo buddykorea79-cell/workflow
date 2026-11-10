@@ -10,7 +10,7 @@ const labels: ValidationLabels = {
   dueDate: '마감일', startDate: '시작일', startsAt: '시작 시각', endsAt: '종료 시각',
   unitId: '단위업무', unitIds: '단위업무', taskId: '세부업무', taskIds: '세부업무',
   primaryId: '담당자', supportIds: '지원 담당자', reviewerId: '검토 담당자',
-  departmentId: '부서', departmentIds: '대상 부서', ownerId: '담당자', fromId: '인계자', toId: '새 담당자',
+  departmentId: '부서', departmentIds: '대상 부서', ownerId: '담당자', fromId: '인계자', toId: '새 담당자', userId: '구성원', deputyId: '기본 대행자',
   reason: '사유', comment: '의견', content: '내용', evidence: '근거', url: '주소',
   period: '평가 기간', month: '실적 월', frequency: '반복 주기', priority: '우선순위', importance: '중요도',
   workflow: '절차', steps: '절차 일정', requiredSteps: '공통 필수 절차', role: '역할', roleIds: '변경할 역할',

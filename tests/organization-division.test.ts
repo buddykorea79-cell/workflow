@@ -4,8 +4,28 @@ import { createSeed } from '../src/lib/seed';
 import { canReadAttachment, executeCommand, getWorkspace } from '../src/lib/domain';
 import { buildOrganizationDivision, filterOrganizationDivision, organizationDivisionRows } from '../src/lib/organization-division';
 import type { Delegation } from '../src/lib/types';
+import { canActAsDeputy } from '../src/lib/delegations';
 
 const now = new Date('2026-11-06T03:00:00Z');
+
+test('default deputy appears as designated metadata without activating execution or overriding approved deputies', () => {
+  const state = createSeed(now), task = state.tasks.find(item => item.id === 'task-data')!;
+  const owner = state.users.find(item => item.id === task.primaryId)!;
+  const deputy = state.users.find(item => item.id === 'u-support-lead')!;
+  owner.defaultDeputyId = deputy.id;
+  const before = structuredClone(state);
+  const model = buildOrganizationDivision(state, now);
+  const person = model.departments.flatMap(department => department.people).find(item => item.id === owner.id)!;
+  assert.deepEqual(person.defaultDeputy, { id: deputy.id, name: deputy.name, team: deputy.team });
+  assert.equal(organizationDivisionRows(model).find(row => row.taskId === task.id)?.delegate, `${deputy.name} (기본)`);
+  assert.equal(canActAsDeputy(state, deputy, task, undefined, now), false);
+  assert.deepEqual(state, before);
+  state.delegations.push({ id: 'current', taskId: task.id, fromId: owner.id, toId: 'u-doyun', status: 'approved', approvedBy: 'u-support-head', startsAt: '2026-11-01T00:00:00Z', endsAt: '2026-12-01T00:00:00Z', actions: ['run.note'] });
+  assert.equal(organizationDivisionRows(buildOrganizationDivision(state, now)).find(row => row.taskId === task.id)?.delegate, state.users.find(item => item.id === 'u-doyun')!.name);
+  state.delegations = [];
+  deputy.active = false;
+  assert.equal(organizationDivisionRows(buildOrganizationDivision(state, now)).find(row => row.taskId === task.id)?.delegate, '—');
+});
 
 test('all roles can read foreign assignment titles without gaining task bodies or attachment access', () => {
   const state = createSeed(now);

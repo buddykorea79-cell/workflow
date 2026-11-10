@@ -8,7 +8,7 @@ export type DefinitionStatus = 'draft' | 'review' | 'confirmed' | 'revision' | '
 export type RunStatus = 'scheduled' | 'in_progress' | 'review' | 'completed' | 'paused';
 export type HandoverStatus = 'approval' | 'acceptance' | 'changes_requested' | 'scheduled' | 'completed' | 'cancelled';
 export type Frequency = 'once' | 'monthly' | 'quarterly' | 'half_yearly' | 'yearly';
-export interface User extends RevisionedEntity { id: string; name: string; initials: string; departmentId: string; team: string; role: OrgRole; title: string; color: string; active: boolean; endsAt?: string; email?: string; phone?: string; commonTaskPermission?: boolean }
+export interface User extends RevisionedEntity { id: string; name: string; initials: string; departmentId: string; team: string; role: OrgRole; title: string; color: string; active: boolean; endsAt?: string; email?: string; phone?: string; defaultDeputyId?: string; commonTaskPermission?: boolean }
 export interface Department extends RevisionedEntity { id: string; name: string; shortName: string }
 export interface UserIdentity { id: string; name: string; departmentId: string; team: string }
 export interface WorkDivisionSnapshot { units: Unit[]; tasks: (TaskVersion & { id: string; code: string; status: DefinitionStatus; commonId?: string })[]; members: UserIdentity[] }

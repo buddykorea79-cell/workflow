@@ -11,7 +11,7 @@ import type { Delegation, Task, Workspace } from '@/lib/types';
 import { canReviewTaskDelegation, delegationStatus, requestableDelegationTasks } from '@/lib/delegations';
 import { Badge, Button, EmptyState, Field, Modal, validateTextFields, type CommandFn } from './ui';
 import { DeputyRequestFields } from './delegation-fields';
-import { delegationLabel, delegationPersonName as personName, deputyPayload, initialDeputyDraft, validDeputyDraft } from '@/lib/delegation-draft';
+import { delegationLabel, delegationPersonName as personName, deputyPayload, deputyRequestCandidates, initialDeputyDraft, validDeputyDraft } from '@/lib/delegation-draft';
 export { DeputyRequestFields, TaskDelegationSection } from './delegation-fields';
 export { delegationLabel, deputyPayload, initialDeputyDraft, validDeputyDraft, type DeputyDraft } from '@/lib/delegation-draft';
 import { DelegationTaskSelection } from './delegation-task-selection';
@@ -28,7 +28,7 @@ export function DelegationRequestDialog({ workspace, command, task, onClose }: P
   const ownerTasks = candidates.filter(item => item.primaryId === fromId);
   const selectedTasks = ownerTasks.filter(item => selectedIds.includes(item.id));
   const selectedOwner = owners.find(person => person.id === fromId);
-  const [draft, setDraft] = useState(() => initialDeputyDraft(workspace));
+  const [draft, setDraft] = useState(() => initialDeputyDraft(workspace, fromId, selectedTasks.map(item => item.reviewerId)));
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
   const [receipt, setReceipt] = useState('');
@@ -40,7 +40,7 @@ export function DelegationRequestDialog({ workspace, command, task, onClose }: P
   const { requestNavigation, clearDraft } = useUnsavedNavigation();
   const close = () => { if (!busy) requestNavigation(() => { clearDraft(draftId); onClose(); }); };
   const validSelection = selectedTasks.length > 0 && selectedTasks.length === selectedIds.length && selectedTasks.length <= 300;
-  const validRecipient = !selectedTasks.some(item => item.reviewerId === draft.toId);
+  const validRecipient = deputyRequestCandidates(workspace, fromId, selectedTasks.map(item => item.reviewerId)).some(person => person.id === draft.toId);
   const changeSelection = (ids: string[]) => { setSelectedIds(ids); if (ownerTasks.some(item => ids.includes(item.id) && item.reviewerId === draft.toId)) setDraft({ ...draft, toId: '' }); };
   return <Modal title="업무대행 승인 요청" description="업무분장표에서 전체 또는 단위·세부업무를 선택한 뒤 대행자를 지정합니다." onClose={close} wide>
     <form className="form-stack" onSubmit={async event => {
@@ -51,7 +51,7 @@ export function DelegationRequestDialog({ workspace, command, task, onClose }: P
       catch { setError('요청을 처리하지 못했습니다. 잠시 후 다시 시도해 주세요.'); }
       finally { setBusy(false); }
     }}>
-      {['manager', 'admin'].includes(workspace.currentUser.role) && !task ? <Field label="업무를 맡길 원담당자"><select required value={fromId} onChange={event => { const nextId = event.target.value; sourceChangePending.current = true; requestNavigation(() => { sourceChangePending.current = false; setFromId(nextId); setSelectedIds([]); setDraft(initialDeputyDraft(workspace)); }, () => { sourceChangePending.current = false; }); }}><option value="">원담당자 선택</option>{owners.map(person => <option value={person.id} key={person.id}>{person.name} · {departmentName(workspace, person.departmentId)} · {person.team}</option>)}</select></Field> : <div className="delegation-context"><UserRound size={19}/><div><strong>원담당자 {selectedOwner?.name || '담당자'}</strong><span>{departmentName(workspace, selectedOwner?.departmentId)} · 본인이 담당하는 업무를 선택합니다.</span></div></div>}
+      {['manager', 'admin'].includes(workspace.currentUser.role) && !task ? <Field label="업무를 맡길 원담당자"><select required value={fromId} onChange={event => { const nextId = event.target.value; sourceChangePending.current = true; requestNavigation(() => { sourceChangePending.current = false; setFromId(nextId); setSelectedIds([]); setDraft(initialDeputyDraft(workspace, nextId)); }, () => { sourceChangePending.current = false; }); }}><option value="">원담당자 선택</option>{owners.map(person => <option value={person.id} key={person.id}>{person.name} · {departmentName(workspace, person.departmentId)} · {person.team}</option>)}</select></Field> : <div className="delegation-context"><UserRound size={19}/><div><strong>원담당자 {selectedOwner?.name || '담당자'}</strong><span>{departmentName(workspace, selectedOwner?.departmentId)} · 본인이 담당하는 업무를 선택합니다.</span></div></div>}
       <DelegationTaskSelection workspace={workspace} tasks={ownerTasks} selectedIds={selectedIds} onChange={changeSelection}/>
       {selectedOwner && ownerTasks.length > 0 && <DeputyRequestFields workspace={workspace} fromId={fromId} departmentId={selectedOwner.departmentId} excludedIds={selectedTasks.map(item => item.reviewerId)} value={draft} onChange={setDraft}/>}
       <p className="delegation-note">선택한 {selectedTasks.length}개 세부업무는 하나의 승인 요청으로 묶입니다. 부서장이 전체 내용을 검토한 뒤 함께 승인하며 원본 업무·단위업무는 이동하거나 복제하지 않습니다.</p>

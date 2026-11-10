@@ -18,7 +18,7 @@ export async function exportOrganizationDivisionXlsx(model: OrganizationDivision
   sheet.columns = [{ width: 22 }, { width: 38 }, { width: 67 }, { width: 28 }];
   sheet.mergeCells('A1:D1'); sheet.getCell('A1').value = '온이음 · 업무분장표'; sheet.getRow(1).height = 38; sheet.getCell('A1').font = { name: '맑은 고딕', size: 20, bold: true, color: { argb: colors.ink } };
   sheet.mergeCells('A2:D2'); sheet.getCell('A2').value = filterLabel(model, filters); sheet.getRow(2).height = 27;
-  sheet.mergeCells('A3:D3'); sheet.getCell('A3').value = `조회 ${exportDate(model)} · 현재 승인·기간이 유효한 업무대행자만 표시`; sheet.getRow(3).height = 27;
+  sheet.mergeCells('A3:D3'); sheet.getCell('A3').value = `조회 ${exportDate(model)} · (기본)은 지정 정보이며, 실제 업무대행은 승인된 기간에만 적용`; sheet.getRow(3).height = 27;
   for (const number of [2, 3]) sheet.getRow(number).font = { name: '맑은 고딕', size: 11, color: { argb: colors.muted } };
   const header = sheet.getRow(4); header.values = columns; header.height = 30; header.font = { name: '맑은 고딕', size: 12, bold: true, color: { argb: colors.ink } }; header.alignment = { vertical: 'middle' }; header.eachCell(cell => { cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: colors.pale } }; });
   const rows = organizationDivisionRows(model);
@@ -58,7 +58,7 @@ export async function exportOrganizationDivisionPdf(model: OrganizationDivisionR
     doc.addPage(); pageNumber++;
     text('온이음 · 업무분장표', left, 27, 19);
     doc.fontSize(9).fillColor(`#${colors.muted}`).text(filterLabel(model, filters), left, 55, { width: right - left, height: 25, ellipsis: true });
-    text(`조회 ${exportDate(model)}`, left, 82, 9, colors.muted);
+    text(`조회 ${exportDate(model)} · (기본)은 지정 정보이며 실제 업무대행은 승인된 기간에만 적용`, left, 82, 9, colors.muted);
     text(`${pageNumber}`, right - 18, doc.page.height - 25, 9, colors.muted);
     y = 106; currentDepartment = department;
     doc.rect(left, y, right - left, 28).fill('#EFF5FF'); text(`${department}${continued ? ' · 계속' : ''}`, left + 10, y + 6, 11.5, colors.blue); y += 28;

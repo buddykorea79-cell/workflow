@@ -8,7 +8,7 @@ export const COMMAND_TARGET_RULES = {
   'transfer.approve': 'transfer', 'transfer.reject': 'transfer', 'transfer.cancel': 'transfer',
   'department.confirm': 'departmentPlan', 'department.reopen': 'departmentPlan',
   'unit.create': null, 'unit.update': 'unit', 'unit.delete': 'unit', 'unit.restore': 'unit', 'work.import': null,
-  'organization.departmentCreate': null, 'organization.userCreate': null, 'organization.userUpdate': 'user',
+  'organization.departmentCreate': null, 'organization.userCreate': null, 'organization.userUpdate': 'user', 'organization.setDefaultDeputy': 'user',
   'common.create': null, 'common.resubmit': 'common', 'common.approve': 'common', 'common.reject': 'common',
   'task.create': null, 'task.delete': 'task', 'task.restore': 'task', 'task.record': 'task',
   'task.procedure.replace': 'task', 'task.configure': 'task', 'task.setProgress': null,

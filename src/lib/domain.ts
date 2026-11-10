@@ -23,7 +23,8 @@ import { canActAsDeputy } from './delegations';
 import { executeDelegationCommand, prepareTaskDelegation, storeTaskDelegation } from './delegation-commands';
 import { organizationDivisionForUser } from './organization-division';
 import { withReplacedRunProcedure } from './procedure-replacement';
-import { organizationIdentityIssue, organizationUserChangeIssue } from './organization-management';
+import { isOrganizationUserActive, organizationIdentityIssue, organizationUserChangeIssue } from './organization-management';
+import { defaultDeputyCandidates } from './default-deputy';
 import { canCreateCommon, canReviewCommon, commonApprovalSnapshot, commonOriginDepartment, commonPublished } from './common-approval';
 import { canonicalWorkImport, validateCompletedWorkImportReplay, validateWorkImport, workImportNeutralCard, type WorkImportInput } from './work-import';
 import type { Attachment, AuditEvent, Command, CommandTargetKind, CommonApprovalRequest, CommonTask, CommonDistribution, DepartmentDivisionReadModel, Handover, Performance, PerformanceSubmissionStatus, Run, Source, TargetRevisionChange, Task, Unit, User, WorkflowStep, Workspace, WorkspaceData } from './types';
@@ -608,6 +609,22 @@ export function executeCommand(state: WorkspaceData, userId: string, raw: unknow
       if (state.departments.some(department => department.name.trim().toLowerCase() === input.name.toLowerCase() || department.shortName.trim().toLowerCase() === input.shortName.toLowerCase())) fail(409, 'DUPLICATE_DEPARTMENT', '같은 부서 이름 또는 짧은 이름이 있습니다.');
       const department = { ...input, id: id('dept') }; state.departments.push(department);
       targetId = department.id; departmentId = department.id; detail = `${department.name} · 부서장과 부서 담당자를 등록해 주세요.`; title = '조직 등록'; break;
+    }
+    case 'organization.setDefaultDeputy': {
+      if (user.role !== 'admin') fail(403, 'ADMIN_REQUIRED', '기관 관리자만 기본 대행자를 지정할 수 있습니다.');
+      const input = parse(z.object({ userId: text.max(150), deputyId: text.max(150).nullable(), reason: text.max(2000) }).strict(), p);
+      const member = state.users.find(item => item.id === input.userId);
+      if (!member) return fail(404, 'USER_NOT_FOUND', '기본 대행자를 지정할 구성원을 찾을 수 없습니다.');
+      if (!isOrganizationUserActive(member, now)) fail(409, 'DEFAULT_DEPUTY_PERSON_INACTIVE', '활성 구성원의 기본 대행자만 변경할 수 있습니다.');
+      if (input.deputyId !== null && !defaultDeputyCandidates(state, member, now).some(candidate => candidate.id === input.deputyId)) {
+        fail(422, 'DEFAULT_DEPUTY_INVALID', member.role === 'head' ? '부서장의 기본 대행자는 같은 부서의 활성 팀장 중 선택해 주세요.' : '본인과 부서장을 제외한 같은 부서의 활성 구성원을 기본 대행자로 선택해 주세요.');
+      }
+      const before = { defaultDeputyId: member.defaultDeputyId ?? null };
+      if (input.deputyId === null) delete member.defaultDeputyId;
+      else member.defaultDeputyId = input.deputyId;
+      targetId = member.id; departmentId = member.departmentId; title = input.deputyId === null ? '구성원 기본 대행자 해제' : '구성원 기본 대행자 지정';
+      detail = JSON.stringify({ reason: input.reason, before, after: { defaultDeputyId: member.defaultDeputyId ?? null } });
+      break;
     }
     case 'organization.userCreate': case 'organization.userUpdate': {
       if (user.role !== 'admin') fail(403, 'ADMIN_REQUIRED', '기관 관리자만 구성원의 등록·인사정보 변경을 처리할 수 있습니다.');

@@ -13,6 +13,20 @@ import { GET as downloadAttachment } from '../src/app/api/attachments/[id]/route
 
 const now = new Date('2026-11-06T03:00:00Z');
 
+test('Excel and PDF label default deputies as designation information', async () => {
+  const state = createSeed(now);
+  const owner = state.users.find(user => user.id === 'u-support-member')!;
+  owner.defaultDeputyId = 'u-support-lead';
+  const model = filterOrganizationDivision(buildOrganizationDivision(state, now), { departmentId: owner.departmentId, name: owner.name });
+  const name = state.users.find(user => user.id === owner.defaultDeputyId)!.name;
+  for (const format of ['xlsx', 'pdf'] as const) {
+    const bytes = format === 'xlsx' ? await exportOrganizationDivisionXlsx(model) : await exportOrganizationDivisionPdf(model);
+    const text = await attachmentText(bytes, format);
+    assert.ok(text.includes(`${name} (기본)`));
+    assert.ok(text.includes('지정 정보'));
+  }
+});
+
 async function attachmentText(bytes: Buffer, format: 'xlsx' | 'pdf') {
   if (format === 'xlsx') {
     const book = new ExcelJS.Workbook(); await book.xlsx.load(bytes as never);
