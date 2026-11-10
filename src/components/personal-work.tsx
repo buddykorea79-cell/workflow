@@ -20,6 +20,7 @@ import { AiWorkRegistrationDialog } from './ai-work-registration-dialog';
 import { directiveIssuerLabels } from '@/lib/directives';
 import { referencesForSave } from '@/lib/task-references';
 import { latestTaskRun, taskExecution } from '@/lib/common-status';
+import { currentExecutionWorkflow } from '@/lib/work-cycles';
 import { deadlineState } from '@/lib/task-deadline';
 import { definitionState, executionStatus } from '@/lib/status-labels';
 import { formatDate, formatDateFull as formatDeadline, formatDateTimeFull, isPastDate } from '@/lib/date-format';
@@ -696,7 +697,7 @@ export function ScheduleView({ workspace: w, command, onOpenTask }: ViewProps) {
   const tasks = w.tasks.filter(task => !task.deletedAt && task.status !== 'archived' && isRegistered(task, w) && (task.primaryId === w.currentUser.id || task.supportIds.includes(w.currentUser.id) || task.reviewerId === w.currentUser.id || (['head', 'admin'].includes(w.currentUser.role) && task.departmentId === w.currentUser.departmentId)));
   const events: ScheduleEvent[] = tasks.flatMap(task => {
     const execution = taskExecution(w, task);
-    const steps = (task.workflow as PlannedStep[]).filter(step => step.startDate || step.dueDate).map(step => ({ id: `${task.id}-${step.id}`, taskId: task.id, taskTitle: task.title, title: step.title, startDate: step.startDate || step.dueDate!, dueDate: step.dueDate || step.startDate!, kind: 'step' as const, done: !!step.done, role: step.role }));
+    const steps = currentExecutionWorkflow(w, task).filter(step => step.startDate || step.dueDate).map(step => ({ id: `${task.id}-${step.id}`, taskId: task.id, taskTitle: task.title, title: step.title, startDate: step.startDate || step.dueDate!, dueDate: step.dueDate || step.startDate!, kind: 'step' as const, done: !!step.done, role: step.role }));
     return [...steps, { id: `${task.id}-due`, taskId: task.id, taskTitle: task.title, title: task.title, startDate: task.dueDate, dueDate: task.dueDate, kind: 'task' as const, done: executionStatus(task, execution.run, execution.progress, execution.nextRole).key === 'completed' }];
   }).filter(event => kind === 'all' || event.kind === kind);
   const [year, monthNumber] = month.split('-').map(Number);
@@ -704,7 +705,7 @@ export function ScheduleView({ workspace: w, command, onOpenTask }: ViewProps) {
   const offset = first.getUTCDay();
   const days = Array.from({ length: 42 }, (_, index) => new Date(Date.UTC(year, monthNumber - 1, index - offset + 1)).toISOString().slice(0, 10));
   const daily = events.filter(event => event.startDate <= selectedDay && event.dueDate >= selectedDay);
-  const unscheduled = tasks.flatMap(task => (task.workflow as PlannedStep[]).filter(step => !step.startDate && !step.dueDate && !step.done).map(step => ({ task, step })));
+  const unscheduled = tasks.flatMap(task => currentExecutionWorkflow(w, task).filter(step => !step.startDate && !step.dueDate && !step.done).map(step => ({ task, step })));
   const monthEvents = events.filter(event => event.startDate.slice(0, 7) <= month && event.dueDate.slice(0, 7) >= month);
   const openTask = (id: string) => onOpenTask ? onOpenTask(id) : setDetailId(id);
   const changeMonth = (change: number) => { const next = new Date(Date.UTC(year, monthNumber - 1 + change, 1)).toISOString().slice(0, 7); setMonth(next); setSelectedDay(next === today.slice(0, 7) ? today : `${next}-01`); };

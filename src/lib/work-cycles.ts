@@ -1,3 +1,4 @@
+import { taskExecution } from './common-status';
 import type { Run, Task, WorkflowStep, WorkspaceData } from './types';
 
 /** Newest insertion wins equal creation times, as in the existing run read model. */
@@ -16,6 +17,13 @@ export function runWorkflow(task: Task, run: Run): WorkflowStep[] {
     const config = definition?.find(item => item.id === step.stepId);
     return { ...(config ? structuredClone(config) : { id: step.stepId, title: step.title, role: step.role, description: '', output: '', required: true, dependsOn: [], checklist: step.checklist.map(item => item.title) }), title: step.title, role: step.role, done: step.status === 'completed' };
   });
+}
+
+/** Calendars follow the current execution, even after a responsibility-only version change.
+ * Keep this separate from the editable task definition and completed older cycles. */
+export function currentExecutionWorkflow(state: Pick<WorkspaceData, 'runs'>, task: Task): WorkflowStep[] {
+  const { run } = taskExecution(state, task);
+  return run ? runWorkflow(task, run) : task.workflow;
 }
 
 /** Reuse the most recent confirmed definition; unpublished revisions are not execution templates. */

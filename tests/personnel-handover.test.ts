@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
 import { createSeed, createRun } from '../src/lib/seed';
 import { DomainError, executeCommand, getWorkspace } from '../src/lib/domain';
+import { currentExecutionWorkflow } from '../src/lib/work-cycles';
 import type { WorkspaceData } from '../src/lib/types';
 
 const now = new Date('2026-11-05T03:00:00Z');
@@ -175,6 +176,73 @@ test('personnel handover: active run content and completed step authors survive 
   assert.deepEqual(run.steps, before.steps); assert.deepEqual(run.notes, before.notes);
   assert.equal(run.dueDate, before.dueDate); assert.deepEqual(run.workflowSnapshot, before.workflowSnapshot);
 });
+
+for (const scenario of ['newly configured task', 'existing confirmed task'] as const) {
+  test(`personnel handover: successor calendar retains the scheduled workflow for ${scenario}`, () => {
+    const state = fixture();
+    const successorId = 'u-it-planning-member-1';
+    let taskId = 'task-data';
+    if (scenario === 'newly configured task') {
+      dispatch(state, sourceId, 'task.create', {
+        title: '품질진단 인계 일정 검증', description: '진단 자료를 작성하고 검토합니다.',
+        unitId: 'unit-data', primaryId: sourceId, supportIds: [], dueDate: '2026-12-31', frequency: 'yearly',
+        workflow: [
+          { id: 'prepare', title: '진단 자료 작성', role: 'primary', description: '자료를 작성합니다.', output: '', required: true, dependsOn: [], checklist: [] },
+          { id: 'review', title: '진단 결과 검토', role: 'reviewer', description: '결과를 검토합니다.', output: '', required: true, dependsOn: ['prepare'], checklist: [] },
+        ],
+      });
+      taskId = state.tasks[0].id;
+    }
+    dispatch(state, sourceId, 'task.configure', { taskId, description: '검토한 AI 설명을 적용한 뒤 절차별 일정을 등록합니다.' });
+    const task = state.tasks.find(item => item.id === taskId)!;
+    assert.ok(task.versions.length > 0, 'handover must preserve the existing confirmed definition history');
+    const previousRun = createRun(task, task.frequency === 'quarterly' ? '2025-Q4' : '2025', '2025-01-01T03:00:00Z');
+    previousRun.id = `completed-before-${taskId}`;
+    previousRun.status = 'completed';
+    previousRun.completedAt = '2025-12-31T03:00:00Z';
+    previousRun.steps.forEach(step => {
+      step.status = 'completed'; step.completedBy = step.role === 'reviewer' ? headId : sourceId;
+      step.completedAt = previousRun.completedAt;
+      step.checklist.forEach(item => { item.done = true; item.completedBy = step.completedBy; item.completedAt = previousRun.completedAt; });
+    });
+    const completedBefore = structuredClone(previousRun);
+    const current = state.runs.find(run => run.taskId === taskId && run.status !== 'completed');
+    const scheduledSteps = task.workflow.map((step, index) => ({
+      stepId: step.id, startDate: `2026-11-${11 + index}`, dueDate: `2026-11-${11 + index}`, scheduleDetails: `${step.title} 인계 일정`,
+    }));
+    dispatch(state, sourceId, 'run.schedule', {
+      taskId, ...(current ? { runId: current.id } : {}), title: '인수인계 검증 회차',
+      startDate: scheduledSteps[0].startDate, dueDate: scheduledSteps.at(-1)!.dueDate, scheduleDetails: '날짜와 진행 기록을 후임에게 유지합니다.', steps: scheduledSteps,
+    });
+    state.runs.push(previousRun);
+    const taskBefore = structuredClone(state.tasks.find(item => item.id === taskId)!);
+    const runBefore = structuredClone(state.runs.find(run => run.taskId === taskId && run.status !== 'completed')!);
+    const workspaceBefore = getWorkspace(state, sourceId, now);
+    const calendarBefore = workspaceBefore.tasks.find(item => item.id === taskId)!;
+    const visibleWorkflowBefore = currentExecutionWorkflow(workspaceBefore, calendarBefore);
+    assert.equal(visibleWorkflowBefore.filter(step => step.startDate && step.dueDate).length, scheduledSteps.length);
+
+    dispatch(state, sourceId, 'transfer.request', request({ toId: successorId, taskIds: [taskId] }));
+    dispatch(state, headId, 'transfer.approve', { transferId: latest(state).id });
+
+    const taskAfter = state.tasks.find(item => item.id === taskId)!;
+    const runAfter = state.runs.find(run => run.id === runBefore.id)!;
+    const workspaceAfter = getWorkspace(state, successorId, now);
+    const calendarAfter = workspaceAfter.tasks.find(item => item.id === taskId)!;
+    assert.equal(taskAfter.primaryId, successorId); assert.equal(runAfter.primaryId, successorId);
+    assert.ok(taskAfter.version > taskBefore.version);
+    assert.equal(runAfter.definitionVersion, runBefore.definitionVersion, 'the running occurrence retains its historical definition version');
+    assert.notEqual(runAfter.definitionVersion, taskAfter.version, 'a responsibility-only version change must not hide scheduled steps');
+    assert.deepEqual(taskAfter.workflow, taskBefore.workflow, 'reading a calendar does not copy occurrence dates into the task definition');
+    assert.deepEqual(taskAfter.versions.slice(0, taskBefore.versions.length), taskBefore.versions);
+    assert.deepEqual(runAfter.workflowSnapshot, runBefore.workflowSnapshot);
+    assert.deepEqual(runAfter.steps, runBefore.steps); assert.deepEqual(runAfter.notes, runBefore.notes);
+    assert.deepEqual(state.runs.find(run => run.id === completedBefore.id), completedBefore, 'completed occurrences retain their original owner and records');
+    assert.equal(calendarAfter.cycleStartDate, calendarBefore.cycleStartDate);
+    assert.equal(calendarAfter.cycleDueDate, calendarBefore.cycleDueDate);
+    assert.deepEqual(currentExecutionWorkflow(workspaceAfter, calendarAfter), visibleWorkflowBefore, 'the successor calendar uses the saved occurrence dates even after handover increments the task version');
+  });
+}
 
 test('personnel handover: transfer history is scoped and remains available to both participants', () => {
   const state = fixture(); dispatch(state, sourceId, 'transfer.request', request());

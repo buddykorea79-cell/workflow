@@ -4,7 +4,7 @@ import { randomUUID } from 'node:crypto';
 import { createSeed } from '../src/lib/seed';
 import { DomainError, executeCommand, getWorkspace } from '../src/lib/domain';
 import { taskExecution, commonDistributionStatus } from '../src/lib/common-status';
-import { nextCycleWorkflow, runWorkflow, taskCycleState } from '../src/lib/work-cycles';
+import { currentExecutionWorkflow, nextCycleWorkflow, runWorkflow, taskCycleState } from '../src/lib/work-cycles';
 import type { WorkspaceData } from '../src/lib/types';
 
 const now = new Date('2026-10-31T13:00:00Z');
@@ -156,4 +156,66 @@ test('cycles: display fallback cannot bypass missing authoritative procedure dat
   const step = run.steps.find(step => step.status !== 'completed' && step.role !== 'reviewer')!;
   rejects('DEFINITION_MISSING', () => dispatch(state, owner, 'run.check', { runId: run.id, stepId: step.stepId, checkId: step.checklist[0].id, done: true }));
   rejects('DEFINITION_MISSING', () => dispatch(state, owner, 'task.setProgress', { taskId, stepId: step.stepId, done: true }));
+});
+
+test('cycles: calendar execution keeps frozen names and dates without replacing a newer editable definition', () => {
+  const state = createSeed(now); complete(state);
+  dispatch(state, owner, 'run.nextCycle', payload(state));
+  const running = structuredClone(taskCycleState(state, getTask(state)).latest!);
+  const originalProcedure = runWorkflow(getTask(state), running);
+  dispatch(state, 'u-admin', 'task.revise', { taskId, reason: '다음 기준 보완' });
+  dispatch(state, owner, 'task.update', { taskId, workflow: getTask(state).workflow.map(({ startDate: _start, dueDate: _due, ...step }) => ({ ...step, title: `새 기준 ${step.title}`, description: '새 기준의 수행 설명' })) });
+  dispatch(state, owner, 'task.submit', { taskId });
+  dispatch(state, 'u-admin', 'task.confirm', { taskId });
+  dispatch(state, 'u-admin', 'task.revise', { taskId, reason: '같은 절차 ID의 초안 편집' });
+  dispatch(state, owner, 'task.update', { taskId, workflow: getTask(state).workflow.map(step => ({ ...step, title: `검토 중 ${step.title}` })) });
+
+  const beforeRead = structuredClone(state);
+  const workspace = getWorkspace(state, owner, now);
+  const task = workspace.tasks.find(item => item.id === taskId)!;
+  assert.ok(task.version > running.definitionVersion);
+  assert.deepEqual(task.workflow, getTask(state).workflow);
+  assert.match(task.workflow[0].title, /^검토 중 새 기준 /);
+  assert.equal(task.workflow[0].startDate, undefined);
+  assert.deepEqual(currentExecutionWorkflow(workspace, task), originalProcedure);
+  assert.equal(currentExecutionWorkflow(workspace, task)[0].startDate, '2026-12-01');
+  assert.deepEqual(state, beforeRead);
+});
+
+test('cycles: execution schedule selects the new cycle and preserves completed, legacy and task-only fallbacks', () => {
+  const legacyState = createSeed(now);
+  const legacyTask = getTask(legacyState);
+  const legacyRun = taskCycleState(legacyState, legacyTask).latest!;
+  delete legacyRun.workflowSnapshot;
+  const confirmedStep = legacyTask.versions.find(version => version.version === legacyRun.definitionVersion)!.workflow[0];
+  legacyTask.workflow[0] = { ...legacyTask.workflow[0], title: '작성 중인 이름', startDate: '2027-01-01', dueDate: '2027-01-02' };
+  const legacyProcedure = currentExecutionWorkflow(legacyState, legacyTask);
+  assert.equal(legacyProcedure[0].title, legacyRun.steps[0].title);
+  assert.equal(legacyProcedure[0].startDate, confirmedStep.startDate);
+  assert.equal(legacyProcedure[0].dueDate, confirmedStep.dueDate);
+  assert.equal(legacyRun.workflowSnapshot, undefined);
+  legacyState.runs = legacyState.runs.filter(run => run.taskId !== taskId);
+  assert.deepEqual(currentExecutionWorkflow(legacyState, legacyTask), legacyTask.workflow);
+
+  const state = createSeed(now); complete(state);
+  const completed = structuredClone(taskCycleState(state, getTask(state)).latest!);
+  dispatch(state, 'u-admin', 'task.revise', { taskId, reason: '완료 후 다음 기준 작성' });
+  dispatch(state, owner, 'task.update', { taskId, workflow: getTask(state).workflow.map(({ startDate: _start, dueDate: _due, ...step }) => ({ ...step, title: `다음 회차 ${step.title}` })) });
+  dispatch(state, owner, 'task.submit', { taskId });
+  dispatch(state, 'u-admin', 'task.confirm', { taskId });
+  const waiting = getWorkspace(state, owner, now);
+  const waitingTask = waiting.tasks.find(item => item.id === taskId)!;
+  assert.equal(taskExecution(waiting, waitingTask).run, undefined);
+  assert.deepEqual(currentExecutionWorkflow(waiting, waitingTask), waitingTask.workflow);
+  assert.ok(currentExecutionWorkflow(waiting, waitingTask).every(step => !step.startDate && !step.dueDate));
+
+  dispatch(state, owner, 'run.nextCycle', payload(state));
+  const current = getWorkspace(state, owner, now);
+  const currentTask = current.tasks.find(item => item.id === taskId)!;
+  const workflow = currentExecutionWorkflow(current, currentTask);
+  assert.match(workflow[0].title, /^다음 회차 /);
+  assert.equal(workflow[0].startDate, '2026-12-01');
+  assert.equal(workflow[0].dueDate, '2026-12-02');
+  assert.ok(workflow.every(step => !step.done));
+  assert.deepEqual(state.runs.find(run => run.id === completed.id), completed);
 });

@@ -21,6 +21,7 @@ import { createCommandQueue } from '@/lib/command-queue';
 import { commandFailure, readCommandResponse, type CommandFailure } from '@/lib/command-response';
 import { canApplyWorkspaceResponse } from '@/lib/workspace-response';
 import { taskExecution } from '@/lib/common-status';
+import { currentExecutionWorkflow } from '@/lib/work-cycles';
 import { dashboardTaskSummary } from '@/lib/dashboard-summary';
 import { deadlineState } from '@/lib/task-deadline';
 import { commandExpectation, targetRevision } from '@/lib/command-targets';
@@ -433,7 +434,7 @@ function Dashboard({ workspace: w, navigate, onOpenTask }: { workspace: Workspac
   const { tasks, inProgress, completed, notStarted, dueSoon } = dashboardTaskSummary(w);
   const pendingEvaluations = navBadges(w).performance || 0;
   const recent = [...tasks].sort((a, b) => a.dueDate.localeCompare(b.dueDate)).slice(0, 5);
-  const scheduled = tasks.flatMap(task => task.workflow.filter(s => s.dueDate && s.dueDate >= today && !s.done).map(step => ({ task, step }))).sort((a, b) => (a.step.dueDate || '').localeCompare(b.step.dueDate || '')).slice(0, 4);
+  const scheduled = tasks.flatMap(task => currentExecutionWorkflow(w, task).filter(s => s.dueDate && s.dueDate >= today && !s.done).map(step => ({ task, step }))).sort((a, b) => (a.step.dueDate || '').localeCompare(b.step.dueDate || '')).slice(0, 4);
   const distributions = w.commonTasks.flatMap(c => c.distributions.map(d => ({ common: c, dist: d })));
   const needsAction = distributions.filter(({ dist: d }) => d.departmentId === user.departmentId && (user.role === 'manager' ? d.status === 'pending' : user.role === 'lead' ? d.leadId === user.id && d.status === 'team_assigned' : d.assigneeId === user.id && d.status === 'person_assigned')).length;
   const stats = [{ label: user.role === 'admin' ? '전체 세부업무' : isReviewer ? '부서 세부업무' : '나의 세부업무', value: tasks.length, detail: user.role === 'admin' ? '전체 부서의 활성 세부업무' : isReviewer ? '우리 부서의 활성 세부업무' : '단위업무에 연결된 실행 과제', accent: 'brand', icon: FolderOpen, view: 'personal' }, { label: '진행 중인 업무', value: inProgress.length, detail: `시작 전 ${notStarted}건 · 완료 ${completed}건`, accent: 'blue', icon: GitBranch, view: 'personal' }, { label: '7일 이내 마감', value: dueSoon.length, detail: '앞으로 7일 이내 마감 업무', accent: 'coral', icon: CalendarDays, view: 'schedule' }, { label: isReviewer ? '평가 대기' : '배정받은 공통업무', value: isReviewer ? pendingEvaluations : needsAction, detail: isReviewer ? '제출된 개인별 반기 성과를 평가해 주세요' : '다음 단계로 연결해 주세요', accent: 'neutral', icon: isReviewer ? ShieldCheck : CheckCheck, view: isReviewer ? 'performance' : user.role === 'manager' ? 'allocation' : 'common' }];
