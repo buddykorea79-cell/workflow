@@ -1,4 +1,5 @@
 'use client';
+import { APP_VERSION } from '@/lib/app-version';
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { ArrowDown, ArrowLeftRight, ArrowRight, ArrowUpRight, Bell, Building2, CalendarDays, Check, CheckCheck, ChevronDown, ChevronRight, CircleHelp, Clock3, FileText, FolderOpen, GitBranch, LayoutDashboard, LoaderCircle, LogOut, Menu, Search, Settings2, ShieldCheck, Sparkles, UserRound, Users, Wallet, X } from 'lucide-react';
@@ -72,12 +73,12 @@ function DemoLogin({ users, departments, busy, error, onLogin }: { users: User[]
   const selectedDepartmentId = selected?.departmentId || availableDepartmentId;
   return <div className="login-card" id="login">
     <div className="login-card-intro"><span className="login-icon"><ArrowUpRight size={23}/></span><Badge>시연용 워크스페이스</Badge></div>
-    <h2>온이음 시작하기.</h2><p className="login-description">{departments.length === 1 ? '현재 부서의 계정으로 역할을 바꾸며 업무 흐름을 확인하세요.' : '담당자 1은 데이터정보화담당관실에서 공통업무를 작성하고, 담당자 2는 혁신행정담당관실에서 배정받습니다.'}</p>
-    <fieldset className="role-picker"><legend>어떤 역할로 시작할까요?</legend><div>{demoRoles.map(({ id, label, icon: Icon }) => <button key={id} type="button" className={role === id ? 'role-option selected' : 'role-option'} aria-pressed={role === id} onClick={() => { const nextRole = id as DemoRole; const defaultDepartment = demoDefaultDepartment(nextRole); setRole(nextRole); setDepartmentId(departments.some(department => department.id === defaultDepartment) ? defaultDepartment : departments[0]?.id || defaultDepartment); setSelectedId(''); }}><Icon size={18} strokeWidth={1.65}/><span>{label}</span>{role === id && <Check size={13} className="role-check"/>}</button>)}</div></fieldset>
+    <h2>온이음 시작하기.</h2><p className="login-description">{departments.length === 1 ? '현재 부서의 계정으로 역할을 바꾸며 업무 흐름을 확인하세요.' : '데이터정보화담당관실 송주무관의 업무를 등록하고, 최과장 승인 후 조주무관에게 인계하는 흐름을 확인하세요.'}</p>
+    <fieldset className="role-picker"><legend>어떤 역할로 시작할까요?</legend><div>{demoRoles.map(({ id, label, icon: Icon }) => <button key={id} type="button" className={role === id ? 'role-option selected' : 'role-option'} data-scenario-role={['member1', 'member2', 'head'].includes(id) ? 'true' : undefined} aria-pressed={role === id} onClick={() => { const nextRole = id as DemoRole; const defaultDepartment = demoDefaultDepartment(nextRole); setRole(nextRole); setDepartmentId(departments.some(department => department.id === defaultDepartment) ? defaultDepartment : departments[0]?.id || defaultDepartment); setSelectedId(''); }}><Icon size={18} strokeWidth={1.65}/><span>{label}</span>{role === id && <Check size={13} className="role-check"/>}</button>)}</div></fieldset>
     <div className="login-selects"><label className="field"><span>부서</span><select aria-label="로그인 부서" value={selectedDepartmentId} onChange={e => { setDepartmentId(e.target.value); setSelectedId(''); }}>{departments.map(d => <option key={d.id} value={d.id}>{d.name}</option>)}</select></label><label className="field"><span>시연 계정</span><select aria-label="시연 계정" value={selected?.id || ''} onChange={e => setSelectedId(e.target.value)}>{!available.length && <option value="">해당 역할의 계정이 없습니다</option>}{available.map(u => <option key={u.id} value={u.id}>{u.name} · {u.team} · {u.title}</option>)}</select></label></div>
     {selected && <div className="login-person"><span className="avatar">{selected.name.slice(0, 1)}</span><div><strong>{selected.name}</strong><span>{departments.find(d => d.id === selected.departmentId)?.name} · {selected.team}</span></div></div>}
     {error && <p role="alert" className="form-error">{error}</p>}
-    <Button className="login-submit" disabled={busy || !selected} onClick={() => selected && onLogin(selected.id)}>{busy ? <LoaderCircle className="spin" size={18}/> : <><span>{selected ? selected.name + ' 계정으로 시작하기' : '계정 불러오는 중'}</span><ArrowRight size={18}/></>}</Button>
+    <Button variant="accent" className="login-submit" disabled={busy || !selected} onClick={() => selected && onLogin(selected.id)}>{busy ? <LoaderCircle className="spin" size={18}/> : <><span>{selected ? selected.name + ' 계정으로 시작하기' : '계정 불러오는 중'}</span><ArrowRight size={18}/></>}</Button>
     <p className="login-footnote">비밀번호 없이 체험할 수 있는 가상 계정입니다.</p>
   </div>;
 }
@@ -89,7 +90,7 @@ function AccessCodeForm({ busy, error, onAccess }: { busy: boolean; error: strin
     <h2>접근 코드 확인</h2><p id="access-code-hint" className="login-description">안내받은 숫자 8자리 접근 코드를 입력하면 시연할 역할을 선택할 수 있습니다.</p>
     <label className="field"><span>접근 코드</span><input name="accessCode" type="password" inputMode="numeric" pattern={ACCESS_CODE_PATTERN} autoComplete="off" autoFocus required minLength={ACCESS_CODE_LENGTH} maxLength={ACCESS_CODE_LENGTH} placeholder="숫자 8자리" value={code} onChange={event => setCode(event.target.value)} aria-describedby={error ? 'access-code-hint access-code-error' : 'access-code-hint'}/></label>
     {error && <p id="access-code-error" role="alert" className="form-error">{error}</p>}
-    <Button type="submit" className="login-submit" disabled={busy || !isValidAccessCode(code)}>{busy ? <><LoaderCircle className="spin" size={18}/><span>확인 중</span></> : <><span>접근 코드 확인</span><ArrowRight size={18}/></>}</Button>
+    <Button type="submit" variant="accent" className="login-submit" disabled={busy || !isValidAccessCode(code)}>{busy ? <><LoaderCircle className="spin" size={18}/><span>확인 중</span></> : <><span>접근 코드 확인</span><ArrowRight size={18}/></>}</Button>
     <p className="login-footnote">접근 권한은 12시간 유지됩니다. 로그아웃하면 다시 입력해야 합니다.</p>
   </form>;
 }
@@ -105,7 +106,7 @@ function Landing(props: Parameters<typeof DemoLogin>[0] & { accessRequired: bool
       {props.accessRequired ? <AccessCodeForm busy={props.busy} error={props.error} onAccess={props.onAccess}/> : <DemoLogin {...props}/>}
     </main>
     <LandingGuide onPreload={preloadUsageGuide} onOpen={(section, role) => setGuide({ section, role })}/>
-    <footer className="landing-footer"><Brand inverse/><p>업무의 맥락이 쌓이고, 조직의 다음이 이어집니다.</p><span>온이음 워크스페이스 <i/> v0.7.0</span></footer>
+    <footer className="landing-footer"><Brand inverse/><p>업무의 맥락이 쌓이고, 조직의 다음이 이어집니다.</p><span>온이음 워크스페이스 <i/> v{APP_VERSION}</span></footer>
     {guide && <UsageGuide initialSection={guide.section} initialRole={guide.role} onClose={() => setGuide(null)}/>}
   </div>;
 }
@@ -411,7 +412,7 @@ function WorkspaceContent() {
         {safeView === 'organization' && <OrganizationView key={user.id} focusId={route.focus} focusToken={focusToken} workspace={workspace} command={command}/>}
         {safeView === 'admin' && <AdminView workspace={workspace} command={command}/>}
       </main>
-      <footer className="workspace-footer"><span>온이음 · 업무의 흐름을 잇다.</span><span>{workspace.mode === 'local' ? '로컬에 안전하게 저장 중' : '연결된 데이터베이스'}<i/>v0.7.0</span></footer>
+      <footer className="workspace-footer"><span>온이음 · 업무의 흐름을 잇다.</span><span>{workspace.mode === 'local' ? '로컬에 안전하게 저장 중' : '연결된 데이터베이스'}<i/>v{APP_VERSION}</span></footer>
     </div>
     {busy && <div className="saving-indicator" role="status"><LoaderCircle size={15} className="spin"/>{pendingCount >= 3 ? '저장을 순서대로 처리하고 있습니다.' : '저장 중'}</div>}
     {notice && <div className={'toast ' + (notice.error ? 'toast-error' : '')} role={notice.error ? 'alert' : 'status'}><span>{notice.error ? '요청을 확인해 주세요' : <Check size={17}/>}</span><p>{notice.text}</p><button className="icon-btn" aria-label="메시지 닫기" onClick={() => setNotice(null)}><X size={16}/></button></div>}

@@ -4,6 +4,7 @@ import { useEffect, useId, useMemo, useRef, useState } from 'react';
 import { ArrowLeftRight, CalendarDays, CheckCheck, ChevronDown, FolderOpen, GitBranch, LayoutDashboard, Settings2, ShieldCheck, UserRound, Users, Wallet } from 'lucide-react';
 import type { View } from '@/lib/hash-route';
 import type { Workspace } from '@/lib/types';
+import { APP_VERSION } from '@/lib/app-version';
 import { groupPendingCount, initialGroupExpansion, navigationGroups, reconcileGroupExpansion, type GroupNavigationState, type NavigationBadges, type NavigationGroup } from '@/lib/navigation-groups';
 import './grouped-sidebar.css';
 
@@ -59,9 +60,9 @@ function GroupedNavigation({ workspace, activeView, badges, titles, onNavigate, 
             const Icon = icons[view];
             const value = badges[view];
             const pending = typeof value === 'number' && Number.isFinite(value) && value > 0 ? Math.floor(value) : 0;
-            return <button key={view} type="button" className={`nav-item ${activeView === view ? 'active' : ''}`} aria-current={activeView === view ? 'page' : undefined} aria-label={pending ? `${titles[view]}, 처리 대기 ${pending}건` : titles[view]}
+            return <button key={view} type="button" className={`nav-item ${activeView === view ? 'active' : ''}`} data-scenario-nav={['personal', 'schedule', 'handover'].includes(view) ? 'true' : undefined} aria-current={activeView === view ? 'page' : undefined} aria-label={pending ? `${titles[view]}, 처리 대기 ${pending}건` : titles[view]}
               onMouseEnter={() => onPreload?.(view)} onFocus={() => onPreload?.(view)} onClick={() => onNavigate(view)}>
-              <Icon size={19} strokeWidth={1.65}/><span>{titles[view]}</span>{pending > 0 && <b className="nav-count" aria-hidden="true">{pending}</b>}{view === 'admin' && <span className="nav-version" aria-hidden="true">v0.7</span>}
+              <Icon size={19} strokeWidth={1.65}/><span>{titles[view]}</span>{pending > 0 && <b className="nav-count" aria-hidden="true">{pending}</b>}{view === 'admin' && <span className="nav-version" aria-hidden="true">v{APP_VERSION}</span>}
             </button>;
           })}
         </div>

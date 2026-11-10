@@ -33,6 +33,9 @@ test('all five real workspace roles retain their approved destinations without d
     assert.equal(views.length, allowed.size, `${role}: no duplicate destinations across groups`);
     assert.deepEqual(groups.map(group => group.label), ['내 업무', '협업', '부서 관리', '조직·시스템']);
     assert.deepEqual(groups.filter(group => group.alwaysOpen).map(group => group.id), ['my']);
+    const myViews = groups.find(group => group.id === 'my')!.views;
+    assert.equal(myViews[myViews.indexOf('schedule') + 1], 'handover', 'handover stays visible immediately after the calendar');
+    assert.equal(groups.find(group => group.id === 'collaboration')!.views.includes('handover'), false);
     for (const view of ['department', 'budgets', 'performance', 'division'] as const) {
       if (allowed.has(view)) assert.ok(groups.find(group => group.id === 'department')!.views.includes(view));
     }

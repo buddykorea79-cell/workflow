@@ -12,6 +12,7 @@ import { OrganizationEditor } from './organization-editor';
 import { useNotificationFocus } from './notification-focus';
 import { useUnsavedNavigation } from './unsaved-changes';
 import { isOrganizationUserActive } from '@/lib/organization-management';
+import { APP_VERSION } from '@/lib/app-version';
 
 const integrationsScreen = createLazyScreen(() => import('./admin-integrations').then(module => module.AdminIntegrations), { label: '연결·테스트', kind: 'section' });
 const budgetScreen = createLazyScreen(() => import('./admin-budget-catalog').then(module => module.AdminBudgetCatalog), { label: '예산 관리', kind: 'section' });
@@ -122,7 +123,7 @@ export function AdminView({ workspace: w, command }: Props) {
   const releases = w.releases || [];
   const latest = releases[0];
   return <div className="management-view" onMouseOver={event => preloadTab(event.target)} onFocusCapture={event => preloadTab(event.target)}><div className="page-heading"><div><p className="eyebrow">시스템 관리</p><h1>조금씩, 더 나은 온이음.</h1><p className="muted">AI·DB·파일 연결을 시험하고 구현 현황과 변경 이력을 확인합니다.</p></div><Button onClick={() => setReleaseOpen(true)}><Plus size={17} />버전 기록 추가</Button></div>
-    <div className="management-release-banner"><div className="management-release-icon"><GitBranch size={28} /></div><div><span>최근 기록 버전</span><h2>v{latest?.version || '0.2.0'}</h2><p>{latest?.title || '업무 연결 구조와 디자인 전면 개편'}</p></div><div className="management-release-environment"><Badge tone="outline">{w.mode === 'local' ? '로컬 시연 환경' : '연결 환경'}</Badge><span>{latest ? day(latest.date) : day(w.serverTime)}</span></div></div>
+    <div className="management-release-banner"><div className="management-release-icon"><GitBranch size={28} /></div><div><span>현재 실행 버전</span><h2>v{APP_VERSION}</h2><p>업무의 흐름을 잇는 온이음 워크스페이스</p></div><div className="management-release-environment"><Badge tone="outline">{w.mode === 'local' ? '로컬 시연 환경' : '연결 환경'}</Badge><span>{latest ? `최근 기록 v${latest.version} · ${day(latest.date)}` : '아직 기록된 버전이 없습니다.'}</span></div></div>
     <Tabs tabs={tabs} label="시스템 관리 구분" className="management-admin-tabs tabs" />
     <div className="management-tab-panel" {...tabs.panelAttrs(tab)}>
     {tab === 'connections' && <AdminIntegrations/>}
@@ -137,6 +138,6 @@ export function AdminView({ workspace: w, command }: Props) {
 }
 
 function CreateRelease({ command, onClose }: { command: CommandFn; onClose: () => void }) {
-  const [version, setVersion] = useState(''); const [title, setTitle] = useState(''); const [notes, setNotes] = useState(''); const [saving, setSaving] = useState(false);
-  return <Modal title="버전 기록 추가" description="완료한 변경 내용을 버전과 함께 기록합니다." onClose={onClose}><form className="form-stack" onSubmit={async e => { e.preventDefault(); setSaving(true); const saved = await command('admin.release', { version, title, notes }); setSaving(false); if (saved) onClose(); }}><Field label="버전"><input required pattern="[0-9]+\.[0-9]+\.[0-9]+" value={version} onChange={e => setVersion(e.target.value)} placeholder="예: 0.2.1" title="0.2.1과 같이 숫자 세 자리 형식으로 입력해 주세요." /></Field><Field label="변경 제목"><input required maxLength={150} value={title} onChange={e => setTitle(e.target.value)} placeholder="이번 버전의 주요 변경" /></Field><Field label="변경 내용"><textarea required rows={6} maxLength={5000} value={notes} onChange={e => setNotes(e.target.value)} placeholder="추가·개선·수정한 내용을 기록하세요." /></Field><div className="management-info"><GitBranch size={17} /><p>버전 기록은 개발 이력 관리용입니다. 앱 코드의 배포나 이전 버전으로의 복원은 실행하지 않습니다.</p></div><div className="form-actions"><Button type="button" variant="secondary" onClick={onClose}>취소</Button><Button type="submit" disabled={saving}>{saving ? '저장 중…' : '버전 기록 저장'}</Button></div></form></Modal>;
+  const [version, setVersion] = useState(APP_VERSION); const [title, setTitle] = useState(''); const [notes, setNotes] = useState(''); const [saving, setSaving] = useState(false);
+  return <Modal title="버전 기록 추가" description="완료한 변경 내용을 버전과 함께 기록합니다." onClose={onClose}><form className="form-stack" onSubmit={async e => { e.preventDefault(); setSaving(true); const saved = await command('admin.release', { version, title, notes }); setSaving(false); if (saved) onClose(); }}><Field label="버전"><input required pattern="[0-9]+\.[0-9]+\.[0-9]+" value={version} onChange={e => setVersion(e.target.value)} placeholder={`예: ${APP_VERSION}`} title={`${APP_VERSION}과 같이 숫자 세 자리 형식으로 입력해 주세요.`} /></Field><Field label="변경 제목"><input required maxLength={150} value={title} onChange={e => setTitle(e.target.value)} placeholder="이번 버전의 주요 변경" /></Field><Field label="변경 내용"><textarea required rows={6} maxLength={5000} value={notes} onChange={e => setNotes(e.target.value)} placeholder="추가·개선·수정한 내용을 기록하세요." /></Field><div className="management-info"><GitBranch size={17} /><p>버전 기록은 개발 이력 관리용입니다. 앱 코드의 배포나 이전 버전으로의 복원은 실행하지 않습니다.</p></div><div className="form-actions"><Button type="button" variant="secondary" onClick={onClose}>취소</Button><Button type="submit" disabled={saving}>{saving ? '저장 중…' : '버전 기록 저장'}</Button></div></form></Modal>;
 }

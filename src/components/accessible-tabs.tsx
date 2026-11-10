@@ -4,7 +4,7 @@ import { useId, useRef, type ReactNode } from 'react';
 import { tabDomIds, tabKeyAction } from '@/lib/tab-navigation';
 import './accessible-tabs.css';
 
-export type TabItem<Value extends string = string> = { value: Value; label: ReactNode; disabled?: boolean; ariaLabel?: string };
+export type TabItem<Value extends string = string> = { value: Value; label: ReactNode; disabled?: boolean; ariaLabel?: string; accent?: boolean };
 export type TabPanelAttrs = { id: string; role: 'tabpanel'; 'aria-labelledby': string; hidden: boolean; tabIndex: 0 };
 export type TabsControls<Value extends string = string> = {
   value: Value;
@@ -31,7 +31,7 @@ export function Tabs<Value extends string>({ tabs, label, className = '' }: { ta
   return <div role="tablist" aria-label={label} aria-orientation="horizontal" className={`accessible-tabs ${className}`}>
     {tabs.items.map(item => <button key={item.value} ref={element => { if (element) buttons.current.set(item.value, element); else buttons.current.delete(item.value); }}
       type="button" role="tab" id={tabs.tabId(item.value)} aria-selected={tabs.value === item.value} aria-controls={tabs.panelAttrs(item.value).id} aria-label={item.ariaLabel}
-      tabIndex={entry === item.value ? 0 : -1} disabled={item.disabled} className={tabs.value === item.value ? 'active' : ''}
+      tabIndex={entry === item.value ? 0 : -1} disabled={item.disabled} className={tabs.value === item.value ? 'active' : ''} data-accent={item.accent || undefined}
       onClick={() => select(item.value)} onKeyDown={event => {
         if (event.altKey || event.ctrlKey || event.metaKey) return;
         const action = tabKeyAction(event.key, item.value, tabs.items);

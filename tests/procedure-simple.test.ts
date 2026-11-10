@@ -61,8 +61,8 @@ test('procedure editor disables unchanged saves and unassigned support while pre
     onApply: async () => true, onChange: () => undefined, onRemove: () => undefined, onMove: () => undefined, onAdd: () => undefined,
   }));
   const saved = render(false), edited = render(true);
-  assert.match(saved, /<button[^>]*class="btn btn-accent[^>]*disabled=""/);
-  assert.doesNotMatch(edited, /<button[^>]*class="btn btn-accent[^>]*disabled=""/);
+  assert.match(saved, /<button[^>]*class="btn btn-accent(?: |")[^>]*disabled=""/);
+  assert.doesNotMatch(edited, /<button[^>]*class="btn btn-accent(?: |")[^>]*disabled=""/);
   assert.match(edited, /<option value="support" disabled="" selected=""/);
   assert.doesNotMatch(render(true, true), /<option value="support" disabled=""/);
   assert.deepEqual(workflow, before);

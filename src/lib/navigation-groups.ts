@@ -13,8 +13,8 @@ export function navigationGroups(role: OrgRole): NavigationGroup[] {
   const isHead = role === 'head';
   const canAllocate = role === 'manager' || isAdmin;
   return [
-    { id: 'my', label: '내 업무', views: ['dashboard', ...(!isHead ? ['personal' as const] : []), 'schedule'], alwaysOpen: true },
-    { id: 'collaboration', label: '협업', views: ['common', ...(canAllocate ? ['allocation' as const] : []), 'delegation', 'handover'], alwaysOpen: false },
+    { id: 'my', label: '내 업무', views: ['dashboard', ...(!isHead ? ['personal' as const] : []), 'schedule', 'handover'], alwaysOpen: true },
+    { id: 'collaboration', label: '협업', views: ['common', ...(canAllocate ? ['allocation' as const] : []), 'delegation'], alwaysOpen: false },
     { id: 'department', label: '부서 관리', views: [...(isHead || isAdmin ? ['department' as const] : []), 'division', ...(canAllocate || isHead ? ['budgets' as const] : []), 'performance'], alwaysOpen: false },
     { id: 'organization', label: '조직·시스템', views: ['organization', ...(isAdmin ? ['admin' as const] : [])], alwaysOpen: false },
   ];

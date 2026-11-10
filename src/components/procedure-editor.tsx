@@ -71,7 +71,7 @@ export function ProcedureEditor({ workspace, taskId, command, onWorkspace, onBus
   const flowContext = context ?? (task ? taskProcedureContext(workspace, task) : undefined);
   return <section className="pe-editor" aria-label="현재 적용된 업무 절차">
     {workflow.length > 0 && <section className="pe-diagram" aria-label="전체 업무 절차도"><ProcedureFlow workflow={workflow} participants={participants} context={flowContext} selectedId={selectedId} onSelect={selectStep} redrawKey={redrawKey} compact/><p className="pe-diagram-status">{diagramChanged ? '수정 중인 절차도 · 저장·반영하면 적용됩니다.' : '저장된 절차도'}<span>절차를 선택하면 아래 내용으로 이동합니다.</span></p></section>}
-    <div className="pw-section-intro"><div><h3>업무 절차 <span>{workflow.length}개</span></h3><p>{editable ? '위·아래 버튼은 표시 순서를 바꿉니다. 실제 수행 순서는 각 절차의 선행 절차로 정하세요.' : '절차별 담당자, 수행 방법과 참고 파일을 확인하세요.'}</p></div>{editable && <Button variant="secondary" disabled={workflow.length >= 50} onClick={add}><Plus size={15}/>수기로 절차 추가</Button>}</div>
+    <div className="pw-section-intro"><div><h3>업무 절차 <span>{workflow.length}개</span></h3><p>{editable ? '위·아래 버튼은 표시 순서를 바꿉니다. 실제 수행 순서는 각 절차의 선행 절차로 정하세요.' : '절차별 담당자, 수행 방법과 참고 파일을 확인하세요.'}</p></div>{editable && <Button variant="accent-outline" disabled={workflow.length >= 50} onClick={add}><Plus size={15}/>수기로 절차 추가</Button>}</div>
     {editable && <div className="pe-apply-bar"><p>누가 · 무엇을 · 어떻게<br/><span>{hasChanges ? '수정한 내용과 순서를 저장하면 절차도에도 함께 반영됩니다.' : '저장된 절차입니다. 내용을 수정하면 저장할 수 있습니다.'}</span></p><Button variant="accent" disabled={busy || !workflow.length || !hasChanges} onClick={() => void onApply()}><Save size={16}/>{busy ? '저장 중…' : '수정사항 저장·절차도 반영'}</Button></div>}
     {editable && firstMovable > 0 && <p className="pe-locked-order">완료된 절차까지의 순서는 유지됩니다. 이후 절차를 추가하거나 이동할 수 있습니다.</p>}
     {!workflow.length && <div className="pw-inline-empty"><p>첫 절차를 추가해 보세요.</p><span>예: 담당자가 자료를 모으고, 검토자가 결과를 확인합니다.</span></div>}
@@ -86,7 +86,7 @@ export function ProcedureEditor({ workspace, taskId, command, onWorkspace, onBus
       const participantWarningId = `${warningId}-${step.id}`;
       return <section className={`pe-step ${done ? 'is-done' : ''}${selectedId === step.id ? ' is-selected' : ''}`} key={step.id} ref={element => { stepSections.current[step.id] = element; }} tabIndex={-1} aria-label={`${index + 1}단계 ${step.title || '새 절차'}`}>
         <header className="pe-step-heading"><span className="pe-step-number">{String(index + 1).padStart(2, '0')}</span><h4>{step.title || '새 절차'}</h4>{requiredCommon && <Badge tone="outline">공통 필수</Badge>}{done && <Badge tone="success">완료</Badge>}{(missingSupport || missingReviewer) && <Badge tone="warning">{missingSupport ? '지원자 미지정' : '검토자 미지정'}</Badge>}
-          {editable && <div className="pe-step-controls"><div className="pe-move-buttons" role="group" aria-label={`${name} 순서 조정`}><Button variant="secondary" disabled={done || !canMoveProcedureStep(workflow, step.id, 'up')} aria-label={`${name} 위로 이동`} title="위로 이동" onClick={() => onMove(step.id, 'up')}><ArrowUp size={15}/><span>위로</span></Button><Button variant="secondary" disabled={done || !canMoveProcedureStep(workflow, step.id, 'down')} aria-label={`${name} 아래로 이동`} title="아래로 이동" onClick={() => onMove(step.id, 'down')}><ArrowDown size={15}/><span>아래로</span></Button></div>{!done && !requiredCommon && !lastReviewer && canRemoveProcedureStep(workflow, step.id) && <button type="button" className="pw-icon-button pe-delete" aria-label={`${name} 절차 삭제`} title="절차 삭제" onClick={() => onRemove(step.id)}><Trash2 size={15}/></button>}</div>}
+          {editable && <div className="pe-step-controls"><div className="pe-move-buttons" role="group" aria-label={`${name} 순서 조정`}><Button variant="accent-outline" disabled={done || !canMoveProcedureStep(workflow, step.id, 'up')} aria-label={`${name} 위로 이동`} title="위로 이동" onClick={() => onMove(step.id, 'up')}><ArrowUp size={15}/><span>위로</span></Button><Button variant="accent-outline" disabled={done || !canMoveProcedureStep(workflow, step.id, 'down')} aria-label={`${name} 아래로 이동`} title="아래로 이동" onClick={() => onMove(step.id, 'down')}><ArrowDown size={15}/><span>아래로</span></Button></div>{!done && !requiredCommon && !lastReviewer && canRemoveProcedureStep(workflow, step.id) && <button type="button" className="pw-icon-button pe-delete" aria-label={`${name} 절차 삭제`} title="절차 삭제" onClick={() => onRemove(step.id)}><Trash2 size={15}/></button>}</div>}
         </header>
         {editable && !done && lastReviewer && <p className="pe-review-policy">{requiredCommon ? '공통업무에서 정한 필수 검토 단계이므로 삭제할 수 없습니다.' : '검토가 필요한 업무의 마지막 검토 단계입니다. 삭제하려면 업무 설정에서 검토 필요 여부를 변경해 주세요.'}</p>}
         {(missingSupport || missingReviewer) && <div className="pe-participant-warning" id={participantWarningId} role="status">
@@ -101,7 +101,7 @@ export function ProcedureEditor({ workspace, taskId, command, onWorkspace, onBus
               : '검토자는 소유 부서의 활성 부서장으로 자동 지정됩니다. 관리자에게 소유 부서의 부서장 등록·확인을 요청해 주세요.'}</p>
           {missingSupport && !done && !requiredCommon && (editable
             ? <Button variant="secondary" aria-label={`${name} 담당자 지정`} onClick={() => focusRole(step.id)}>담당자 지정</Button>
-            : onStartEditing && <Button variant="secondary" onClick={onStartEditing}>업무 기준 수정</Button>)}
+            : onStartEditing && <Button variant="accent-outline" onClick={onStartEditing}>업무 기준 수정</Button>)}
           {missingReviewer && workspace.currentUser.role === 'admin' && onOpenOrganization && <Button variant="secondary" onClick={onOpenOrganization}>조직 · 구성원 확인</Button>}
         </div>}
         {editable && !done ? <div className="pe-essential-fields">
@@ -122,6 +122,6 @@ export function ProcedureEditor({ workspace, taskId, command, onWorkspace, onBus
         <TaskFileAttachments workspace={workspace} taskId={taskId} attachmentIds={step.attachmentIds ?? []} onChange={editable && !done ? ids => onChange(step.id, { attachmentIds: ids }) : undefined} command={command} onWorkspace={onWorkspace} onBusyChange={onBusyChange} disabled={locked} label="절차 참고 파일"/>
       </section>;
     })}</div>
-    {editable && workflow.length > 1 && <Button className="pe-add-step" variant="secondary" disabled={workflow.length >= 50} onClick={add}><Plus size={15}/>수기로 절차 추가</Button>}
+    {editable && workflow.length > 1 && <Button className="pe-add-step" variant="accent-outline" disabled={workflow.length >= 50} onClick={add}><Plus size={15}/>수기로 절차 추가</Button>}
   </section>;
 }

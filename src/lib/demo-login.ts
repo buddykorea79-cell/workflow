@@ -6,15 +6,15 @@ export type DemoRole = OrgRole | 'member1' | 'member2';
 const preferredUsers: Record<DemoRole, string> = {
   member: 'u-support-member',
   member1: 'u-support-member',
-  member2: 'u-innovation-member',
+  member2: 'u-it-planning-member-1',
   lead: 'u-support-lead',
   manager: 'u-doyun',
   head: 'u-support-head',
   admin: 'u-support-admin',
 };
 
-export function demoDefaultDepartment(role: DemoRole): string {
-  return role === 'member2' ? 'dept-innovation' : 'dept-support';
+export function demoDefaultDepartment(_role: DemoRole): string {
+  return 'dept-support';
 }
 
 export function demoCandidates(users: User[], role: DemoRole, departmentId: string): User[] {

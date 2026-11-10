@@ -58,7 +58,7 @@ export function applyStatisticsDemo(state: WorkspaceData, now = new Date()): Sta
     references: [{ id: 'statistics-demo-reference-guide', type: 'guideline', title: '통계연보 자료 작성 안내 · 시연용', content: '이 안내는 기능 시연을 위한 가상 자료입니다. 실제 법령이나 기관 지침이 아닙니다.\n발간 총괄 담당자는 대상 부서에 통계 항목, 대상 기간, 작성 양식을 안내한다. 각 부서 담당자는 소관 통계의 수치와 출처를 확인하고 작성표를 제출한다. 발간 총괄 담당자는 회신 자료를 취합해 누락과 수치 불일치를 확인한다. 부서장은 취합 결과와 발간본을 검토한다. 검토된 통계연보를 발간·게시하고 결과 기록을 남긴다.' }],
   };
   const common: CommonTask = {
-    id: ids.common, kind: 'common', title: '행정안전 통계연보 발간', description: '통계 간행물 발간 단위업무에 연결되는 부서 공통 자료 요청입니다. 혁신행정담당관실은 소관 통계 작성표에 대상 기간·수치·출처를 기입하고 정합성을 확인하여 제출합니다. 시연 수신자는 업무 담당자 2(임주무관)입니다. 실제 배정은 작성 부서장의 배포 승인 후 혁신행정담당관실 부서 담당자와 팀장이 진행합니다. 시연용 가상 요청입니다.',
+    id: ids.common, kind: 'common', title: '행정안전 통계연보 발간', description: '통계 간행물 발간 단위업무에 연결되는 부서 공통 자료 요청입니다. 혁신행정담당관실은 소관 통계 작성표에 대상 기간·수치·출처를 기입하고 정합성을 확인하여 제출합니다. 시연 수신자는 혁신행정담당관실 임주무관입니다. 실제 배정은 작성 부서장의 배포 승인 후 혁신행정담당관실 부서 담당자와 팀장이 진행합니다. 시연용 가상 요청입니다.',
     managerId: ids.sender, originDepartmentId: ids.senderDepartment, distributionMode: 'selected', projectName: '통계 간행물 발간 · 두 담당자 시연', dueDate, frequency: 'yearly', version: 1,
     requiredSteps: ['통계 작성 항목과 기간 확인', '소관 통계 자료 작성', '수치·출처 정합성 확인', '부서장 검토', '통계 작성표 제출'],
     departmentIds: [], distributions: [], publicationStatus: 'pending', approvalRequests: [],

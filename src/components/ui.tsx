@@ -132,7 +132,7 @@ function invalidControlIssues(container: HTMLElement) {
   });
 }
 
-export function Button({ variant = 'primary', className = '', type = 'button', ...props }: ButtonHTMLAttributes<HTMLButtonElement> & { variant?: 'primary' | 'secondary' | 'ghost' | 'accent' }) {
+export function Button({ variant = 'primary', className = '', type = 'button', ...props }: ButtonHTMLAttributes<HTMLButtonElement> & { variant?: 'primary' | 'secondary' | 'ghost' | 'accent' | 'accent-outline' }) {
   return <button type={type} className={`btn btn-${variant} ${className}`} {...props} />;
 }
 
