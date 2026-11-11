@@ -101,6 +101,7 @@ test('eager guide entry points and management exclude their detailed lazy module
     const dependencies = staticDependencies(entry);
     assert.equal(dependencies.has(path.resolve('src/components/usage-guide.tsx')), false);
     assert.equal(dependencies.has(path.resolve('src/lib/usage-guide.ts')), false);
+    assert.equal(dependencies.has(path.resolve('src/lib/guide-topics.ts')), false);
   }
   const management = staticDependencies('src/components/management.tsx');
   for (const file of ['admin-integrations.tsx', 'admin-budget-catalog.tsx', 'common-work.tsx', 'unit-evaluation.tsx']) {

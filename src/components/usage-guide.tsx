@@ -1,8 +1,9 @@
 'use client';
 
 import { useId, useState } from 'react';
-import { ArrowRight, BookOpen, Building2, CircleHelp, GitBranch, Lightbulb, ListChecks, Settings2, ShieldCheck, UserRound, Users } from 'lucide-react';
+import { ArrowRight, BookOpen, Building2, CircleHelp, GitBranch, Lightbulb, ListChecks, Search, Settings2, ShieldCheck, UserRound, Users, X } from 'lucide-react';
 import { guideRoles, type GuideRole } from '@/lib/usage-guide';
+import { filterGuideQuestions, questionCategories, taskTabs, type QuestionCategory } from '@/lib/guide-topics';
 import { Button } from './ui';
 import type { GuideSection } from '@/lib/guide-role-summaries';
 import './usage-guide.css';
@@ -11,89 +12,10 @@ export type { GuideSection } from '@/lib/guide-role-summaries';
 const roleIcons = { member: UserRound, lead: Users, manager: Building2, head: ShieldCheck, admin: Settings2 };
 const sections = [
   { id: 'start', label: '처음 시작하기', icon: BookOpen },
-  { id: 'roles', label: '권한별 역할·메뉴', icon: Users },
+  { id: 'roles', label: '역할·메뉴 안내', icon: Users },
   { id: 'task', label: '세부업무 따라하기', icon: ListChecks },
   { id: 'faq', label: '자주 묻는 질문', icon: CircleHelp },
 ] as const;
-
-const taskTabs = [
-  { title: '업무 개요', intro: '어떤 일을 누가, 어떤 기준으로 수행하는지 정합니다.', steps: [
-    { title: '단위업무 아래 세부업무 만들기', description: '개인업무에서 단위업무를 만든 뒤 세부업무 추가를 선택합니다. 단위업무 중요도는 1~10, 기본값은 5이며 높을수록 목록에 먼저 표시됩니다. 이미 배정받은 공통업무는 내 단위업무에 등록합니다.' },
-    { title: '이름·설명·담당자 확인', description: '세부업무를 열어 업무 기준 수정을 누릅니다. 소속 단위업무, 업무 이름, 설명, 마감일과 반복 주기를 확인합니다. 화면에 표시된 담당자·검토자와 완료 기준도 함께 확인하세요.' },
-    { title: '업무 설명용 첨부파일 연결', description: '업무 설명에 필요한 파일을 올리고 내용을 확인한 뒤 업무를 저장합니다. 절차 AI는 저장한 업무명·설명·완료 기준과 이 첨부파일을 먼저 분석합니다. 파일을 이용한 업무 설명 초안도 원문과 비교한 뒤 적용할 수 있습니다.' },
-    { title: '변경사항 저장', description: '업무 기준을 수정한 뒤 변경사항 저장을 누릅니다. 조회만 가능한 업무나 업무분장이 확정된 부서는 기준을 직접 수정할 수 없습니다.' },
-  ], tip: '단위업무는 업무 묶음, 세부업무는 실제 수행 과제입니다. 예: 예산 관리 → 월별 집행 현황 보고.' },
-  { title: '관련 근거', intro: '법령·지침·생산 문서를 모아 업무 절차의 조건과 누락을 검토할 자료를 준비합니다.', steps: [
-    { title: '근거 입력과 추가', description: '기본 입력란에서 법령, 지침, 국정과제, 지시사항, 생산 문서 또는 기타 근거를 선택하고 제목·내용·적용 조항을 입력합니다. 여러 자료는 근거 추가로 늘리고 원문 링크와 기존 첨부파일도 연결할 수 있습니다.' },
-    { title: '파일 첨부 · 선택', description: '각 근거 아래 파일 첨부 · 선택을 눌러 10MB 이하 파일을 연결합니다. HWP·HWPX·PDF·DOCX·XLSX·XLS·PPTX는 Kordoc으로 읽고, TXT·CSV는 텍스트로 읽습니다. 문서는 150쪽 또는 섹션·추출 본문 20만 자 이하로 준비하고 추출 경고와 본문을 확인하세요.' },
-    { title: '파일과 본문 일치 확인', description: '파일을 바꾸면 새로 가져온 본문과 기존 본문을 확인해 사용할 내용을 선택합니다. 기존 본문은 새 파일과 일치한다는 확인 후에만 유지할 수 있습니다. 추출할 수 없는 새 파일의 본문을 선택하면 이전 본문은 비워지므로 직접 입력하세요.' },
-    { title: '저장 후 분석 준비', description: '업무 기준을 작성 중이라면 변경사항 저장을 누른 뒤 절차 탭으로 이동합니다. 확정 후 생산 문서를 추가할 때에는 수행 기록 입력에서 작성하고 수행 기록 저장을 누릅니다. 파일 업로드와 업무에 연결하는 저장은 별개이며, AI 분석에는 읽을 수 있는 본문이 필요합니다.' },
-  ], tip: '스캔·이미지 문서는 자동 OCR하지 않습니다. OCR 처리한 문서를 올리거나 본문을 직접 보완하세요. 첨부파일의 검사 대기 상태와 다운로드 가능 여부는 파일 옆에 표시됩니다. 수행 기록 입력에서는 생산 문서를 기록하고 법령·지침 등 업무 기준은 바꾸지 않습니다.' },
-  { title: '절차', intro: '누가, 무엇을, 어떻게 하는지 순서대로 정하고 절차마다 필요한 파일을 연결합니다.', steps: [
-    { title: '핵심 세 항목으로 절차 작성', description: '수기로 절차 추가를 누르고 누가에 담당자, 무엇을에 할 일, 어떻게에 진행 방법을 입력합니다. 절차별 참고 파일에서 파일을 추가하거나 이 업무에 올린 파일을 선택합니다. 절차마다 최대 30개, 파일당 10MB까지 첨부할 수 있으며 수정사항 저장·절차도 반영으로 연결을 완료합니다.' },
-    { title: '위·아래로 순서 조정', description: '각 절차의 위로·아래로 버튼으로 표시 순서를 바꿉니다. 선행 관계와 날짜는 유지됩니다. 선행 절차를 직접 선택하고 동시에 수행할 단계끼리는 연결하지 않으면 겹치는 일정으로 등록할 수 있습니다. 완료된 절차까지의 순서는 보존됩니다. 크게 보기에서는 업무절차도 제목과 부서명·단위업무·개인업무 한 줄 아래에 절차도만 표시합니다. 역할은 세로 행으로, 진행 순서는 왼쪽에서 오른쪽으로 표시하고 창 높이에 맞춰 가로 스크롤로 확인합니다. AI 작성 영역과 기존 작은 절차도는 본문과 함께 스크롤됩니다.' },
-    { title: 'AI로 절차·절차도 작성', description: '업무 개요와 첨부파일 연결, 참고할 관련 근거를 저장하고 절차 탭 상단의 AI로 절차·절차도 작성을 선택합니다. 개인업무 상단의 AI 업무등록은 단위업무·세부업무 초안을 만드는 별도 기능입니다. 업무명·설명·완료 기준은 포함되며 분석할 개요 첨부파일은 개별 선택합니다. 모든 파일 제외를 누르면 저장된 텍스트만 분석합니다. 관련 근거는 필요한 항목을 선택하는 보완 자료이며, 없어도 충분한 개요나 파일로 생성할 수 있습니다. 개요 파일은 최대 10개, 관련 근거는 최대 20개, 전체 본문은 합계 60,000자까지 분석합니다.' },
-    { title: '초안 검토·수정', description: '개요와 첨부파일의 수행 내용이 절차에 반영되었는지 확인하고, 관련 근거와의 충돌·누락 경고를 검토합니다. 담당자·수행 내용·진행 순서와 원문 인용을 확인하세요. 절차도와 목록에는 업무 담당자·지원 담당자·검토자의 이름이 함께 표시됩니다. 실제 배정과 업무 내용에 맞게 초안을 수정하세요.' },
-    { title: '초안을 저장하고 현재 절차에 반영', description: '원문 자료와 절차를 확인했다는 항목을 선택하고 주황색 초안 저장·절차도 반영을 누릅니다. 선택한 초안이 즉시 저장되어 현재 절차 전체를 교체하고 분석 창이 닫힙니다. 같은 내용을 다시 저장할 필요는 없습니다. 기존 절차가 뒤에 덧붙지 않으며 화면에는 새 현재 절차 하나만 표시됩니다.' },
-    { title: '수정과 절차도를 한 번에 반영', description: '누가·무엇을·어떻게와 참고 파일을 수정한 뒤 주황색 수정사항 저장·절차도 반영을 누릅니다. 추가·수정한 내용과 조정한 순서를 함께 저장하고 절차도에 반영합니다. 저장하고 일정 등록을 누르면 절차 저장 후 일정·수행으로 이어집니다.' },
-    { title: '이전 절차와 수행 기록 확인', description: '진행 중 회차의 절차를 교체하면 새 절차는 미완료 상태로 시작합니다. 이전 절차·체크리스트·수행 결과·실제 완료자는 일정·수행의 이 회차의 절차 변경 이력에서 펼쳐 확인합니다. 이미 완료된 회차의 절차와 결과는 지난 회차에 그대로 보존됩니다.' },
-  ], tip: 'AI 분석은 BizRouter 연결이 필요하며 업무 개요·첨부파일에서 읽은 본문·선택한 관련 근거 본문을 전송합니다. 선택한 개요 첨부파일은 Kordoc 등으로 읽습니다. 같은 파일의 본문은 중복 전송하지 않습니다. 개요를 우선해도 적용 법령·필수 조건은 지켜야 합니다. 초안 저장·절차도 반영은 초안 전체를 교체·저장하고, 수정사항 저장·절차도 반영은 현재 절차의 수정과 순서 변경을 함께 저장합니다. 개인업무는 필수 검토 단계 유지를 해제한 뒤 검토 단계를 삭제할 수 있습니다. 업무분장 확정·공통 필수 절차·완료 기록은 보호되며 주체 표시가 추가 권한을 부여하지는 않습니다.' },
-  { title: '일정·수행', intro: '만들어 저장한 절차에 날짜를 정하고 수행 결과를 기록합니다.', steps: [
-    { title: '저장한 절차에 날짜 지정', description: '일정 등록을 누르면 만들어 둔 절차가 표시됩니다. 날짜가 정해진 절차부터 시작일 또는 종료일을 입력하면 전체 기간이 자동으로 정해집니다. 회차 이름과 전체 기간을 따로 입력하지 않습니다. 날짜를 비운 절차는 일정 미정으로 표시됩니다. 장소·준비 사항은 진행 방법 · 일정 메모를 펼쳐 입력하고 일정 저장을 누릅니다.' },
-    { title: '절차 수행과 결과 기록', description: '선행 절차부터 수행 결과를 입력하고 절차 완료를 누릅니다. 기존 체크리스트가 있는 절차는 항목도 확인합니다. 검토 단계는 지정된 검토자 또는 부서장이 처리합니다.' },
-    { title: '완료 결과 정정', description: '다음 회차를 시작하기 전까지 수행 결과 정정에서 내용과 사유를 저장합니다. 원래 결과와 완료 시각은 정정 이력에 보존하며 이미 완료된 관련 검토는 다시 요청합니다. 새 회차 시작 후에도 지난 회차에서 정정 이력을 확인할 수 있습니다.' },
-    { title: '완료 후 새 일정 등록', description: '모든 절차와 검토를 마치면 회차가 완료됩니다. 기존 일정 미등록 완료 기록은 업무 사이클 완료로 보존합니다. 새 일정 등록을 눌러 다음 회차를 시작하면 진행률은 0%부터 다시 계산됩니다.' },
-    { title: '업무 일정과 지난 회차 확인', description: '업무 일정 메뉴에서 주담당·지원담당·검토자로 참여하는 현재 회차의 날짜를 달력으로 확인합니다. 지난 회차에서는 당시 배정 주체와 절차·일정·체크리스트·실제 완료자·결과를 읽기 전용으로 봅니다. 회차 도중 절차를 교체했다면 접힌 절차 변경 이력을 펼쳐 교체 시각·교체자·사유·이전 수행 기록도 확인할 수 있습니다.' },
-  ], tip: '업무 기준 저장과 일정 저장은 별개입니다. 공통업무의 내부 종료일이 중앙 제출기한을 넘으면 안내가 표시되며 내부 일정 변경으로 중앙 기한이 연장되지는 않습니다. 미완료 회차가 있으면 다음 회차를 시작할 수 없습니다.' },
-  { title: '성과', intro: '세부업무의 성과를 저장하고 반기별로 모아 제출합니다.', steps: [
-    { title: '500자 이내 성과와 참고 파일 저장', description: '성과 탭에서 연도와 상·하반기를 선택하고 핵심 결과와 개선점을 500자 이내로 작성합니다. 글자 수를 보며 내용을 정리하고 필요하면 성과 참고 파일을 첨부합니다. 파일은 성과별 최대 30개, 파일당 10MB이며 성과 저장으로 연결합니다. 세부업무에 속한 기록이므로 제목·근거 설명·지표는 따로 입력하지 않습니다.' },
-    { title: '단위업무별 업무 비중 설정', description: '성과 · 평가에서 같은 연도와 반기를 선택하고 업무 비중 설정을 엽니다. 중요도 기준으로 제안된 비중을 직접 조정할 수 있으며, 각 단위업무에 최소 1점씩 정수로 배분해 합계를 50점으로 맞춥니다. 중요도 변경 후에는 중요도 기준으로 다시 배분을 선택합니다.' },
-    { title: '제출하기', description: '각 단위업무의 성과와 업무 비중을 확인한 뒤 제출하기를 누릅니다. 성과 저장만으로는 제출이 완료되지 않습니다. 제출 후에는 평가 전 제출 회수로 수정할 수 있습니다.' },
-    { title: '인계 전 작성한 성과 보완', description: '업무를 넘겨 현재 업무를 열 수 없어도 성과 · 평가에서 본인이 작성했던 성과의 성과 수정·보완을 이용할 수 있습니다. 제출 상태라면 먼저 제출 회수를 누릅니다. 당시 작성자와 부서·단위업무 정보는 유지됩니다.' },
-    { title: '부서장 평가 확인', description: '부서장은 제출 당시 단위업무와 업무 비중을 기준으로 점수와 의견을 입력해 평가를 확정합니다. 전출 후에도 기존 부서의 제출 기록을 해당 부서장이 평가할 수 있으며 확정된 기록은 보존됩니다.' },
-  ], tip: '업무 사이클 완료와 반기 성과 제출은 별도입니다. 한 반기에 여러 부서의 성과를 분리 제출·평가하는 기능은 아직 지원하지 않습니다. 확정된 평가의 성과와 비중은 수정할 수 없습니다.' },
-  { title: '예산·집행', intro: '사업 예산과 지출 내역을 세부업무에 기록합니다.', steps: [
-    { title: '사업 예산 입력', description: '업무 기준 수정에서 사업 예산 총액을 원 단위로 입력하고 변경사항 저장을 누릅니다. 예산이 없는 업무는 0원으로 둘 수 있습니다. 확정 후 예산 총액 변경은 재작성 허용이 필요합니다.' },
-    { title: '수행 기록 입력과 집행 추가', description: '현재 주담당자·지원담당자는 상단 수행 기록 입력을 누른 뒤 집행 추가에서 집행일·내용·금액을 입력합니다. 확정 후에도 작성할 수 있으며 집행 합계와 남은 예산 또는 초과 금액을 확인합니다.' },
-    { title: '수행 기록 저장과 이력 확인', description: '수행 기록 저장으로 집행내역과 생산 문서의 변경을 반영합니다. 관련 근거의 생산 문서에 보고서나 집행 증빙을 연결할 수 있습니다. 수행 기록 변경 이력에서 기록자·시각, 변경 전후 집행 합계와 문서 제목을 확인합니다.' },
-  ], tip: '수행 기록 저장은 업무 기준 버전이나 진행 회차를 바꾸지 않습니다. 예산·집행은 업무 기록이며 실제 지출 결재나 금융기관 송금을 실행하는 기능은 아닙니다.' },
-];
-
-const questions = [
-  { title: '같은 화면인데 버튼이 보이지 않거나 비활성화되어 있어요.', answer: '로그인한 역할, 해당 업무의 담당 여부, 현재 배정 단계와 업무분장 확정 여부에 따라 가능한 작업이 달라집니다. 업무 기준 수정과 수행 기록 입력은 별개입니다. 팀장이라는 이유만으로 모든 팀원의 업무를 수정하거나 성과를 평가할 수 있는 것은 아닙니다.' },
-  { title: '업무분장이 확정되면 어떤 일을 계속할 수 있나요?', answer: '승인된 절차의 일정 등록·수행 체크·결과 기록·성과 입력을 계속할 수 있습니다. 현재 주담당자·지원담당자는 수행 기록 입력에서 생산 문서·집행내역을 작성하고 수행 기록 저장을 누릅니다. 법령·지침·절차·예산 총액 등 업무 기준이나 일반 배정을 바꾸려면 재작성 허용이 필요합니다. 인사이동은 인수인계 메뉴를 이용하며 이전 확정본을 보존합니다.' },
-  { title: '새 부서나 새로 온 직원을 어디에서 등록하나요?', answer: '관리자로 로그인해 조직 · 구성원 → 부서 등록 또는 구성원 등록을 이용합니다. 새 부서는 부서장과 부서 담당자를 먼저 등록하세요. 구성원은 부서·팀·직위·역할과 필요한 연락처를 입력합니다. 등록한 활성 구성원은 시연 계정 선택과 업무 배정에 사용할 수 있습니다. 외부 로그인 계정을 초대하는 기능은 아닙니다.' },
-  { title: '직원의 부서·팀·역할이나 퇴직 상태는 어떻게 변경하나요?', answer: '관리자가 조직 · 구성원에서 이름을 누른 뒤 인사정보 변경을 엽니다. 소속·팀·직위·역할·연락처와 활성 상태를 수정하고 변경 사유를 작성해 저장합니다. 퇴직·사용 중지는 비활성으로 설정하며 기록은 삭제되지 않습니다. 복귀 시 다시 활성화할 수 있습니다. 저장 즉시 적용되고 같은 화면의 최근 인사정보 변경 기록에 변경 전후 정보와 사유·수행자·시각이 남습니다.' },
-  { title: '전보나 비활성화를 저장하려는데 남은 업무 책임이 있다고 해요.', answer: '인사정보 변경의 남은 업무 책임 목록을 확인하고 인수인계에서 책임 정리를 누르세요. 단위업무·주담당·진행 회차는 인수인계 요청으로, 지원·검토·총괄·배정 대기·대행은 남은 역할 정리로 처리합니다. 진행 중인 인수인계도 완료하거나 취소해야 합니다. 부서장 승인이 끝나 책임이 정리된 뒤 인사정보 변경을 저장하세요. 소속만 바꾸어서는 업무 담당자가 자동 변경되지 않습니다.' },
-  { title: '역할 변경이나 부서장 이동이 제한되는 이유는 무엇인가요?', answer: '팀·역할 변경 후 기존 책임을 맡을 자격이 없어지면 해당 역할을 먼저 인수인계해야 합니다. 기존 부서의 마지막 활성 부서장·부서 담당자는 후임을 먼저 지정해야 이동·비활성화·역할 변경이 가능합니다. 관리자는 자기 계정을 비활성화하거나 자기 관리자 권한을 해제할 수 없고 마지막 활성 관리자도 유지해야 합니다. 부서장 부재 시 공식 직무대리나 관리자 대신 승인 기능은 아직 없습니다.' },
-  { title: '갑작스러운 인사이동으로 인계자가 직접 처리할 수 없어요.', answer: '부서 담당자 또는 관리자가 인수인계 → 긴급 인사이동에서 인계자와 업무를 보관할 부서 담당자를 선택하고 사유를 작성합니다. 활성 단위업무·주담당 세부업무와 남은 미완료 회차가 즉시 부서 담당자에게 이관됩니다. 부서 보관 업무에서 새 담당자에게 전부 또는 일부 배정을 요청하고 부서장 승인을 받습니다. 지원·검토·공통업무 총괄 등은 남은 역할 정리에서 별도로 처리해야 합니다.' },
-  { title: '새로 온 부서원에게 업무 일부만 넘길 수 있나요?', answer: '인수인계 요청에서 같은 부서에 등록된 활성 업무 담당자·팀장·부서 담당자 중 인수자를 선택합니다. 단위업무를 선택하면 그 안에서 인계자가 담당하는 세부업무가 함께 선택됩니다. 일부만 넘기려면 필요한 세부업무만 선택합니다. 부서장이 승인하여 배정을 누르면 선택한 업무와 진행 중인 회차를 새 담당자가 이어받습니다.' },
-  { title: '인수인계를 요청했는데 담당자가 바뀌지 않았어요.', answer: '승인 대기 중에는 기존 담당자를 유지합니다. 해당 부서장이 승인하여 배정을 처리해야 담당자가 변경되며 관리자나 부서 담당자가 부서장 승인을 대신할 수는 없습니다. 반려되었다면 상세 보기의 사유를 확인하고 새 요청을 작성하세요. 승인 후 별도의 인수 수락 단계는 없습니다.' },
-  { title: '인수인계 승인 대기 중에도 업무를 처리할 수 있나요?', answer: '새 요청은 체크·메모·회차 일정·수행 기록을 이어 작성해도 승인할 수 있습니다. 업무 기준이나 배정 대상이 바뀌면 현재 범위로 취소 후 다시 요청해야 합니다. 이전 방식으로 저장된 대기 요청은 변경 시 다시 요청해야 할 수 있습니다.' },
-  { title: '업무 기준은 다른 직원에게 넘어갔는데 진행 회차가 제게 남아 있어요.', answer: '인수인계 요청의 이전 배정에서 남은 진행 회차에서 해당 회차를 선택하세요. 부서장 승인 후 선택한 회차의 수행 담당자만 변경되며 세부업무 소유자와 다음 회차의 담당 기준은 유지됩니다. 긴급 인사이동 때에는 이런 미완료 회차도 부서 담당자가 보관한 뒤 새 담당자에게 승인받아 재배정할 수 있습니다.' },
-  { title: '지원·검토·공통업무 총괄도 후임에게 넘길 수 있나요?', answer: '인수인계 → 남은 역할 정리에서 업무와 미완료 회차의 지원·검토, 공통업무 총괄, 배정 대기 팀장·등록 대기 담당자 역할을 선택하고 같은 부서 후임과 사유를 지정해 부서장 승인을 요청합니다. 개인은 본인 역할만, 부서장·부서 담당자는 소속 부서의 역할을, 관리자는 선택한 부서의 역할을 요청합니다. 승인 후 선택한 역할이 바뀌고 완료 회차와 과거 기록은 보존됩니다.' },
-  { title: '남은 역할 정리에서 선택할 후임이 없어요.', answer: '선택한 모든 역할을 맡을 자격이 있는 활성 후임만 표시됩니다. 검토는 부서장·부서 담당자·팀장, 지원은 업무 담당자·부서 담당자·팀장이 맡으며 수행·지원·검토 간 겸임 제한을 확인해야 합니다. 공통업무 총괄은 같은 부서의 업무 담당자·팀장·부서 담당자·관리자, 배정 대기 역할은 해당 팀의 후임이 필요합니다. 역할별로 요청을 나누거나 관리자에게 후임의 소속·팀·권한을 확인해 달라고 요청하세요.' },
-  { title: '기존 대행 권한도 새 담당자에게 자동으로 옮겨지나요?', answer: '자동으로 이전되지 않습니다. 남은 역할 정리에서 대행 권한 해제를 선택하고 사유를 작성하면 부서장 승인 후 기존 대행을 종료합니다. 이 요청의 후임을 선택하더라도 새 대행 권한을 부여하는 것은 아닙니다. 해제 대상과 승인·적용 기록은 인수인계 이력에서 확인할 수 있습니다.' },
-  { title: '인수인계 후 이전 업무 기록과 승인 이력은 어디에서 보나요?', answer: '인수인계 이력의 상세 보기에서 인계자·인수자, 요청자, 대상 단위·세부업무·회차 또는 역할 목록, 사유, 승인·반려·취소와 실제 적용 시각을 확인합니다. 완료된 회차, 기존 수행자의 체크·결과 기록, 성과 작성자와 이전 업무분장 확정본은 남아 있습니다. 일부만 넘기면 선택하지 않은 업무나 역할은 기존 담당자에게 남습니다.' },
-  { title: '배정받은 공통업무가 개인업무에 바로 나타나지 않아요.', answer: '공통업무는 부서 접수·팀 배정 → 팀장의 개인 배정 → 담당자의 내 단위업무 등록 순서로 이어집니다. 공통업무 · 지시사항에서 현재 단계와 다음 처리자를 확인하세요. 개인 배정까지 끝났다면 내 단위업무에 등록합니다. 선택할 단위업무가 없으면 개인업무에서 먼저 만드세요.' },
-  { title: '업무분장이 확정된 부서에도 새 공통업무를 보낼 수 있나요?', answer: '업무 담당자는 대상 부서의 확정 여부와 관계없이 공통 세부업무를 작성해 소속 부서장에게 승인 요청할 수 있습니다. 작성 부서장이 승인해야 대상 부서에 접수됩니다. 확정된 부서에서 팀·개인 배정과 내 단위업무 등록을 진행하려면 부서장의 재작성 허용이 먼저 필요합니다. 접수만으로 확정된 업무분장이나 기존 회차가 바뀌지는 않습니다.' },
-  { title: '내부 일정을 늦췄는데도 공통업무가 기한 경과로 표시돼요.', answer: '중앙 제출기한과 부서 내부 회차 종료일은 별개입니다. 지연 여부는 중앙 기한으로 판단합니다. 월별·분기별 업무도 해당 회차의 보고기간에 정해진 기한을 적용하므로 내부 종료일만 바꿔서는 중앙 기한이 연장되지 않습니다.' },
-  { title: '누가 공통업무를 만들고 배포할 수 있나요?', answer: '공통업무 전용 권한은 없습니다. 업무 담당자·팀장·부서 담당자·관리자는 공통업무 · 지시사항 메뉴에서 세부업무 단위로 작성하고 소속 부서장에게 승인 요청할 수 있습니다. 부서장이 내용과 대상 부서를 승인하면 지정 부서에 등록되고, 해당 부서 담당자가 팀과 팀장을 지정합니다. 작성자는 배포 현황을 확인할 수 있지만 다른 부서의 업무 본문까지 자동으로 열람하는 것은 아닙니다.' },
-  { title: '공통업무 승인이 반려되거나 대상 부서를 더 추가하려면 어떻게 하나요?', answer: '작성자는 승인 요청의 반려 사유를 확인하고 내용을 보완해 다시 요청합니다. 승인된 업무에 대상 부서를 추가할 때도 소속 부서장의 새 승인을 받아야 합니다. 추가 승인 대기 중에도 이미 승인·배포된 부서의 업무는 계속 진행됩니다. 관리자도 부서장 승인을 대신할 수 없습니다.' },
-  { title: '장·차관 지시사항과 일반 공통업무는 어떻게 다른가요?', answer: '장·차관 지시사항 통합 관리는 기획재정담당관실 기획팀의 별도 총괄 역할에 제공됩니다. 권한이 있는 사용자가 통합 관리 화면에서 지시사항과 부서별 진행·월별 실적을 확인합니다. 배정받은 현재 담당자는 업무가 완료될 때까지 월별 실적을 기록할 수 있습니다.' },
-  { title: 'AI 분석이 실행되지 않거나 원하는 절차가 나오지 않아요.', answer: '업무 개요와 첨부파일 연결을 먼저 저장하고 업무 설명에 목적·수행 내용·완료 조건을 구체적으로 적어 주세요. AI는 개요와 첨부파일을 우선 사용하므로 관련 근거가 없어도 생성할 수 있습니다. 파일 이름이나 링크만으로는 분석할 수 없으며 읽기 오류가 난 파일은 보완해야 합니다. 관련 근거는 필요한 항목만 선택해 참고하도록 합니다. 연결 오류는 관리자에게 BizRouter 연결 상태를 확인하고, 초안의 원문 인용과 담당 역할·충돌 경고를 검토하세요.' },
-  { title: '절차 AI가 가장 먼저 참고하는 자료는 무엇인가요?', answer: '저장한 업무명·업무 설명·완료 기준과 업무 개요에 연결한 첨부파일입니다. 이를 바탕으로 수행 흐름을 구성한 뒤 선택한 법령·지침·생산 문서로 조건과 누락을 검토합니다. 개요와 근거가 충돌하면 경고와 원문을 확인해 보완해야 하며, 개요를 우선한다고 법령이나 필수 조건을 생략하지는 않습니다.' },
-  { title: 'AI 초안 저장과 현재 절차 수정은 어떻게 다른가요?', answer: 'AI 초안에서 초안 저장·절차도 반영을 누르면 현재 절차 전체가 새 초안으로 교체·저장되고 분석 창이 닫힙니다. 현재 절차에서 수기로 추가·수정하거나 위로·아래로 순서를 조정한 뒤에는 수정사항 저장·절차도 반영을 누릅니다. 내용 저장과 절차도 반영을 한 번에 처리하며, 기존 완료 기록은 보존합니다.' },
-  { title: '절차를 교체하면 이전 수행 기록은 없어지나요?', answer: '진행 중 회차의 이전 절차·수행 상태·결과·체크리스트·메모는 절차 변경 이력에 보관합니다. 새 절차의 수행 상태는 미완료로 시작하며, 현재 화면에는 새 절차만 표시됩니다. 일정·수행에서 이 회차의 절차 변경 이력을 펼치고 교체 시점을 선택하면 당시 기록을 볼 수 있습니다. 이미 완료된 회차는 수정하지 않으며 지난 회차에서 확인합니다.' },
-  { title: '절차도에 표시된 이름과 실제 완료자가 다른 이유는 무엇인가요?', answer: '절차도와 단계의 주체는 해당 업무 또는 회차에 배정된 담당자·지원자·검토자입니다. 승인된 업무대행자가 수행한 경우 실제 완료자에는 대행자의 이름이 남습니다. 지난 회차와 절차 교체 이력은 당시 저장한 배정자를 기준으로 표시하므로 현재 담당자와 다를 수 있습니다.' },
-  { title: '파일을 교체했는데 어떤 본문을 선택해야 하나요?', answer: '새 파일에서 가져온 본문과 추출 경고를 확인하세요. 기존 본문을 유지하려면 새 파일과 일치함을 확인하고 명시적으로 선택해야 합니다. 새 파일을 읽을 수 없어 본문을 비웠다면 직접 입력합니다. 파일 선택과 본문 확인을 마친 뒤 변경사항 저장 또는 수행 기록 저장까지 눌러야 업무와 연결됩니다.' },
-  { title: '절차 완료나 새 일정 등록이 되지 않아요.', answer: '선행 절차, 필수 체크리스트, 수행 결과 입력과 검토자 권한을 확인하세요. 저장하지 않은 업무 변경이 있으면 먼저 저장합니다. 새 회차는 모든 절차와 검토가 끝난 뒤 담당자 또는 관리자가 시작하며, 새 날짜는 선행 절차 순서에 맞아야 하며 전체 기간은 절차별 날짜에서 자동으로 정해집니다.' },
-  { title: '업무 비중은 어떻게 배분하나요?', answer: '처음에는 단위업무 중요도 비율로 합계 50점을 제안합니다. 각 단위업무의 비중은 최소 1점인 정수이며 직접 수정할 수 있습니다. 중요도를 바꾸어도 저장한 비중은 자동 변경되지 않으므로 중요도 기준으로 다시 배분을 선택한 뒤 확인·저장하세요. 평가 대상 단위업무가 50개를 넘으면 최소 1점씩 배분할 수 없어 비중을 새로 저장할 수 없습니다. 기존 기록은 보존됩니다.' },
-  { title: '성과를 저장했는데 부서장에게 제출되지 않았어요.', answer: '성과 저장과 제출은 별도입니다. 성과 · 평가에서 같은 연도·반기를 선택하고 단위업무별 성과를 확인한 뒤, 업무 비중 합계가 50점인지 확인하고 제출하기를 누르세요. 제출 완료 · 평가 대기 상태가 되어야 부서장이 평가할 수 있습니다.' },
-  { title: '업무를 인계한 뒤 제가 작성한 성과를 보완하려면 어떻게 하나요?', answer: '성과 · 평가에서 해당 연도·반기를 선택하고 본인이 작성한 성과의 성과 수정·보완을 이용하세요. 제출 상태라면 평가 확정 전 제출 회수를 먼저 누릅니다. 원래 작성자·부서·단위업무를 유지하며 기존 기록을 고칩니다. 인계 후 이전 업무에 새 성과를 만들거나 확정된 평가를 바꾸는 권한이 생기는 것은 아닙니다.' },
-  { title: '제출한 성과나 삭제한 업무를 다시 수정할 수 있나요?', answer: '성과는 평가 확정 전 제출 회수를 통해 다시 수정하고 제출할 수 있습니다. 확정된 평가는 당시 기록을 보존합니다. 삭제한 개인 단위·세부업무는 개인업무의 휴지통에서 복원합니다. 단위업무도 삭제되어 있다면 먼저 복원하거나 다른 활성 단위업무를 선택하세요. 업무분장 확정 상태에서는 복원도 제한됩니다.' },
-  { title: '시연 계정을 바꾸거나 다른 역할을 확인하려면 어떻게 하나요?', answer: '첫 화면에서 역할·부서·시연 계정을 선택해 시작합니다. 로그인 후에는 왼쪽 아래 프로필 또는 상단 역할 전환을 이용하세요. 원하는 부서나 계정이 선택 목록에 없으면 로그아웃 후 첫 화면에서 다시 선택합니다. 시연 계정의 이름과 조직은 가상 데이터입니다.' },
-];
 
 function Steps({ items }: { items: { title: string; description: string }[] }) {
   return <ol className="guide-steps">{items.map((step, index) => <li key={step.title}><span aria-hidden="true">{String(index + 1).padStart(2, '0')}</span><div><strong>{step.title}</strong><p>{step.description}</p></div></li>)}</ol>;
@@ -103,32 +25,59 @@ export function UsageGuideContent({ onClose, initialRole = 'member', initialSect
   const [section, setSection] = useState<GuideSection>(initialSection);
   const [roleId, setRoleId] = useState<GuideRole>(initialRole);
   const [taskTab, setTaskTab] = useState(0);
+  const [query, setQuery] = useState('');
+  const [category, setCategory] = useState<QuestionCategory | 'all'>('all');
   const contentId = useId();
+  const searchId = useId();
   const role = guideRoles.find(role => role.id === roleId) || guideRoles[0];
   const detail = taskTabs[taskTab];
+  const matchingQuestions = filterGuideQuestions(query, category);
+
   return <div className="usage-guide">
-    <nav className="guide-nav" aria-label="사용 안내 항목">{sections.map(item => { const Icon = item.icon; return <button key={item.id} type="button" aria-pressed={section === item.id} aria-controls={contentId} onClick={() => setSection(item.id)}><Icon size={16}/>{item.label}</button>; })}</nav>
+    <nav className="guide-nav" aria-label="사용 안내 항목">{sections.map(item => { const Icon = item.icon; return <button key={item.id} type="button" aria-pressed={section === item.id} aria-controls={contentId} onClick={() => setSection(item.id)}><Icon size={16} aria-hidden="true"/>{item.label}</button>; })}</nav>
     <div id={contentId}>
-      {section === 'start' && <section className="guide-section"><header><h3>업무를 정리하고, 실행하고, 성과로 남깁니다.</h3><p>온이음은 업무의 기준과 실제 수행 기록을 함께 관리하는 공간입니다. 먼저 세 가지 개념을 익히고 내 역할의 메뉴를 확인하세요.</p></header><div className="guide-term-grid">{[
-        ['단위업무', '서로 관련된 세부업무를 모으는 업무 묶음입니다.', '예: 예산 관리'],
-        ['세부업무', '담당자·근거·절차·완료 기준을 가진 실행 과제입니다.', '예: 월별 집행 현황 보고'],
-        ['업무 회차', '같은 절차를 특정 일정에 따라 수행하는 한 번의 사이클입니다.', '예: 11월 보고 → 12월 보고'],
-      ].map(([title, description, example]) => <article key={title}><h4>{title}</h4><p>{description}</p><small>{example}</small></article>)}</div>
+      {section === 'start' && <section className="guide-section">
+        <header className="guide-welcome"><span className="guide-eyebrow">처음 만나는 온이음</span><h3>내 업무 하나부터 시작해 보세요.</h3><p>온이음은 업무의 기준, 실제 수행 기록, 반기 성과를 한곳에서 이어주는 공간입니다. 기존 예시 업무를 열어보면 전체 흐름을 익힐 수 있습니다.</p></header>
         <Steps items={[
-          { title: '역할과 계정 선택', description: '초기화면에서 업무 담당자·팀장·부서 담당자·부서장·관리자 중 체험할 역할을 고르고 부서와 시연 계정을 확인합니다. 로그인 전 역할별 카드를 눌러 사용할 메뉴를 확인할 수 있습니다.' },
-          { title: '새 조직과 구성원 준비', description: '새 부서나 직원이 필요하면 관리자가 조직 · 구성원에서 부서 등록·구성원 등록을 진행합니다. 새 부서에는 부서장·부서 담당자를 먼저 준비하고 각 직원의 팀·역할을 확인한 뒤 업무를 배정합니다.' },
-          { title: '업무 홈에서 다음 할 일 확인', description: '로그인하면 업무 홈이 열립니다. 내 업무·마감·배정 현황을 확인하고 개인업무 또는 공통업무 · 지시사항으로 이동합니다. 부서장은 부서 업무 현황과 업무분장을 중심으로 확인합니다.' },
-          { title: '업무 기준 작성 후 수행', description: '담당자는 업무 개요와 첨부파일을 저장하고 필요한 관련 근거를 연결합니다. AI는 개요·첨부파일을 우선 분석하고 근거를 참고해 절차·절차도를 만듭니다. 일정·수행에서 저장한 절차별 날짜를 정하고 수행 결과를 기록합니다. 생산 문서와 집행내역은 수행 기록 입력에서 작성해 별도로 저장합니다.' },
-          { title: '완료 기록과 성과 연결', description: '절차와 검토가 끝나면 다음 회차의 새 일정을 등록합니다. 업무 성과를 따로 저장하고 성과 · 평가에서 업무 비중을 설정해 반기 성과를 제출합니다.' },
-          { title: '인사이동 시 업무 이어주기', description: '인수인계 요청으로 단위·세부업무와 진행 회차를, 남은 역할 정리로 지원·검토·총괄 등의 책임을 후임에게 요청합니다. 갑작스러운 이동은 부서 담당자가 주담당 업무를 먼저 보관하고 새 담당자 배정은 부서장 승인을 거칩니다. 책임을 정리한 뒤 관리자가 조직 · 구성원에서 전보·비활성화를 저장합니다.' },
+          { title: '업무 담당자 1로 시작하기', description: '접근 코드 화면이 보이면 안내받은 숫자 8자리를 입력하세요. 업무 담당자 1 → 데이터정보화담당관실 → 송주무관을 선택합니다. 업무 담당자 1·2는 같은 권한의 서로 다른 시연 계정입니다.' },
+          { title: '개인업무에서 세부업무 하나 열기', description: '로그인하면 업무 홈이 열립니다. 왼쪽 개인업무에서 단위업무를 펼치고 기존 세부업무를 선택하세요. 업무 개요에서 담당자와 업무 설명을 먼저 확인합니다.' },
+          { title: '절차와 일정·수행 살펴보기', description: '절차에서 누가, 무엇을, 어떻게 하는지 확인하고 일정·수행에서 날짜와 진행 상태를 살펴보세요. 직접 시작할 때는 단위업무 → 세부업무 → 절차 → 일정 순으로 작성·저장합니다.' },
         ]}/>
-        <div className="guide-callout"><GitBranch size={22}/><div><strong>여러 부서가 함께하는 업무의 흐름</strong><p>공통 세부업무는 작성 부서장이 승인한 뒤 대상 부서에 등록됩니다. 이후 각 부서의 배정과 수행 기록이 연결되고 현재 단계의 담당자가 업무를 이어받습니다.</p></div></div><ol className="guide-flow">{[['작성자', '공통 세부업무 작성'], ['작성 부서장', '내용·대상 부서 승인'], ['대상 부서 담당자', '팀 배정'], ['팀장', '업무 담당자 배정'], ['업무 담당자', '내 단위업무 등록'], ['담당자·검토자', '수행·검토·완료']].map(([owner, action]) => <li key={owner}><small>{owner}</small><strong>{action}</strong></li>)}</ol>
-        <Button variant="secondary" onClick={() => setSection('roles')}>권한별 역할·메뉴 보기<ArrowRight size={16}/></Button>
+        <div className="guide-shortcuts" aria-label="다음으로 볼 안내">
+          <button type="button" onClick={() => setSection('task')}><ListChecks size={20}/><span><strong>직접 업무 작성하기</strong><small>탭별 입력과 저장 방법</small></span><ArrowRight size={17}/></button>
+          <button type="button" onClick={() => setSection('roles')}><Users size={20}/><span><strong>내 역할에서 할 일</strong><small>메뉴와 승인·처리 순서</small></span><ArrowRight size={17}/></button>
+          <button type="button" onClick={() => setSection('faq')}><CircleHelp size={20}/><span><strong>막히는 부분 찾기</strong><small>질문 검색과 주제별 안내</small></span><ArrowRight size={17}/></button>
+        </div>
+        <h4>이 세 가지만 알면 쉬워집니다</h4>
+        <div className="guide-term-grid">{[
+          ['단위업무', '관련된 일을 모아 놓은 업무 묶음', '예산 관리'],
+          ['세부업무', '실제로 수행하는 하나의 과제', '월별 집행 현황 보고'],
+          ['업무 회차', '같은 업무를 한 번 수행하는 일정과 기록', '11월 보고 → 12월 보고'],
+        ].map(([title, description, example]) => <article key={title}><h4>{title}</h4><p>{description}</p><small>예: {example}</small></article>)}</div>
+        <aside className="guide-tip"><strong>저장과 제출은 따로 진행합니다</strong><p>업무 기준, 생산 문서·집행내역, 일정, 성과는 각각 저장합니다. 성과를 저장한 뒤에는 성과 · 평가에서 업무 비중을 정하고 제출하기를 눌러야 부서장이 평가할 수 있습니다.</p></aside>
+        <details className="guide-more"><summary><GitBranch size={18} aria-hidden="true"/>여러 부서가 함께하는 업무는 어떻게 이어지나요?</summary><p>공통업무 · 지시사항에서 작성한 업무는 작성 부서장의 승인 후 대상 부서에 접수됩니다. 현재 단계의 담당자가 다음 사람에게 이어줍니다.</p><ol className="guide-flow">{[['작성자', '공통 세부업무 작성'], ['작성 부서장', '내용·대상 부서 승인'], ['대상 부서 담당자', '팀 배정'], ['팀장', '업무 담당자 배정'], ['업무 담당자', '내 단위업무 등록'], ['담당자·검토자', '수행·검토·완료']].map(([owner, action]) => <li key={owner}><small>{owner}</small><strong>{action}</strong></li>)}</ol></details>
       </section>}
-      {section === 'roles' && <section className="guide-section"><header><h3>역할에 따라 메뉴와 처리 범위가 달라집니다.</h3><p>같은 메뉴에서도 내가 담당하는 업무와 배정 단계에 따라 실행할 수 있는 작업이 다릅니다. 역할 선택은 안내 내용을 바꾸며 로그인 권한은 변경하지 않습니다.</p></header><nav className="guide-role-picker" aria-label="안내할 역할 선택">{guideRoles.map(item => { const Icon = roleIcons[item.id]; return <button key={item.id} type="button" aria-pressed={roleId === item.id} onClick={() => setRoleId(item.id)}><Icon size={18}/><span>{item.title}</span></button>; })}</nav><div className="guide-role-summary"><small>선택한 역할</small><h3>{role.title}</h3><p>{role.summary}</p></div><div className="guide-scope"><strong>업무 범위</strong><p>{role.scope}</p></div><div className="guide-columns"><section><h4><BookOpen size={17}/>메뉴별 사용 방법</h4><dl className="guide-menu-list">{role.menus.map(menu => <div key={menu.name}><dt>{menu.name}</dt><dd>{menu.description}</dd></div>)}</dl></section><section><h4><ListChecks size={17}/>이 순서로 처리하세요</h4><Steps items={role.steps}/></section></div><aside className="guide-tip"><strong>역할과 권한 확인</strong><ul className="guide-notes">{role.notes.map(note => <li key={note}>{note}</li>)}</ul></aside></section>}
-      {section === 'task' && <section className="guide-section"><header><h3>세부업무의 탭 순서대로 따라 해보세요.</h3><p>개인업무에서 세부업무를 열면 아래 탭을 순서대로 사용할 수 있습니다. 업무 기준, 생산 문서·집행내역, 회차 일정, 업무 성과는 각각 저장합니다. 지시사항 업무에는 예산·집행 다음에 월별 실적 탭이 추가되며, 현재 담당자가 완료 전까지 매월 실적과 다음 계획을 기록합니다.</p></header><nav className="guide-detail-tabs" aria-label="세부업무 탭별 안내">{taskTabs.map((item, index) => <button key={item.title} type="button" aria-pressed={taskTab === index} onClick={() => setTaskTab(index)}><span>{index + 1}</span>{item.title}</button>)}</nav><article className="guide-detail-content"><h4>{detail.title}</h4><p>{detail.intro}</p><Steps items={detail.steps}/><aside className="guide-tip"><Lightbulb size={18}/><p>{detail.tip}</p></aside></article></section>}
-      {section === 'faq' && <section className="guide-section"><header><h3>막히는 단계에서 확인하세요.</h3><p>질문을 펼치면 필요한 확인 사항과 다음 행동을 볼 수 있습니다.</p></header>{questions.map(question => <details className="guide-faq" key={question.title}><summary tabIndex={0}>{question.title}</summary><p>{question.answer}</p></details>)}</section>}
+      {section === 'roles' && <section className="guide-section">
+        <header><h3>내 역할에서 할 수 있는 일을 확인하세요.</h3><p>5가지 역할의 메뉴와 처리 순서를 안내합니다. 아래 선택은 도움말만 바꾸며 로그인한 계정은 그대로 유지됩니다.</p></header>
+        <nav className="guide-role-picker" aria-label="안내할 역할 선택">{guideRoles.map(item => { const Icon = roleIcons[item.id]; return <button key={item.id} type="button" aria-pressed={roleId === item.id} onClick={() => setRoleId(item.id)}><Icon size={18} aria-hidden="true"/><span>{item.title}</span></button>; })}</nav>
+        <div className="guide-role-summary"><small>선택한 역할</small><h3>{role.title}</h3><p>{role.summary}</p></div>
+        <div className="guide-scope"><strong>업무 범위</strong><p>{role.scope}</p></div>
+        <div className="guide-columns"><section><h4><BookOpen size={17}/>메뉴별 사용 방법</h4><dl className="guide-menu-list">{role.menus.map(menu => <div key={menu.name}><dt>{menu.name}</dt><dd>{menu.description}</dd></div>)}</dl></section><section><h4><ListChecks size={17}/>이 순서로 처리하세요</h4><Steps items={role.steps}/></section></div>
+        <aside className="guide-tip"><strong>역할과 권한 확인</strong><ul className="guide-notes">{role.notes.map(note => <li key={note}>{note}</li>)}</ul></aside>
+      </section>}
+      {section === 'task' && <section className="guide-section">
+        <header><h3>세부업무를 열고, 필요한 탭을 선택하세요.</h3><p>개인업무에서 세부업무 이름을 누르면 아래 탭을 볼 수 있습니다. 월별 실적은 지시사항에만 표시됩니다. 각 안내의 마지막 저장 단계까지 확인하세요.</p></header>
+        <nav className="guide-detail-tabs" aria-label="세부업무 탭별 안내">{taskTabs.map((item, index) => <button key={item.title} type="button" aria-pressed={taskTab === index} aria-controls={`${contentId}-task`} onClick={() => setTaskTab(index)}><span aria-hidden="true">{index + 1}</span>{item.title}</button>)}</nav>
+        <article id={`${contentId}-task`} className="guide-detail-content"><span className="guide-eyebrow">{taskTab + 1} / {taskTabs.length} · 탭별 안내</span><h4>{detail.title}</h4><p>{detail.intro}</p><Steps items={detail.steps}/><aside className="guide-tip"><Lightbulb size={18}/><p>{detail.tip}</p></aside></article>
+      </section>}
+      {section === 'faq' && <section className="guide-section">
+        <header><h3>궁금한 내용을 빠르게 찾아보세요.</h3><p>주제를 고르거나 질문과 답변에 들어 있는 단어로 검색하세요. 예: 기본 대행자, 성과 제출, 법령</p></header>
+        <div className="guide-search-field"><label htmlFor={searchId}>도움말 검색</label><div className="guide-search"><Search size={19} aria-hidden="true"/><input id={searchId} type="search" value={query} placeholder="어떤 도움이 필요하세요?" onChange={event => setQuery(event.target.value)} aria-controls={`${contentId}-questions`}/>{query && <button type="button" aria-label="검색어 지우기" onClick={() => setQuery('')}><X size={17}/></button>}</div></div>
+        <nav className="guide-categories" aria-label="질문 주제"><button type="button" aria-pressed={category === 'all'} onClick={() => setCategory('all')}>전체</button>{questionCategories.map(item => <button type="button" key={item} aria-pressed={category === item} onClick={() => setCategory(item)}>{item}</button>)}</nav>
+        <p className="guide-result-count" role="status" aria-live="polite">{category === 'all' ? '전체 주제' : category} · 질문 {matchingQuestions.length}개{query.trim() && ` · “${query.trim()}” 검색 결과`}</p>
+        <div id={`${contentId}-questions`}>{matchingQuestions.length ? matchingQuestions.map(question => <details className="guide-faq" key={question.title}><summary><span>{question.category}</span>{question.title}</summary><p>{question.answer}</p></details>) : <div className="guide-empty"><CircleHelp size={28} aria-hidden="true"/><h4>일치하는 질문이 없습니다.</h4><p>검색어를 줄이거나 다른 주제를 선택해 보세요.</p><Button variant="secondary" onClick={() => { setQuery(''); setCategory('all'); }}>전체 질문 보기</Button></div>}</div>
+      </section>}
     </div>
-    <footer className="guide-footer"><p><BookOpen size={15}/>초기화면과 로그인 후 왼쪽 메뉴에서 언제든 다시 열 수 있습니다.</p><Button variant="secondary" onClick={onClose}>안내 닫기</Button></footer>
+    <footer className="guide-footer"><p><BookOpen size={15}/>첫 화면과 왼쪽 메뉴에서 언제든 다시 열 수 있습니다.</p><Button variant="secondary" onClick={onClose}>안내 닫기</Button></footer>
   </div>;
 }
